@@ -553,6 +553,13 @@ export interface DailyQAOutputMetadata {
     expiryDate: string;
 }
 
+export interface DailyQAOutputAllocationLine extends DailyQAOutputMetadata {
+    allocationKey: string;
+    allocationId?: number | null;
+    quantity: number;
+    rejectionReasonId?: number | null;
+}
+
 export interface DailyQAInspectionEntry {
     jobOrderId: number;
     joRouteId: number | null;
@@ -581,7 +588,16 @@ export interface DailyQAInspectionRequest {
     rejectedQuantity?: number;
     outputMetadata: DailyQAOutputMetadata | null;
     rejectedOutputMetadata: DailyQAOutputMetadata | null;
+    acceptedAllocations?: DailyQAOutputAllocationLine[];
+    rejectedAllocations?: DailyQAOutputAllocationLine[];
     inspections: DailyQAInspectionEntry[];
+}
+
+export interface DailyQAAuditEvidenceFiles {
+    acceptedFiles: File[];
+    acceptedKeys: string[];
+    rejectedFiles: File[];
+    rejectedKeys: string[];
 }
 
 const DAILY_QA_CLIENT_TIMEOUT_MS = 130_000;
@@ -598,14 +614,34 @@ export class DailyQARequestError extends Error {
     }
 }
 
-export async function postDailyQAInspection(payload: DailyQAInspectionRequest): Promise<any> {
+export async function postDailyQAInspection(
+    payload: DailyQAInspectionRequest,
+    evidence?: DailyQAAuditEvidenceFiles
+): Promise<any> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), DAILY_QA_CLIENT_TIMEOUT_MS);
     try {
+        let body: BodyInit;
+        let requestHeaders: HeadersInit | undefined;
+        if (evidence) {
+            const formData = new FormData();
+            formData.set("payload", JSON.stringify({
+                ...payload,
+                action: "jobOrderYieldAudit",
+                acceptedEvidenceKeys: evidence.acceptedKeys,
+                rejectedEvidenceKeys: evidence.rejectedKeys
+            }));
+            evidence.acceptedFiles.forEach((file) => formData.append("acceptedEvidence", file, file.name));
+            evidence.rejectedFiles.forEach((file) => formData.append("rejectedEvidence", file, file.name));
+            body = formData;
+        } else {
+            requestHeaders = { "Content-Type": "application/json" };
+            body = JSON.stringify(payload);
+        }
         const res = await fetch("/api/manufacturing/production/daily-qa", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            headers: requestHeaders,
+            body,
             signal: controller.signal
         });
         const data = await res.json().catch(() => null) as { error?: string; code?: string } | null;
@@ -647,15 +683,38 @@ export async function registerRejectedOutputAllocation(payload: {
     ledgerId: number;
     acceptedQuantity: number;
     rejectedQuantity: number;
-    rejectedOutputMetadata: DailyQAOutputMetadata;
-}): Promise<any> {
+    rejectedOutputMetadata?: DailyQAOutputMetadata;
+    rejectedAllocations?: DailyQAOutputAllocationLine[];
+}, evidence?: { files: File[]; keys: string[] }): Promise<any> {
+    let body: BodyInit;
+    let headers: HeadersInit | undefined;
+    if (evidence) {
+        const formData = new FormData();
+        formData.set("payload", JSON.stringify({
+            action: "registerRejectedOutput",
+            ...payload,
+            rejectedEvidenceKeys: evidence.keys
+        }));
+        evidence.files.forEach((file) => formData.append("rejectedEvidence", file, file.name));
+        body = formData;
+    } else {
+        headers = { "Content-Type": "application/json" };
+        body = JSON.stringify({ action: "registerRejectedOutput", ...payload });
+    }
     const res = await fetch("/api/manufacturing/production/daily-qa", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "registerRejectedOutput", ...payload })
+        headers,
+        body
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to register rejected output.");
+    const data = await res.json().catch(() => null) as { error?: string; code?: string } | null;
+    if (!res.ok) {
+        throw new DailyQARequestError(
+            data?.error || `Failed to register rejected output (HTTP ${res.status}).`,
+            typeof data?.code === "string" ? data.code : null,
+            res.status >= 500,
+            res.status >= 500
+        );
+    }
     return data;
 }
 

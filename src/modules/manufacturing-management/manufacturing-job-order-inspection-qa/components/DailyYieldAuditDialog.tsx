@@ -7,16 +7,27 @@ import {
     Calendar,
     ChevronRight,
     ClipboardCheck,
-    Expand,
     History,
     ImageIcon,
     Loader2,
     MapPin,
     Package,
+    Plus,
     Tag,
+    Trash2,
     User,
     Users,
 } from "lucide-react";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
     Dialog,
     DialogContent,
@@ -40,9 +51,28 @@ import {
 import { FinishedGoodsLotSelect } from "../../shared/FinishedGoodsLotSelect";
 import { formatPhtTimestamp12Hour, phtTimestampToEpoch } from "../../shared/pht-date";
 import { isManufacturingEvidenceVideo } from "@/modules/manufacturing-management/production-workflow/services/production-yield-image";
-import { parseQAOutputQuantity } from "@/modules/manufacturing-management/manufacturing-qa/qa-output-allocation";
+import {
+    parseQAOutputQuantity,
+    qaOutputAllocationCapacityErrorMessage,
+    qaOutputAllocationMatchesLoggedTotal,
+    qaOutputAllocationWithinCapacity,
+    sumQAOutputQuantities
+} from "@/modules/manufacturing-management/manufacturing-qa/qa-output-allocation";
+import {
+    dailyQAAuditStateError,
+    type DailyQALabStatus
+} from "@/modules/manufacturing-management/manufacturing-qa/daily-qa-outcome";
+import { dailyQAParameterValueKey } from "../utils/saved-daily-qa-parameters";
 import type { DailyYieldAuditController } from "../hooks/useDailyYieldAudit";
-import type { DailyYieldQALog, DailyYieldQAParameter } from "../types";
+import type { DailyYieldQALog, DailyYieldQAParameter, JobOrderDailyYieldEvidence } from "../types";
+import { EvidenceMediaInput } from "../../production-workflow/components/EvidenceMediaInput";
+
+function auditActorName(actorId: number | null, actorLabel: string, namesById: Record<number, string> | undefined) {
+    if (!actorId) return "Not recorded";
+    const name = namesById?.[actorId];
+    if (name && name !== `Inspector #${actorId}`) return name;
+    return `${actorLabel === "Logged By" ? "User" : "Inspector"} #${actorId}`;
+}
 
 interface DailyYieldAuditDialogProps {
     controller: DailyYieldAuditController;
@@ -75,15 +105,46 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
     const yieldRecord = controller.selectedYield;
     const details = controller.selectedDetails;
     const shiftName = displayShiftName || yieldRecord?.shiftName || "Shift not specified";
-    const acceptedOutputQuantity = parseQAOutputQuantity(controller.dailyAcceptedOutputQuantity) ?? 0;
-    const rejectedOutputQuantity = parseQAOutputQuantity(controller.dailyRejectedOutputQuantity) ?? 0;
-    const loggedOutputQuantity = Number(yieldRecord?.goodQuantity || 0) + Number(yieldRecord?.rejectedQuantity || 0);
+    const parsedAcceptedOutputQuantity = parseQAOutputQuantity(controller.dailyAcceptedOutputQuantity);
+    const parsedRejectedOutputQuantity = parseQAOutputQuantity(controller.dailyRejectedOutputQuantity);
+    const acceptedOutputQuantity = parsedAcceptedOutputQuantity ?? 0;
+    const rejectedOutputQuantity = parsedRejectedOutputQuantity ?? 0;
+    const loggedOutputQuantity = sumQAOutputQuantities(
+        yieldRecord?.goodQuantity,
+        yieldRecord?.rejectedQuantity,
+        yieldRecord?.scrapQuantity
+    ) ?? 0;
+    const auditedOutputQuantity = parsedAcceptedOutputQuantity !== null && parsedRejectedOutputQuantity !== null
+        ? sumQAOutputQuantities(parsedAcceptedOutputQuantity, parsedRejectedOutputQuantity)
+        : null;
+    const hasAllocationVariance = auditedOutputQuantity !== null && Boolean(yieldRecord)
+        && !qaOutputAllocationMatchesLoggedTotal(
+            { acceptedQuantity: acceptedOutputQuantity, rejectedQuantity: rejectedOutputQuantity },
+            yieldRecord?.goodQuantity,
+            sumQAOutputQuantities(yieldRecord?.rejectedQuantity, yieldRecord?.scrapQuantity)
+        );
+    const allocationExceedsCapacity = auditedOutputQuantity !== null && Boolean(yieldRecord)
+        && !qaOutputAllocationWithinCapacity(
+            { acceptedQuantity: acceptedOutputQuantity, rejectedQuantity: rejectedOutputQuantity },
+            yieldRecord?.qaAllocationLimit
+        );
+    const quantityAllocationError = controller.quantityAllocationError || (allocationExceedsCapacity
+        ? qaOutputAllocationCapacityErrorMessage(
+            yieldRecord?.qaAllocationLimit,
+            details?.totalProducedQuantity,
+            details?.productUom
+        )
+        : null);
     const hasOutput = loggedOutputQuantity > 0;
     const requiresOutputTraceability = acceptedOutputQuantity > 0;
     const requiresRejectedOutputTraceability = rejectedOutputQuantity > 0;
+    const hasSavedAcceptedEvidence = (yieldRecord?.evidence?.acceptedStock.length || 0) > 0;
+    const hasSavedRejectedEvidence = (yieldRecord?.evidence?.rejectedStock.length || 0) > 0;
     const shelfLifeDays = Number(details?.productShelfLifeDays);
     const hasValidShelfLifeDays = Number.isSafeInteger(shelfLifeDays) && shelfLifeDays > 0;
     const isVerified = yieldRecord?.qaStatus === "Passed";
+    const labDispositionError = dailyQAAuditStateError(controller.dailyLabStatus, controller.dailyActionTaken);
+    const confirmsLabVerification = controller.savedLabStatus === "Pending" && controller.dailyLabStatus === "Passed";
     const rejectedOutputRegistered = Boolean(yieldRecord?.rejectedMmLotId);
     const canRegisterRejectedOutput = Boolean(
         requiresRejectedOutputTraceability
@@ -92,13 +153,17 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
     );
     const rejectedOutputLocked = controller.actionLoading || rejectedOutputRegistered;
     const [evidenceExpanded, setEvidenceExpanded] = React.useState(false);
+    const [previewEvidence, setPreviewEvidence] = React.useState<JobOrderDailyYieldEvidence | null>(null);
     const [showAllAuditTrail, setShowAllAuditTrail] = React.useState(false);
     const [showAllOperators, setShowAllOperators] = React.useState(false);
     const [checklistSectionOpen, setChecklistSectionOpen] = React.useState(false);
     const [evidenceSectionOpen, setEvidenceSectionOpen] = React.useState(false);
     const [auditTrailSectionOpen, setAuditTrailSectionOpen] = React.useState(false);
+    const [revokeDialogOpen, setRevokeDialogOpen] = React.useState(false);
+    const [revokeReason, setRevokeReason] = React.useState("");
     React.useEffect(() => {
         setEvidenceExpanded(false);
+        setPreviewEvidence(null);
         setShowAllAuditTrail(false);
         setShowAllOperators(false);
         const shouldStartOpen = window.matchMedia("(min-width: 64rem)").matches;
@@ -111,6 +176,26 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
         [controller.routes]
     );
     const inspectorDisplayName = controller.inspectorName?.trim() || "Current signed-in inspector";
+    const evidenceChannels: Array<{ key: string; label: string; items: JobOrderDailyYieldEvidence[] }> = [
+        {
+            key: "inspectorShift",
+            label: "Inspector / Shift Evidence",
+            items: yieldRecord?.evidence?.inspectorShift ?? (yieldRecord?.evidenceImage ? [{
+                evidenceId: `legacy-${yieldRecord.ledgerId}`,
+                channel: "INSPECTOR_SHIFT",
+                fileId: yieldRecord.evidenceImage.fileId,
+                fileName: yieldRecord.evidenceImage.fileName,
+                mimeType: yieldRecord.evidenceImage.mimeType,
+                fileSize: yieldRecord.evidenceImage.fileSize,
+                url: yieldRecord.evidenceImage.url,
+                uploadedById: yieldRecord.loggedById,
+                uploadedAt: yieldRecord.loggedAt,
+                sortOrder: -1
+            }] : [])
+        },
+        { key: "acceptedStock", label: "QA Accepted Stock Evidence", items: yieldRecord?.evidence?.acceptedStock ?? [] },
+        { key: "rejectedStock", label: "QA Rejected Stock Evidence", items: yieldRecord?.evidence?.rejectedStock ?? [] }
+    ];
     const auditTrailEntries = React.useMemo(() => {
         type TrailEntry = {
             key: string;
@@ -118,7 +203,8 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
             routeName: string | null;
             detail: string | null;
             timestamp: unknown;
-            inspectorId: number | null;
+            actorId: number | null;
+            actorLabel: "Logged By" | "Inspector";
             remarks: string | null;
         };
         const textValue = (record: Record<string, unknown>, keys: string[]): string | null => {
@@ -143,7 +229,8 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                 routeName: null,
                 detail: null,
                 timestamp: yieldRecord.loggedAt,
-                inspectorId: null,
+                actorId: yieldRecord.loggedById,
+                actorLabel: "Logged By",
                 remarks: null
             });
         }
@@ -171,7 +258,8 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                 routeName: route ? `Step ${route.sequenceOrder}: ${route.name}` : null,
                 detail: readings.length > 0 ? readings.join(" · ") : null,
                 timestamp: record.inspected_at ?? record.created_at ?? null,
-                inspectorId: numberValue(record, ["inspector_id", "inspectorId", "created_by", "user_id"]),
+                actorId: numberValue(record, ["inspector_id", "inspectorId", "created_by", "user_id"]),
+                actorLabel: "Inspector",
                 remarks: textValue(record, ["remarks"])
             });
         });
@@ -192,10 +280,26 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                         Record physicochemical specifications and sensory audits for {details?.jobOrderNo || "the selected Job Order"} ({shiftName}).
                     </DialogDescription>
                 </DialogHeader>
+                {details?.yieldEvidenceAvailable === false && (
+                    <div role="status" className="flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-800 dark:text-amber-200">
+                        <AlertCircle className="h-4 w-4 shrink-0" />
+                        {details.yieldEvidenceWarning || "Yield evidence is temporarily unavailable. Only legacy shift evidence is displayed."}
+                    </div>
+                )}
                 {isVerified && (
                     <div role="status" className="flex shrink-0 items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
                         <ClipboardCheck className="h-4 w-4 shrink-0" />
                         This daily yield has been verified. Details are read-only.
+                    </div>
+                )}
+                {yieldRecord?.qaRevocation && (
+                    <div role="status" className="flex shrink-0 items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div>
+                            <p className="font-semibold">This yield has a prior QA release revocation ({formatAuditTimestamp(yieldRecord.qaRevocation.revokedAt)}).</p>
+                            {yieldRecord.qaRevocation.reason && <p className="mt-0.5">Reason: {yieldRecord.qaRevocation.reason}</p>}
+                            {yieldRecord.qaRevocation.revokedById && <p className="mt-0.5">Recorded by {yieldRecord.qaRevocation.revokedByName || controller.inspectorNamesById[yieldRecord.qaRevocation.revokedById] || "Name unavailable"}.</p>}
+                        </div>
                     </div>
                 )}
 
@@ -425,8 +529,8 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                 </details>
                             </div>
 
-                            {/* End-of-shift Evidence Image */}
-                            {yieldRecord?.evidenceImage && (
+                            {/* Role-separated yield evidence */}
+                            {yieldRecord && (
                                 <details
                                     className="group rounded-xl border border-sky-500/20 bg-sky-500/[0.03] p-3 shadow-sm"
                                     open={evidenceSectionOpen}
@@ -437,60 +541,42 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                         <div className="p-1 bg-sky-500/10 rounded-lg text-sky-600 dark:text-sky-400">
                                             <ImageIcon className="h-3.5 w-3.5" />
                                         </div>
-                                            <span className="truncate uppercase tracking-wider">End-of-Shift Evidence</span>
+                                            <span className="truncate uppercase tracking-wider">Yield Evidence by Stage</span>
                                         </span>
                                         <span className="shrink-0 text-[10px] font-semibold text-primary">{evidenceSectionOpen ? "Hide" : "Show"}</span>
                                     </summary>
-                                    <div className="mt-2 flex items-center gap-3 rounded-lg border border-sky-500/20 bg-background/70 p-2">
-                                        {isManufacturingEvidenceVideo(yieldRecord.evidenceImage.mimeType, yieldRecord.evidenceImage.fileName) ? (
-                                            <video
-                                                src={yieldRecord.evidenceImage.url}
-                                                controls
-                                                playsInline
-                                                preload="metadata"
-                                                aria-label="End-of-shift evidence video"
-                                                className="max-h-40 w-full max-w-xs shrink-0 rounded-md border border-border bg-black"
-                                            />
-                                        ) : (
-                                            <button
-                                                type="button"
-                                                onClick={() => setEvidenceExpanded(true)}
-                                                aria-label="Expand end-of-shift evidence image"
-                                                title="Expand image"
-                                                className="group relative shrink-0 cursor-zoom-in rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                                            >
-                                                <Image
-                                                    src={yieldRecord.evidenceImage.url}
-                                                    alt={yieldRecord.evidenceImage.fileName || "End-of-shift evidence"}
-                                                    width={80}
-                                                    height={80}
-                                                    unoptimized
-                                                    className="h-20 w-20 rounded-md object-cover border border-border"
-                                                />
-                                                <span className="absolute bottom-1 right-1 rounded-md bg-background/90 p-1 text-muted-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                                                    <Expand className="h-3 w-3" />
-                                                </span>
-                                            </button>
-                                        )}
-                                        <div className="min-w-0 space-y-1 text-[10px]">
-                                            <p className="truncate font-semibold text-foreground" title={yieldRecord.evidenceImage.fileName || undefined}>
-                                                {yieldRecord.evidenceImage.fileName || "End-of-shift evidence"}
-                                            </p>
-                                            {yieldRecord.evidenceImage.mimeType && (
-                                                <p className="text-muted-foreground">{yieldRecord.evidenceImage.mimeType}</p>
-                                            )}
-                                            {yieldRecord.evidenceImage.fileSize && (
-                                                <p className="text-muted-foreground">{(yieldRecord.evidenceImage.fileSize / 1024 / 1024).toFixed(2)} MB</p>
-                                            )}
-                                            <a
-                                                href={yieldRecord.evidenceImage.url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="inline-flex font-semibold text-primary hover:underline"
-                                            >
-                                                Open file
-                                            </a>
-                                        </div>
+                                    <div className="mt-2 space-y-2">
+                                        {evidenceChannels.map((channel) => (
+                                            <section key={channel.key} className="rounded-lg border border-border bg-background/70 p-2.5">
+                                                <div className="mb-2 flex items-center justify-between gap-2">
+                                                    <h5 className="text-[10px] font-bold uppercase tracking-wide text-foreground">{channel.label}</h5>
+                                                    <span className="text-[10px] text-muted-foreground">{channel.items.length} {channel.items.length === 1 ? "file" : "files"}</span>
+                                                </div>
+                                                {channel.items.length === 0 ? (
+                                                    <p className="text-[10px] italic text-muted-foreground">No evidence recorded.</p>
+                                                ) : (
+                                                    <ul className="space-y-2">
+                                                        {channel.items.map((item) => (
+                                                            <li key={`${item.evidenceId}-${item.fileId}`} className="flex min-w-0 items-center gap-2.5 rounded-md border border-border/70 p-2">
+                                                                {isManufacturingEvidenceVideo(item.mimeType, item.fileName) ? (
+                                                                    <video src={item.url} controls playsInline preload="metadata" aria-label={`${channel.label} video`} className="max-h-20 w-28 shrink-0 rounded border border-border bg-black" />
+                                                                ) : (
+                                                                    <button type="button" onClick={() => { setPreviewEvidence(item); setEvidenceExpanded(true); }} aria-label={`Preview ${item.fileName || channel.label}`} className="shrink-0 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                                                                        <Image src={item.url} alt={item.fileName || channel.label} width={64} height={64} unoptimized className="h-16 w-16 rounded border border-border object-cover" />
+                                                                    </button>
+                                                                )}
+                                                                <div className="min-w-0 space-y-0.5 text-[10px]">
+                                                                    <p className="truncate font-semibold text-foreground" title={item.fileName || undefined}>{item.fileName || "Evidence file"}</p>
+                                                                    <p className="truncate text-muted-foreground">Uploaded by {auditActorName(item.uploadedById, "Logged By", controller.inspectorNamesById)}</p>
+                                                                    <p className="text-muted-foreground">{formatAuditTimestamp(item.uploadedAt)}{item.fileSize ? ` · ${(item.fileSize / 1024 / 1024).toFixed(2)} MB` : ""}</p>
+                                                                    <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex font-semibold text-primary hover:underline">Open file</a>
+                                                                </div>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </section>
+                                        ))}
                                     </div>
                                 </details>
                             )}
@@ -515,9 +601,7 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                 ) : (
                                     <ol className="space-y-2 overflow-hidden">
                                         {auditTrailEntries.slice(0, 2).map((entry) => {
-                                            const inspectorLabel = entry.inspectorId
-                                                ? controller.inspectorNamesById?.[entry.inspectorId] || `Inspector #${entry.inspectorId}`
-                                                : "—";
+                                            const actorName = auditActorName(entry.actorId, entry.actorLabel, controller.inspectorNamesById);
                                             return (
                                                 <li key={entry.key} className="rounded-lg border border-border bg-muted/20 p-2.5 space-y-1 overflow-hidden">
                                                     <div className="flex items-center justify-between gap-2">
@@ -527,7 +611,7 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                                         </p>
                                                         <span className="font-mono text-[10px] text-muted-foreground shrink-0">{formatAuditTimestamp(entry.timestamp)}</span>
                                                     </div>
-                                                    <p className="text-[10px] text-muted-foreground">Inspector: <span className="font-semibold text-foreground">{inspectorLabel}</span></p>
+                                                    <p className="text-[10px] text-muted-foreground">{entry.actorLabel}: <span className="font-semibold text-foreground">{actorName}</span></p>
                                                     {entry.detail && (
                                                         <p className="text-[10px] text-foreground/80">{entry.detail}</p>
                                                     )}
@@ -613,8 +697,16 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                                     </Badge>
                                                 </div>
                                                 {parameters.length > 0 ? parameters.map((parameter) => {
-                                                    const value = controller.qaParamValues[parameter.parameter_id] || "";
-                                                    const failed = isParameterFailed(parameter, value);
+                                                    const parameterValueKey = dailyQAParameterValueKey(route.id, parameter.parameter_id);
+                                                    const value = controller.qaParamValues[parameterValueKey] || "";
+                                                    const savedParameter = controller.selectedYield?.audits
+                                                        .find((audit) => Number(audit.jo_route_id) === route.id)
+                                                        ?.qaParameters?.find((item) => item.parameter_id === parameter.parameter_id);
+                                                    const hasSavedPassState = typeof savedParameter?.is_passed === "boolean";
+                                                    const failed = isVerified
+                                                        ? savedParameter?.is_passed === false
+                                                        : isParameterFailed(parameter, value);
+                                                    const hasResult = isVerified ? hasSavedPassState : Boolean(value);
                                                     return (
                                                         <div key={parameter.parameter_id} className="flex flex-col gap-1.5 py-1.5 border-b border-border/40 last:border-b-0">
                                                             <div className="flex flex-col">
@@ -625,14 +717,14 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                                                 {parameter.test_type === "Numeric" && <span className="text-[10px] text-muted-foreground font-medium">Limit: [{parameter.min_value ?? "-∞"} – {parameter.max_value ?? "+∞"}]</span>}
                                                             </div>
                                                             <div className="flex items-center gap-2 shrink-0">
-                                                                {value && <span className={`text-[10px] font-bold px-1 py-0.5 rounded ${failed ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"}`}>{failed ? "FAIL" : "PASS"}</span>}
+                                                                {hasResult && <span className={`text-[10px] font-bold px-1 py-0.5 rounded ${failed ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"}`}>{failed ? "FAIL" : "PASS"}</span>}
                                                                 {["Boolean", "Pass/Fail", "Yes/No"].includes(parameter.test_type || "") ? (
                                                                     <div className="flex gap-2.5 text-[10px]">
-                                                                        <label className="flex items-center gap-1 cursor-pointer text-foreground"><input type="radio" name={`daily-yield-param-${parameter.parameter_id}`} checked={value === "Pass"} disabled={isVerified} onChange={() => controller.setQaParamValues({ ...controller.qaParamValues, [parameter.parameter_id]: "Pass" })} />Pass</label>
-                                                                        <label className="flex items-center gap-1 cursor-pointer text-foreground"><input type="radio" name={`daily-yield-param-${parameter.parameter_id}`} checked={value === "Fail"} disabled={isVerified} onChange={() => controller.setQaParamValues({ ...controller.qaParamValues, [parameter.parameter_id]: "Fail" })} />Fail</label>
+                                                                        <label className="flex items-center gap-1 cursor-pointer text-foreground"><input type="radio" name={`daily-yield-param-${route.id}-${parameter.parameter_id}`} checked={value === "Pass"} disabled={isVerified} onChange={() => controller.setQaParamValues({ ...controller.qaParamValues, [parameterValueKey]: "Pass" })} />Pass</label>
+                                                                        <label className="flex items-center gap-1 cursor-pointer text-foreground"><input type="radio" name={`daily-yield-param-${route.id}-${parameter.parameter_id}`} checked={value === "Fail"} disabled={isVerified} onChange={() => controller.setQaParamValues({ ...controller.qaParamValues, [parameterValueKey]: "Fail" })} />Fail</label>
                                                                     </div>
                                                                 ) : (
-                                                                    <Input type={parameter.test_type === "Numeric" ? "number" : "text"} step={parameter.test_type === "Numeric" ? "any" : undefined} required placeholder={parameter.test_type === "Numeric" ? `Target: ${parameter.target_value || "N/A"}` : "Reading..."} className="h-7 text-[11px] font-mono w-full bg-background border-border text-foreground py-0" disabled={isVerified} value={value} onChange={(event) => controller.setQaParamValues({ ...controller.qaParamValues, [parameter.parameter_id]: event.target.value })} />
+                                                                    <Input type={parameter.test_type === "Numeric" ? "number" : "text"} step={parameter.test_type === "Numeric" ? "any" : undefined} required placeholder={parameter.test_type === "Numeric" ? `Target: ${parameter.target_value || "N/A"}` : "Reading..."} className="h-7 text-[11px] font-mono w-full bg-background border-border text-foreground py-0" disabled={isVerified} value={value} onChange={(event) => controller.setQaParamValues({ ...controller.qaParamValues, [parameterValueKey]: event.target.value })} />
                                                                 )}
                                                             </div>
                                                         </div>
@@ -704,85 +796,89 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                             step="0.000001"
                                             value={controller.dailyAcceptedOutputQuantity}
                                             onChange={(event) => controller.setDailyAcceptedOutputQuantity(event.target.value)}
-                                            className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs font-mono"
+                                            className={`h-9 rounded-lg bg-background text-foreground text-xs font-mono ${quantityAllocationError ? "border-destructive focus-visible:ring-destructive" : "border-border/80"}`}
+                                            aria-invalid={Boolean(quantityAllocationError)}
+                                            aria-describedby={quantityAllocationError ? "daily-yield-output-allocation-error" : undefined}
                                             disabled={controller.actionLoading || isVerified || !hasOutput}
                                             required={hasOutput}
                                         />
                                         <p className="text-[10px] text-muted-foreground">
-                                            Good + Bad must equal the logged output total of {numericText(loggedOutputQuantity)}.
+                                            Job Order production: {numericText(details?.totalProducedQuantity)} {details?.productUom || "units"}. Available for this audit: {numericText(yieldRecord?.qaAllocationLimit)} {details?.productUom || "units"}. Operator logged: {numericText(loggedOutputQuantity)}.
                                         </p>
                                     </div>
 
-                                    <div className="space-y-1">
-                                        <Label htmlFor="daily-yield-output-batch" className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]">
-                                            <Tag className="h-3.5 w-3.5 text-emerald-500" /> Output Batch / Lot No <span className="text-destructive">*</span>
-                                        </Label>
-                                        <Input
-                                            id="daily-yield-output-batch"
-                                            type="text"
-                                            maxLength={100}
-                                            value={controller.dailyOutputBatchNo}
-                                            onChange={(event) => controller.setDailyOutputBatchNo(event.target.value)}
-                                            className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs font-bold font-mono"
-                                            placeholder="e.g. JO-2026-YLD-001"
-                                            disabled={controller.actionLoading || !requiresOutputTraceability || isVerified}
-                                            required={requiresOutputTraceability}
-                                        />
-                                    </div>
-
-                                    <div className="space-y-1">
-                                        <Label htmlFor="daily-yield-storage-lot" className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]">
-                                            <MapPin className="h-3.5 w-3.5 text-emerald-500" /> Storage Lot <span className="text-destructive">*</span>
-                                        </Label>
-                                        {controller.dailyOutputLotsLoading ? (
-                                            <div role="status" aria-label="Loading finished-goods storage lots" aria-busy="true" className="space-y-1">
-                                                <span className="sr-only">Loading finished-goods storage lots...</span>
-                                                <Skeleton aria-hidden="true" className="h-9 w-full rounded-lg" />
-                                                <Skeleton aria-hidden="true" className="h-3 w-3/4" />
-                                            </div>
-                                        ) : (
-                                            <FinishedGoodsLotSelect
-                                                lots={controller.dailyOutputEligibleLots}
-                                                value={controller.dailyOutputMmLotId}
-                                                onValueChange={controller.setDailyOutputMmLotId}
-                                                disabled={controller.actionLoading || !requiresOutputTraceability || isVerified}
-                                                placeholder="Select storage lot..."
-                                                className="h-9 w-full justify-between rounded-lg border-border/80 text-xs font-semibold"
-                                                showBatchSummary
-                                            />
-                                        )}
-                                    </div>
-
-                                    <div className="space-y-1">
-                                        <Label htmlFor="daily-yield-manufacturing-date" className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]">
-                                            <Calendar className="h-3.5 w-3.5 text-emerald-500" /> Manufacturing Date <span className="text-destructive">*</span>
-                                        </Label>
-                                        <Input
-                                            id="daily-yield-manufacturing-date"
-                                            type="date"
-                                            value={controller.dailyOutputManufacturingDate}
-                                            onChange={(event) => controller.setDailyOutputManufacturingDate(event.target.value)}
-                                            className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs"
-                                            disabled={controller.actionLoading || !requiresOutputTraceability || isVerified}
-                                            required={requiresOutputTraceability}
-                                        />
-                                    </div>
-
-                                    <div className="space-y-1">
-                                        <Label htmlFor="daily-yield-expiry-date" className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]">
-                                            <Calendar className="h-3.5 w-3.5 text-emerald-500" /> Expiry Date <span className="text-destructive">*</span>
-                                        </Label>
-                                        <Input
-                                            id="daily-yield-expiry-date"
-                                            type="date"
-                                            value={controller.dailyOutputExpiryDate}
-                                            onChange={(event) => controller.setDailyOutputExpiryDate(event.target.value)}
-                                            className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs"
-                                            disabled={controller.actionLoading || !requiresOutputTraceability || isVerified}
-                                            required={requiresOutputTraceability}
-                                        />
-                                    </div>
+                                    {requiresOutputTraceability && (
+                                        <div className="sm:col-span-2 space-y-3">
+                                            {controller.acceptedOutputAllocations.map((allocation, index) => (
+                                                <div key={allocation.allocationKey} className="rounded-lg border border-emerald-500/20 bg-background/70 p-3 space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">Allocation {index + 1}</p>
+                                                        {controller.acceptedOutputAllocations.length > 1 && !isVerified && (
+                                                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-destructive" disabled={controller.actionLoading} onClick={() => controller.removeAcceptedAllocation(allocation.allocationKey)}>
+                                                                <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                        <div className="space-y-1">
+                                                            <Label htmlFor={`accepted-allocation-quantity-${allocation.allocationKey}`} className="text-muted-foreground font-medium text-[11px]">Allocation Quantity <span className="text-destructive">*</span></Label>
+                                                            <Input id={`accepted-allocation-quantity-${allocation.allocationKey}`} type="number" min="0" step="0.000001" value={allocation.quantity} onChange={(event) => controller.updateAcceptedAllocation(allocation.allocationKey, "quantity", event.target.value)} className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs font-mono" disabled={controller.actionLoading || isVerified} required />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <Label htmlFor={`accepted-allocation-batch-${allocation.allocationKey}`} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Tag className="h-3.5 w-3.5 text-emerald-500" /> Batch / Lot No <span className="text-destructive">*</span></Label>
+                                                            <Input id={`accepted-allocation-batch-${allocation.allocationKey}`} type="text" maxLength={100} value={allocation.batchNo} onChange={(event) => controller.updateAcceptedAllocation(allocation.allocationKey, "batchNo", event.target.value)} className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs font-bold font-mono" placeholder="e.g. JO-2026-YLD-001" disabled={controller.actionLoading || isVerified} required />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <Label htmlFor={`accepted-allocation-lot-${allocation.allocationKey}`} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><MapPin className="h-3.5 w-3.5 text-emerald-500" /> Storage Lot <span className="text-destructive">*</span></Label>
+                                                            {isVerified ? (
+                                                                <Input id={`accepted-allocation-lot-${allocation.allocationKey}`} value={allocation.lotName || (allocation.mmLotId ? `Lot #${allocation.mmLotId}` : "Not recorded")} disabled readOnly className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs font-semibold" />
+                                                            ) : controller.dailyOutputLotsLoading ? (
+                                                                <Skeleton className="h-9 w-full rounded-lg" />
+                                                            ) : (
+                                                                <FinishedGoodsLotSelect lots={controller.dailyOutputEligibleLots} value={allocation.mmLotId} onValueChange={(value) => controller.updateAcceptedAllocation(allocation.allocationKey, "mmLotId", value)} disabled={controller.actionLoading} placeholder="Select storage lot..." className="h-9 w-full justify-between rounded-lg border-border/80 text-xs font-semibold" showBatchSummary />
+                                                            )}
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <Label htmlFor={`accepted-allocation-mfg-${allocation.allocationKey}`} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Calendar className="h-3.5 w-3.5 text-emerald-500" /> Manufacturing Date <span className="text-destructive">*</span></Label>
+                                                            <Input id={`accepted-allocation-mfg-${allocation.allocationKey}`} type="date" value={allocation.manufacturingDate} onChange={(event) => controller.updateAcceptedAllocation(allocation.allocationKey, "manufacturingDate", event.target.value)} className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs" disabled={controller.actionLoading || isVerified} required />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <Label htmlFor={`accepted-allocation-expiry-${allocation.allocationKey}`} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Calendar className="h-3.5 w-3.5 text-emerald-500" /> Expiry Date <span className="text-destructive">*</span></Label>
+                                                            <Input id={`accepted-allocation-expiry-${allocation.allocationKey}`} type="date" value={allocation.expiryDate} onChange={(event) => controller.updateAcceptedAllocation(allocation.allocationKey, "expiryDate", event.target.value)} className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs" disabled={controller.actionLoading || isVerified} required />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {!isVerified && (
+                                                <Button type="button" variant="outline" className="h-8 text-xs" disabled={controller.actionLoading} onClick={controller.addAcceptedAllocation}>
+                                                    <Plus className="mr-1 h-3.5 w-3.5" /> Add Another Lot / Batch Allocation
+                                                </Button>
+                                            )}
+                                            {quantityAllocationError && (
+                                                <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{quantityAllocationError}</div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
+                                {requiresOutputTraceability && !isVerified && (
+                                    <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.03] p-3">
+                                        <p className="mb-2 text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">
+                                            QA Accepted Stock Evidence {!hasSavedAcceptedEvidence && <span className="text-destructive">*</span>}
+                                            <span className="ml-1 font-normal text-muted-foreground">{hasSavedAcceptedEvidence ? "Evidence already recorded." : "Required when accepted quantity is greater than zero."}</span>
+                                        </p>
+                                        <EvidenceMediaInput
+                                            id="daily-yield-accepted-evidence"
+                                            label="QA accepted stock evidence"
+                                            files={controller.acceptedEvidenceFiles}
+                                            multiple
+                                            error={controller.acceptedEvidenceError}
+                                            required={!hasSavedAcceptedEvidence}
+                                            disabled={controller.actionLoading}
+                                            active={controller.isOpen}
+                                            onFilesChange={controller.setAcceptedEvidence}
+                                        />
+                                    </div>
+                                )}
                             </div>
 
                             {hasOutput && (
@@ -796,7 +892,9 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                                 Rejected Output Traceability
                                             </h4>
                                             <p className="text-[9px] text-muted-foreground mt-0.5">
-                                                {numericText(controller.dailyRejectedOutputQuantity)} rejected units will be registered in the configured bad-stock branch after this audit is complete.
+                                                {rejectedOutputRegistered
+                                                    ? `${numericText(controller.dailyRejectedOutputQuantity)} rejected units are already registered in the configured bad-stock branch.`
+                                                    : `${numericText(controller.dailyRejectedOutputQuantity)} rejected units will be registered in the configured bad-stock branch after this audit is complete.`}
                                             </p>
                                         </div>
                                     </div>
@@ -823,82 +921,111 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                                 step="0.000001"
                                                 value={controller.dailyRejectedOutputQuantity}
                                                 onChange={(event) => controller.setDailyRejectedOutputQuantity(event.target.value)}
-                                                className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs font-mono"
+                                                className={`h-9 rounded-lg bg-background text-foreground text-xs font-mono ${quantityAllocationError ? "border-destructive focus-visible:ring-destructive" : "border-rose-500/30"}`}
+                                                aria-invalid={Boolean(quantityAllocationError)}
+                                                aria-describedby={quantityAllocationError ? "daily-yield-output-allocation-error" : undefined}
                                                 disabled={controller.actionLoading || isVerified || rejectedOutputRegistered || !hasOutput}
                                                 required={hasOutput}
                                             />
                                         </div>
 
-                                        <div className="space-y-1">
-                                            <Label htmlFor="daily-yield-rejected-output-batch" className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]">
-                                                <Tag className="h-3.5 w-3.5 text-rose-500" /> Rejected Batch / Lot No <span className="text-destructive">*</span>
-                                            </Label>
-                                            <Input
-                                                id="daily-yield-rejected-output-batch"
-                                                type="text"
-                                                maxLength={100}
-                                                value={controller.dailyRejectedOutputBatchNo}
-                                                onChange={(event) => controller.setDailyRejectedOutputBatchNo(event.target.value)}
-                                                className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs font-bold font-mono"
-                                                placeholder="Enter rejected batch or lot number"
-                                                disabled={rejectedOutputLocked || !requiresRejectedOutputTraceability}
-                                                required={requiresRejectedOutputTraceability}
-                                            />
-                                        </div>
+                                        {hasAllocationVariance && auditedOutputQuantity !== null && (
+                                            <div role="status" className="sm:col-span-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                                                Yield Variance Detected: QA Audited ({numericText(auditedOutputQuantity)} {details?.productUom || "units"}) vs. Supervisor Logged ({numericText(loggedOutputQuantity)} {details?.productUom || "units"}). Add an optional explanation in Inspector remarks / Lab Comments.
+                                            </div>
+                                        )}
 
-                                        <div className="space-y-1">
-                                            <Label htmlFor="daily-yield-rejected-storage-lot" className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]">
-                                                <MapPin className="h-3.5 w-3.5 text-rose-500" /> Bad-stock Storage Lot <span className="text-destructive">*</span>
-                                            </Label>
-                                            {controller.dailyRejectedOutputLotsLoading ? (
-                                                <div role="status" aria-label="Loading bad-stock storage lots" aria-busy="true" className="space-y-1">
-                                                    <span className="sr-only">Loading bad-stock storage lots...</span>
-                                                    <Skeleton aria-hidden="true" className="h-9 w-full rounded-lg" />
-                                                    <Skeleton aria-hidden="true" className="h-3 w-3/4" />
-                                                </div>
-                                            ) : (
-                                                <FinishedGoodsLotSelect
-                                                    lots={controller.dailyRejectedOutputEligibleLots}
-                                                    value={controller.dailyRejectedOutputMmLotId}
-                                                    onValueChange={controller.setDailyRejectedOutputMmLotId}
-                                                    disabled={rejectedOutputLocked || !requiresRejectedOutputTraceability}
-                                                    placeholder="Select bad-stock storage lot..."
-                                                    className="h-9 w-full justify-between rounded-lg border-rose-500/30 text-xs font-semibold"
-                                                    showBatchSummary
-                                                />
-                                            )}
-                                        </div>
+                                        {quantityAllocationError && (
+                                            <div id="daily-yield-output-allocation-error" role="alert" className="sm:col-span-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                                                {quantityAllocationError}
+                                            </div>
+                                        )}
 
-                                        <div className="space-y-1">
-                                            <Label htmlFor="daily-yield-rejected-manufacturing-date" className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]">
-                                                <Calendar className="h-3.5 w-3.5 text-rose-500" /> Manufacturing Date <span className="text-destructive">*</span>
-                                            </Label>
-                                            <Input
-                                                id="daily-yield-rejected-manufacturing-date"
-                                                type="date"
-                                                value={controller.dailyRejectedOutputManufacturingDate}
-                                                onChange={(event) => controller.setDailyRejectedOutputManufacturingDate(event.target.value)}
-                                                className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs"
-                                                disabled={rejectedOutputLocked || !requiresRejectedOutputTraceability}
-                                                required={requiresRejectedOutputTraceability}
-                                            />
-                                        </div>
-
-                                        <div className="space-y-1">
-                                            <Label htmlFor="daily-yield-rejected-expiry-date" className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]">
-                                                <Calendar className="h-3.5 w-3.5 text-rose-500" /> Expiry Date <span className="text-destructive">*</span>
-                                            </Label>
-                                            <Input
-                                                id="daily-yield-rejected-expiry-date"
-                                                type="date"
-                                                value={controller.dailyRejectedOutputExpiryDate}
-                                                onChange={(event) => controller.setDailyRejectedOutputExpiryDate(event.target.value)}
-                                                className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs"
-                                                disabled={rejectedOutputLocked || !requiresRejectedOutputTraceability}
-                                                required={requiresRejectedOutputTraceability}
-                                            />
-                                        </div>
+                                        {requiresRejectedOutputTraceability && (
+                                            <div className="sm:col-span-2 space-y-3">
+                                                {controller.rejectedOutputAllocations.map((allocation, index) => (
+                                                    <div key={allocation.allocationKey} className="rounded-lg border border-rose-500/20 bg-background/70 p-3 space-y-3">
+                                                        <div className="flex items-center justify-between">
+                                                            <p className="text-[10px] font-bold uppercase tracking-wide text-rose-800 dark:text-rose-300">Rejected allocation {index + 1}</p>
+                                                            {controller.rejectedOutputAllocations.length > 1 && !isVerified && !rejectedOutputRegistered && (
+                                                                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-destructive" disabled={controller.actionLoading} onClick={() => controller.removeRejectedAllocation(allocation.allocationKey)}>
+                                                                    <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove
+                                                                </Button>
+                                                            )}
+                                                        </div>
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                            <div className="space-y-1">
+                                                                <Label htmlFor={"rejected-allocation-quantity-" + allocation.allocationKey} className="text-muted-foreground font-medium text-[11px]">Allocation Quantity <span className="text-destructive">*</span></Label>
+                                                                <Input id={"rejected-allocation-quantity-" + allocation.allocationKey} type="number" min="0" step="0.000001" value={allocation.quantity} onChange={(event) => controller.updateRejectedAllocation(allocation.allocationKey, "quantity", event.target.value)} className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs font-mono" disabled={rejectedOutputLocked || isVerified} required />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <Label htmlFor={"rejected-allocation-batch-" + allocation.allocationKey} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Tag className="h-3.5 w-3.5 text-rose-500" /> Rejected Batch / Lot No <span className="text-destructive">*</span></Label>
+                                                                <Input id={"rejected-allocation-batch-" + allocation.allocationKey} type="text" maxLength={100} value={allocation.batchNo} onChange={(event) => controller.updateRejectedAllocation(allocation.allocationKey, "batchNo", event.target.value)} className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs font-bold font-mono" placeholder="Enter rejected batch or lot number" disabled={rejectedOutputLocked || isVerified} required />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <Label htmlFor={"rejected-allocation-lot-" + allocation.allocationKey} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><MapPin className="h-3.5 w-3.5 text-rose-500" /> Bad-stock Storage Lot <span className="text-destructive">*</span></Label>
+                                                                {isVerified || rejectedOutputRegistered ? (
+                                                                    <Input id={"rejected-allocation-lot-" + allocation.allocationKey} value={allocation.lotName || (allocation.mmLotId ? "Lot #" + allocation.mmLotId : "Not recorded")} disabled readOnly className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs font-semibold" />
+                                                                ) : controller.dailyRejectedOutputLotsLoading ? (
+                                                                    <Skeleton className="h-9 w-full rounded-lg" />
+                                                                ) : (
+                                                                    <FinishedGoodsLotSelect lots={controller.dailyRejectedOutputEligibleLots} value={allocation.mmLotId} onValueChange={(value) => controller.updateRejectedAllocation(allocation.allocationKey, "mmLotId", value)} disabled={rejectedOutputLocked} placeholder="Select bad-stock storage lot..." className="h-9 w-full justify-between rounded-lg border-rose-500/30 text-xs font-semibold" showBatchSummary />
+                                                                )}
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <Label htmlFor={"rejected-allocation-reason-" + allocation.allocationKey} className="text-muted-foreground font-medium text-[11px]">Defect / Rejection Reason <span className="text-destructive">*</span></Label>
+                                                                {isVerified ? (
+                                                                    <Input id={"rejected-allocation-reason-" + allocation.allocationKey} value={allocation.rejectionReasonName || controller.qaRejectionReasons.find((reason) => String(reason.id) === allocation.rejectionReasonId)?.reason_name || allocation.rejectionReasonId || "Not recorded"} disabled readOnly className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs" />
+                                                                ) : (
+                                                                    <Select value={allocation.rejectionReasonId || "__unselected__"} onValueChange={(value) => controller.updateRejectedAllocation(allocation.allocationKey, "rejectionReasonId", value === "__unselected__" ? "" : value)} disabled={controller.actionLoading || controller.qaRejectionReasonsLoading}>
+                                                                        <SelectTrigger id={"rejected-allocation-reason-" + allocation.allocationKey} className="h-9 text-xs"><SelectValue placeholder="Select a rejection reason..." /></SelectTrigger>
+                                                                        <SelectContent position="popper" className="z-[9999]">
+                                                                            <SelectItem value="__unselected__" className="text-xs">Select a rejection reason...</SelectItem>
+                                                                            {controller.qaRejectionReasons.filter((reason) => reason.is_active).map((reason) => <SelectItem key={reason.id} value={String(reason.id)} className="text-xs">{reason.reason_name}</SelectItem>)}
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                )}
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <Label htmlFor={"rejected-allocation-mfg-" + allocation.allocationKey} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Calendar className="h-3.5 w-3.5 text-rose-500" /> Manufacturing Date <span className="text-destructive">*</span></Label>
+                                                                <Input id={"rejected-allocation-mfg-" + allocation.allocationKey} type="date" value={allocation.manufacturingDate} onChange={(event) => controller.updateRejectedAllocation(allocation.allocationKey, "manufacturingDate", event.target.value)} className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs" disabled={rejectedOutputLocked || isVerified} required />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <Label htmlFor={"rejected-allocation-expiry-" + allocation.allocationKey} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Calendar className="h-3.5 w-3.5 text-rose-500" /> Expiry Date <span className="text-destructive">*</span></Label>
+                                                                <Input id={"rejected-allocation-expiry-" + allocation.allocationKey} type="date" value={allocation.expiryDate} onChange={(event) => controller.updateRejectedAllocation(allocation.allocationKey, "expiryDate", event.target.value)} className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs" disabled={rejectedOutputLocked || isVerified} required />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {!isVerified && !rejectedOutputRegistered && (
+                                                    <Button type="button" variant="outline" className="h-8 text-xs" disabled={controller.actionLoading} onClick={controller.addRejectedAllocation}>
+                                                        <Plus className="mr-1 h-3.5 w-3.5" /> Add Another Lot / Batch Allocation
+                                                    </Button>
+                                                )}
+                                                {controller.qaRejectionReasonsError && <p role="alert" className="text-xs text-destructive">{controller.qaRejectionReasonsError}</p>}
+                                            </div>
+                                        )}
                                     </div>
+
+                                    {requiresRejectedOutputTraceability && !isVerified && !rejectedOutputRegistered && (
+                                        <div className="rounded-lg border border-rose-500/20 bg-rose-500/[0.03] p-3">
+                                            <p className="mb-2 text-[10px] font-semibold text-rose-800 dark:text-rose-300">
+                                                QA Rejected Stock Evidence {!hasSavedRejectedEvidence && <span className="text-destructive">*</span>}
+                                                <span className="ml-1 font-normal text-muted-foreground">{hasSavedRejectedEvidence ? "Evidence already recorded." : "Required when rejected quantity is greater than zero."}</span>
+                                            </p>
+                                            <EvidenceMediaInput
+                                                id="daily-yield-rejected-evidence"
+                                                label="QA rejected stock evidence"
+                                                files={controller.rejectedEvidenceFiles}
+                                                multiple
+                                                error={controller.rejectedEvidenceError}
+                                                required={!hasSavedRejectedEvidence}
+                                                disabled={controller.actionLoading}
+                                                active={controller.isOpen}
+                                                onFilesChange={controller.setRejectedEvidence}
+                                            />
+                                        </div>
+                                    )}
 
                                     {canRegisterRejectedOutput && (
                                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-t border-rose-500/15 pt-3">
@@ -948,7 +1075,7 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                             <SelectValue placeholder="Select action..." />
                                         </SelectTrigger>
                                         <SelectContent position="popper" className="z-[9999]">
-                                            <SelectItem value="Released" className="text-xs">Release Shift Yield</SelectItem>
+                                            <SelectItem value="Released" disabled={controller.dailyLabStatus === "Pending"} className="text-xs">Release Shift Yield</SelectItem>
                                             <SelectItem value="Quarantined" className="text-xs">Hold / Quarantine Yield</SelectItem>
                                             <SelectItem value="Scrapped" className="text-xs">Scrap Yield Lot</SelectItem>
                                         </SelectContent>
@@ -958,8 +1085,8 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                     <Label htmlFor="daily-yield-lab" className="text-foreground font-bold text-xs">Lab Status</Label>
                                     <Select
                                         disabled={isVerified}
-                                        value={controller.dailyLabStatus}
-                                        onValueChange={(val) => controller.setDailyLabStatus(val as "Pending" | "Passed" | "Failed")}
+                                        value={controller.dailyLabStatus || ""}
+                                        onValueChange={(val) => controller.setDailyLabStatus(val as DailyQALabStatus)}
                                     >
                                         <SelectTrigger id="daily-yield-lab" className="h-9 w-full text-xs font-medium bg-background border-border">
                                             <SelectValue placeholder="Select lab status..." />
@@ -973,6 +1100,17 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                 </div>
                             </div>
 
+                            {labDispositionError && (
+                                <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                                    {labDispositionError}
+                                </div>
+                            )}
+                            {confirmsLabVerification && (
+                                <div role="status" className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-800 dark:text-sky-200">
+                                    This changes the saved Lab Status from Pending Analysis to Passed. Saving confirms that the laboratory result has been verified.
+                                </div>
+                            )}
+
                             {/* Failed Parameter Warning Alert */}
                             {controller.hasFailedParam && (
                                 <div className="p-2.5 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive flex items-center gap-1.5 text-xs font-semibold">
@@ -983,8 +1121,8 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
 
                             {/* Inspector Remarks / Notes */}
                             <div className="space-y-1">
-                                <Label htmlFor="daily-yield-remarks" className="text-foreground font-bold text-xs">Inspector remarks / Lab Comments</Label>
-                                <textarea id="daily-yield-remarks" disabled={isVerified} value={controller.dailyRemarks} onChange={(event) => controller.setDailyRemarks(event.target.value)} className="flex min-h-[52px] w-full rounded-md border border-border bg-background text-foreground px-3 py-1.5 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary" placeholder="Details about moisture logs, physicochemical traits or sensory notes..." />
+                                <Label htmlFor="daily-yield-remarks" className="text-foreground font-bold text-xs">Inspector remarks / Lab Comments (Optional)</Label>
+                                <textarea id="daily-yield-remarks" disabled={isVerified} value={controller.dailyRemarks} onChange={(event) => controller.setDailyRemarks(event.target.value)} className="flex min-h-[52px] w-full rounded-md border border-border bg-background text-foreground px-3 py-1.5 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary" placeholder="Details about the audit, including an optional yield variance explanation..." />
                             </div>
                         </div>
                     </div>
@@ -992,53 +1130,102 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
 
                     {/* Dialog Footer */}
                     <DialogFooter className="shrink-0 pt-3 mt-1 border-t border-border gap-2 flex items-center justify-end bg-background">
-                        <Button type="button" variant="outline" onClick={controller.closeAudit} disabled={controller.actionLoading} title={controller.actionLoading ? "Wait for the save to finish or time out." : undefined} className="border-border hover:bg-muted text-foreground min-h-10 text-xs font-semibold">Cancel</Button>
-                        <Button type="submit" disabled={controller.actionLoading || controller.referenceLoading || isVerified || controller.saveOutcomeUnclear} title={controller.referenceLoading ? "Wait for the audit reference data to finish loading." : isVerified ? "This yield has been verified and can no longer be edited." : controller.saveOutcomeUnclear ? "Close and reopen this yield to check its latest saved status before retrying." : undefined} className="bg-primary hover:bg-primary/95 text-white font-bold min-h-10 text-xs px-4">
-                            {controller.actionLoading ? (
-                                <span role="status" className="inline-flex items-center gap-2">
-                                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                                    Saving audit...
-                                </span>
-                            ) : "Save Audit & Authorize"}
-                        </Button>
+                        <Button type="button" variant="outline" onClick={controller.closeAudit} disabled={controller.actionLoading} title={controller.actionLoading ? "Wait for the save to finish or time out." : undefined} className="border-border hover:bg-muted text-foreground min-h-10 text-xs font-semibold">{isVerified ? "Close" : "Cancel"}</Button>
+                        {!isVerified && (
+                            <Button type="submit" disabled={controller.actionLoading || controller.referenceLoading || controller.saveOutcomeUnclear || Boolean(labDispositionError)} title={labDispositionError || (controller.referenceLoading ? "Wait for the audit reference data to finish loading." : controller.saveOutcomeUnclear ? "Close and reopen this yield to check its latest saved status before retrying." : undefined)} className="bg-primary hover:bg-primary/95 text-white font-bold min-h-10 text-xs px-4">
+                                {controller.actionLoading ? (
+                                    <span role="status" className="inline-flex items-center gap-2">
+                                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                        Saving audit...
+                                    </span>
+                                ) : "Save Audit & Authorize"}
+                            </Button>
+                        )}
+                        {isVerified && details?.canRevokeYieldAudit && (
+                            <Button
+                                type="button"
+                                variant="destructive"
+                                onClick={() => { setRevokeReason(""); setRevokeDialogOpen(true); }}
+                                disabled={controller.actionLoading}
+                                className="min-h-10 text-xs font-semibold"
+                            >
+                                Revoke QA Release
+                            </Button>
+                        )}
                     </DialogFooter>
                     </fieldset>
                 </form>
             </DialogContent>
-            {yieldRecord?.evidenceImage && (
+            <AlertDialog open={revokeDialogOpen} onOpenChange={setRevokeDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Revoke this QA release?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            The accepted quantity will be removed from released finished goods and the yield will return to the QA queue for re-audit. This action is recorded in the yield ledger.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <Label htmlFor="qa-release-revocation-reason">Reason</Label>
+                    <textarea
+                        id="qa-release-revocation-reason"
+                        value={revokeReason}
+                        onChange={(event) => setRevokeReason(event.target.value)}
+                        maxLength={500}
+                        rows={3}
+                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                        placeholder="Explain why this QA release must be revoked..."
+                    />
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={controller.actionLoading}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            disabled={controller.actionLoading || !revokeReason.trim()}
+                            onClick={(event) => {
+                                event.preventDefault();
+                                const reason = revokeReason.trim();
+                                setRevokeDialogOpen(false);
+                                void controller.revokeAudit(reason);
+                            }}
+                        >
+                            {controller.actionLoading ? "Revoking..." : "Revoke release"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+            {previewEvidence && (
                 <Dialog open={evidenceExpanded} onOpenChange={setEvidenceExpanded}>
-                    <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl p-4 sm:p-5 gap-3">
-                        <DialogHeader>
-                            <DialogTitle className="truncate text-sm font-bold" title={yieldRecord.evidenceImage.fileName || undefined}>
-                                {yieldRecord.evidenceImage.fileName || "End-of-shift evidence"}
+                    <DialogContent className="flex h-[calc(100dvh-2rem)] max-h-[52rem] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+                        <DialogHeader className="min-w-0 shrink-0 px-4 pb-3 pr-14 pt-4 text-left">
+                            <DialogTitle className="block min-w-0 truncate text-sm font-bold" title={previewEvidence.fileName || undefined}>
+                                {previewEvidence.fileName || "Evidence file"}
                             </DialogTitle>
-                            <DialogDescription className="text-[11px]">
-                                {yieldRecord.evidenceImage.mimeType || "Evidence media"}
-                                {typeof yieldRecord.evidenceImage.fileSize === "number"
-                                    ? ` · ${(yieldRecord.evidenceImage.fileSize / 1024 / 1024).toFixed(2)} MB`
+                            <DialogDescription className="min-w-0 break-words text-[11px] leading-5">
+                                {previewEvidence.mimeType || "Evidence media"} · Uploaded by {auditActorName(previewEvidence.uploadedById, "Logged By", controller.inspectorNamesById)} · {formatAuditTimestamp(previewEvidence.uploadedAt)}
+                                {typeof previewEvidence.fileSize === "number"
+                                    ? ` · ${(previewEvidence.fileSize / 1024 / 1024).toFixed(2)} MB`
                                     : ""}
                             </DialogDescription>
                         </DialogHeader>
-                        {isManufacturingEvidenceVideo(yieldRecord.evidenceImage.mimeType, yieldRecord.evidenceImage.fileName) ? (
-                            <video
-                                src={yieldRecord.evidenceImage.url}
-                                controls
-                                playsInline
-                                preload="metadata"
-                                className="mx-auto max-h-[75vh] w-full rounded-lg border border-border bg-black object-contain"
-                            />
-                        ) : (
-                            <Image
-                                src={yieldRecord.evidenceImage.url}
-                                alt={yieldRecord.evidenceImage.fileName || "End-of-shift evidence"}
-                                width={1280}
-                                height={720}
-                                unoptimized
-                                className="mx-auto max-h-[75vh] w-auto max-w-full rounded-lg border border-border object-contain bg-muted/20"
-                            />
-                        )}
-                        <DialogFooter className="sm:justify-end">
-                            <Button type="button" variant="outline" onClick={() => setEvidenceExpanded(false)}>
+                        <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-muted/20 p-3 sm:p-4">
+                            {isManufacturingEvidenceVideo(previewEvidence.mimeType, previewEvidence.fileName) ? (
+                                <video
+                                    src={previewEvidence.url}
+                                    controls
+                                    playsInline
+                                    preload="metadata"
+                                    className="h-full max-h-full w-full max-w-full rounded-lg border border-border bg-black object-contain"
+                                />
+                            ) : (
+                                <Image
+                                    src={previewEvidence.url}
+                                    alt={previewEvidence.fileName || "Evidence file"}
+                                    width={1280}
+                                    height={720}
+                                    unoptimized
+                                    className="h-auto max-h-full w-auto max-w-full rounded-lg border border-border object-contain"
+                                />
+                            )}
+                        </div>
+                        <DialogFooter className="w-full shrink-0 flex-row justify-end border-t border-border bg-background px-4 py-3">
+                            <Button type="button" variant="outline" onClick={() => setEvidenceExpanded(false)} className="min-h-10 min-w-20">
                                 Close
                             </Button>
                         </DialogFooter>
@@ -1098,9 +1285,7 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                     </DialogHeader>
                     <div className="space-y-2.5 max-h-[65vh] overflow-y-auto pr-1 scrollbar-thin">
                         {auditTrailEntries.map((entry, index) => {
-                            const inspectorLabel = entry.inspectorId
-                                ? controller.inspectorNamesById?.[entry.inspectorId] || `Inspector #${entry.inspectorId}`
-                                : "—";
+                            const actorName = auditActorName(entry.actorId, entry.actorLabel, controller.inspectorNamesById);
                             return (
                                 <div key={`full-${entry.key}-${index}`} className="rounded-xl border border-border bg-muted/20 p-3 space-y-1.5">
                                     <div className="flex items-center justify-between gap-2 border-b border-border/40 pb-1">
@@ -1110,7 +1295,7 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                         </p>
                                         <span className="font-mono text-[11px] text-muted-foreground shrink-0">{formatAuditTimestamp(entry.timestamp)}</span>
                                     </div>
-                                    <p className="text-[11px] text-muted-foreground">Inspector: <span className="font-semibold text-foreground">{inspectorLabel}</span></p>
+                                    <p className="text-[11px] text-muted-foreground">{entry.actorLabel}: <span className="font-semibold text-foreground">{actorName}</span></p>
                                     {entry.detail && (
                                         <p className="text-xs text-foreground/90 font-medium">{entry.detail}</p>
                                     )}
