@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { Search, X, Calendar as CalendarIcon, ArrowRight } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { BranchOption, CustomerOption, OrderLifecycleStatus } from "../types";
 import { PeriodPreset } from "../hooks/useCustomerOrderLeadTimeTracker";
-import { SearchableSelect } from "@/modules/manufacturing-management/shared/components/SearchableSelect";
+import { SearchableSelect, SearchableSelectOption } from "@/modules/manufacturing-management/shared/components/SearchableSelect";
 import { Button } from "@/components/ui/button";
 
 interface LeadTimeFilterBarProps {
@@ -67,8 +67,8 @@ export function LeadTimeFilterBar({
     totalOrders,
 }: LeadTimeFilterBarProps) {
     // Prepare SearchableSelect options for Branch
-    const branchOptions = useMemo(() => {
-        const list = [
+    const branchOptions = useMemo<SearchableSelectOption[]>(() => {
+        const list: SearchableSelectOption[] = [
             {
                 value: "all",
                 label: "All Branches",
@@ -85,8 +85,8 @@ export function LeadTimeFilterBar({
     }, [branches]);
 
     // Prepare SearchableSelect options for Customer
-    const customerOptions = useMemo(() => {
-        const list = [
+    const customerOptions = useMemo<SearchableSelectOption[]>(() => {
+        const list: SearchableSelectOption[] = [
             {
                 value: "all",
                 label: "All Customers",

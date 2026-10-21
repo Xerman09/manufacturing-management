@@ -131,9 +131,10 @@ export function useCustomerOrderLeadTimeTracker() {
             setBranches(res.branches || []);
             setCustomers(res.customers || []);
             setTotalOrders(res.total || 0);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Error fetching lead time tracking data:", err);
-            setError(err.message || "Failed to load lead time tracking data.");
+            const message = err instanceof Error ? err.message : "Failed to load lead time tracking data.";
+            setError(message);
         } finally {
             setIsLoading(false);
         }

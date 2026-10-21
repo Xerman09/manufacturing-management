@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
+import { LifecycleMilestone, MilestoneStage, StageDuration } from "@/modules/manufacturing-management/sales-and-fulfillment/customer-order-lead-time-tracker/types";
 
 interface RawSalesOrder {
     order_id: number;
@@ -25,8 +26,30 @@ interface RawSalesOrder {
     on_hold_at: string | null;
     cancelled_at: string | null;
     not_fulfilled_at: string | null;
-    isDelivered: any;
-    isCancelled: any;
+    isDelivered: boolean | number | null;
+    isCancelled: boolean | number | null;
+}
+
+interface RawBranch {
+    id: number | string;
+    branch_name: string;
+    branch_code: string;
+}
+
+interface RawCustomer {
+    id: number | string;
+    customer_code: string;
+    customer_name: string;
+}
+
+interface RawSalesInvoice {
+    invoice_id: number;
+    order_id: string | number;
+    invoice_no: string;
+    invoice_date: string | null;
+    dispatch_date: string | null;
+    created_date: string | null;
+    transaction_status: string;
 }
 
 function formatHumanDuration(hours: number): string {
@@ -85,8 +108,8 @@ export async function GET(req: NextRequest) {
         ]);
 
         const rawOrders: RawSalesOrder[] = ordersRes && ordersRes.ok ? (await ordersRes.json()).data || [] : [];
-        const rawBranches: any[] = branchesRes && branchesRes.ok ? (await branchesRes.json()).data || [] : [];
-        const rawCustomers: any[] = customersRes && customersRes.ok ? (await customersRes.json()).data || [] : [];
+        const rawBranches: RawBranch[] = branchesRes && branchesRes.ok ? (await branchesRes.json()).data || [] : [];
+        const rawCustomers: RawCustomer[] = customersRes && customersRes.ok ? (await customersRes.json()).data || [] : [];
 
         // Build lookup maps
         const branchMap = new Map<number, { name: string; code: string }>();
@@ -103,48 +126,23 @@ export async function GET(req: NextRequest) {
 
         // Candidate order IDs for deep milestone lookup
         const orderIds = rawOrders.map((o) => o.order_id);
-        const orderNos = rawOrders.map((o) => o.order_no).filter(Boolean);
 
-        // 2. Fetch linked Sales Invoices & Reservations
-        let invoices: any[] = [];
-        let reservations: any[] = [];
-        let consolidatorDetails: any[] = [];
-        let postDispatchInvoices: any[] = [];
+        // 2. Fetch linked Sales Invoices
+        let invoices: RawSalesInvoice[] = [];
 
         if (orderIds.length > 0) {
-            const [invRes, cdRes] = await Promise.all([
-                fetch(`${DIRECTUS_URL}/items/sales_invoice?filter[order_id][_in]=${orderIds.slice(0, 100).join(",")}&fields=invoice_id,order_id,invoice_no,invoice_date,dispatch_date,created_date,transaction_status&limit=-1`, {
-                    headers,
-                    cache: "no-store",
-                }).catch(() => null),
-                fetch(`${DIRECTUS_URL}/items/consolidator_details?limit=-1&fields=id,consolidator_id,sales_order_detail_id,picked_at,created_at`, {
-                    headers,
-                    cache: "no-store",
-                }).catch(() => null),
-            ]);
+            const invRes = await fetch(`${DIRECTUS_URL}/items/sales_invoice?filter[order_id][_in]=${orderIds.slice(0, 100).join(",")}&fields=invoice_id,order_id,invoice_no,invoice_date,dispatch_date,created_date,transaction_status&limit=-1`, {
+                headers,
+                cache: "no-store",
+            }).catch(() => null);
 
             if (invRes && invRes.ok) {
                 invoices = (await invRes.json()).data || [];
             }
-            if (cdRes && cdRes.ok) {
-                consolidatorDetails = (await cdRes.json()).data || [];
-            }
-
-            // Fetch dispatch stops if we have invoices
-            const invIds = invoices.map((inv) => inv.invoice_id).filter(Boolean);
-            if (invIds.length > 0) {
-                const pdiRes = await fetch(`${DIRECTUS_URL}/items/post_dispatch_invoices?filter[invoice_id][_in]=${invIds.slice(0, 100).join(",")}&fields=id,post_dispatch_plan_id,invoice_id,status,sequence,invoiceAt&limit=-1`, {
-                    headers,
-                    cache: "no-store",
-                }).catch(() => null);
-                if (pdiRes && pdiRes.ok) {
-                    postDispatchInvoices = (await pdiRes.json()).data || [];
-                }
-            }
         }
 
         // Map invoices to order_id
-        const orderInvoicesMap = new Map<string, any[]>();
+        const orderInvoicesMap = new Map<string, RawSalesInvoice[]>();
         for (const inv of invoices) {
             const key = String(inv.order_id);
             if (!orderInvoicesMap.has(key)) orderInvoicesMap.set(key, []);
@@ -168,7 +166,11 @@ export async function GET(req: NextRequest) {
 
             // Invoicing timestamp from linked invoices or sales_order column
             const linkedInvoices = orderInvoicesMap.get(orderIdStr) || [];
-            const earliestInvoice = [...linkedInvoices].sort((a, b) => new Date(a.created_date || a.invoice_date).getTime() - new Date(b.created_date || b.invoice_date).getTime())[0];
+            const earliestInvoice = [...linkedInvoices].sort((a, b) => {
+                const dateA = a.created_date || a.invoice_date || 0;
+                const dateB = b.created_date || b.invoice_date || 0;
+                return new Date(dateA).getTime() - new Date(dateB).getTime();
+            })[0];
             const invoicingTimeStr = earliestInvoice?.created_date || earliestInvoice?.invoice_date || order.for_shipping_at;
             const dispatchTimeStr = earliestInvoice?.dispatch_date || order.en_route_at;
 
@@ -202,7 +204,7 @@ export async function GET(req: NextRequest) {
             }
 
             // Build Milestones Sequence
-            const milestones: any[] = [
+            const milestones: LifecycleMilestone[] = [
                 {
                     id: `m-create-${order.order_id}`,
                     stage: "ORDER_CREATED",
@@ -287,7 +289,7 @@ export async function GET(req: NextRequest) {
             ];
 
             // Build Stage Durations & Anomaly detection
-            const stages: any[] = [];
+            const stages: StageDuration[] = [];
             const missingMilestonesList: string[] = [];
             let hasNegativeDurations = false;
 
@@ -327,7 +329,7 @@ export async function GET(req: NextRequest) {
             }
 
             // Determine current active stage
-            let currentStage = "ORDER_CREATED";
+            let currentStage: MilestoneStage = "ORDER_CREATED";
             let currentStageLabel = "Order Created";
             for (let i = milestones.length - 1; i >= 0; i--) {
                 if (milestones[i].timestamp) {
@@ -469,10 +471,11 @@ export async function GET(req: NextRequest) {
             pageSize,
             totalPages,
         });
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error("[Customer Order Lead Time Tracker API Error]:", err);
+        const details = err instanceof Error ? err.message : String(err);
         return NextResponse.json(
-            { error: "Internal server error fetching customer order lead time data", details: err?.message },
+            { error: "Internal server error fetching customer order lead time data", details },
             { status: 500 }
         );
     }
