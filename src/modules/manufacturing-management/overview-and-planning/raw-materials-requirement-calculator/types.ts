@@ -32,6 +32,8 @@ export interface UnitOption {
     unitId: number;
     unitName: string;
     unitShortcut: string;
+    multiplier?: number;
+    isBase?: boolean;
 }
 
 export interface DensityOption {
@@ -72,6 +74,7 @@ export interface CalculationResult {
     targetQuantity: number;
     targetUomId: number;
     targetUomShortcut: string;
+    effectiveTargetQuantity?: number;
     finishedGood: {
         productId: number;
         productName: string;
@@ -89,6 +92,8 @@ export interface CalculationResult {
     assumptions: {
         scalingFactor: number;
         appliedDensityFactor?: number;
+        packagingMultiplier?: number;
+        effectiveBaseQuantity?: number;
         expectedYieldPercentage: number;
         calculationTimestamp: string;
         disclaimer: string;

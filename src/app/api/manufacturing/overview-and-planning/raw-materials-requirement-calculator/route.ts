@@ -223,6 +223,78 @@ export async function GET(req: Request) {
             return NextResponse.json(versions);
         }
 
+        if (action === "units") {
+            const productIdStr = searchParams.get("productId");
+            if (!productIdStr) {
+                return NextResponse.json({ error: "Missing productId query parameter" }, { status: 400 });
+            }
+            const productId = parseInt(productIdStr, 10);
+
+            // Fetch the target product to get its unit_of_measurement, unit_of_measurement_count, and parent_id
+            const prodRes = await fetch(
+                `${DIRECTUS_URL}/items/products/${productId}?fields=product_id,parent_id,unit_of_measurement,unit_of_measurement_count`,
+                { headers, cache: "no-store" }
+            );
+
+            if (!prodRes.ok) {
+                return NextResponse.json([]);
+            }
+
+            const targetProd = (await prodRes.json()).data;
+            const parentId = targetProd.parent_id ? Number(targetProd.parent_id) : Number(targetProd.product_id);
+
+            // Query product itself and any sibling/child packaging variants under the same parent
+            const filter = encodeURIComponent(
+                JSON.stringify({
+                    _or: [
+                        { product_id: { _eq: parentId } },
+                        { parent_id: { _eq: parentId } },
+                        { product_id: { _eq: productId } }
+                    ]
+                })
+            );
+
+            const [relatedRes, allUnitsRes] = await Promise.all([
+                fetch(`${DIRECTUS_URL}/items/products?filter=${filter}&fields=product_id,unit_of_measurement,unit_of_measurement_count&limit=-1`, { headers, cache: "no-store" }),
+                fetch(`${DIRECTUS_URL}/items/units?limit=-1`, { headers, cache: "no-store" })
+            ]);
+
+            const relatedProds = relatedRes.ok ? (await relatedRes.json()).data || [] : [targetProd];
+            const rawUnits: DirectusUnit[] = allUnitsRes.ok ? (await allUnitsRes.json()).data || [] : [];
+            const unitMap = new Map<number, DirectusUnit>(rawUnits.map(u => [Number(u.unit_id), u]));
+
+            // Build unique map of units for this product family
+            const unitsResult: { unitId: number; unitName: string; unitShortcut: string; multiplier: number; isBase: boolean }[] = [];
+            const seenUnitIds = new Set<number>();
+
+            for (const p of relatedProds) {
+                const uomId = typeof p.unit_of_measurement === "object" && p.unit_of_measurement !== null
+                    ? Number(p.unit_of_measurement.unit_id)
+                    : Number(p.unit_of_measurement || 0);
+
+                if (uomId > 0 && !seenUnitIds.has(uomId)) {
+                    seenUnitIds.add(uomId);
+                    const uObj = unitMap.get(uomId);
+                    const count = Number(p.unit_of_measurement_count || 1);
+                    const multiplier = Number.isFinite(count) && count > 0 ? count : 1;
+                    const isBase = multiplier === 1 || Number(p.product_id) === parentId;
+
+                    unitsResult.push({
+                        unitId: uomId,
+                        unitName: uObj?.unit_name || `Unit #${uomId}`,
+                        unitShortcut: uObj?.unit_shortcut || uObj?.unit_name || `U#${uomId}`,
+                        multiplier,
+                        isBase
+                    });
+                }
+            }
+
+            // Sort: Base unit first, then ascending by multiplier
+            unitsResult.sort((a, b) => a.multiplier - b.multiplier);
+
+            return NextResponse.json(unitsResult);
+        }
+
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     } catch (e) {
         console.error("GET calculator error:", e);
@@ -405,19 +477,55 @@ export async function POST(req: Request) {
             onhandMap.set(pid, current + Number(item.onhandQuantity || 0));
         }
 
-        // 6. Base Quantity & Scaling Factor Calculation
+        // 6. Base Quantity, Packaging Multiplier & Scaling Factor Calculation
         const baseQty = Number(versionData.base_quantity);
         if (!Number.isFinite(baseQty) || baseQty <= 0) {
             return NextResponse.json({ error: "Invalid BOM base quantity in master data." }, { status: 400 });
         }
 
-        // Check if unit conversion or density conversion is needed between target and BOM
         const bomUomId = Number(versionData.uom_id);
         const selectedTargetUomId = targetUomId ? Number(targetUomId) : bomUomId;
-        let effectiveTargetQty = targetQtyNum;
 
-        // Apply density or scale if target UOM differs from BOM base UOM
-        if (selectedTargetUomId !== bomUomId) {
+        // Check if selected target UOM is a packaged unit (e.g. Case of 24)
+        let packagingMultiplier = 1;
+        const parentId = (prodData as unknown as { parent_id?: number | null }).parent_id
+            ? Number((prodData as unknown as { parent_id?: number | null }).parent_id)
+            : Number(prodData.product_id);
+
+        const relatedFilter = encodeURIComponent(
+            JSON.stringify({
+                _or: [
+                    { product_id: { _eq: parentId } },
+                    { parent_id: { _eq: parentId } },
+                    { product_id: { _eq: productId } }
+                ]
+            })
+        );
+        const relatedRes = await fetch(
+            `${DIRECTUS_URL}/items/products?filter=${relatedFilter}&fields=product_id,unit_of_measurement,unit_of_measurement_count&limit=-1`,
+            { headers, cache: "no-store" }
+        );
+        if (relatedRes.ok) {
+            const familyProds = (await relatedRes.json()).data || [];
+            const matchedFamily = familyProds.find((fp: { unit_of_measurement: unknown; unit_of_measurement_count?: number }) => {
+                const uId = typeof fp.unit_of_measurement === "object" && fp.unit_of_measurement !== null
+                    ? Number((fp.unit_of_measurement as { unit_id: number }).unit_id)
+                    : Number(fp.unit_of_measurement || 0);
+                return uId === selectedTargetUomId;
+            });
+            if (matchedFamily && matchedFamily.unit_of_measurement_count) {
+                const count = Number(matchedFamily.unit_of_measurement_count);
+                if (Number.isFinite(count) && count > 0) {
+                    packagingMultiplier = count;
+                }
+            }
+        }
+
+        // Multiply by packaging unit count (e.g. 100 cases * 24 pcs/case = 2400 effective base units)
+        let effectiveTargetQty = targetQtyNum * packagingMultiplier;
+
+        // Apply density or scale if target UOM differs in mass/volume from BOM base UOM
+        if (selectedTargetUomId !== bomUomId && packagingMultiplier === 1) {
             const targetUomObj = unitMap.get(selectedTargetUomId);
             const baseUomObj = unitMap.get(bomUomId);
             const targetShortcut = (targetUomObj?.unit_shortcut || "").toUpperCase();
@@ -426,10 +534,8 @@ export async function POST(req: Request) {
 
             // e.g., Target in Liters, Base in MT
             if ((targetShortcut === "L" || targetShortcut === "LITERS") && (baseShortcut === "MT" || baseShortcut === "METRIC TON")) {
-                // Mass (MT) = Volume (L) * density / 1000
                 effectiveTargetQty = (targetQtyNum * density) / 1000;
             } else if ((targetShortcut === "MT" || targetShortcut === "METRIC TON") && (baseShortcut === "L" || baseShortcut === "LITERS")) {
-                // Volume (L) = Mass (MT) * 1000 / density
                 effectiveTargetQty = (targetQtyNum * 1000) / (density || 1);
             } else if ((targetShortcut === "KG" || targetShortcut === "KILOGRAM") && (baseShortcut === "MT" || baseShortcut === "METRIC TON")) {
                 effectiveTargetQty = targetQtyNum / 1000;
@@ -542,6 +648,7 @@ export async function POST(req: Request) {
             targetQuantity: targetQtyNum,
             targetUomId: selectedTargetUomId,
             targetUomShortcut: unitMap.get(selectedTargetUomId)?.unit_shortcut || "Units",
+            effectiveTargetQuantity: effectiveTargetQty,
             finishedGood: {
                 productId: Number(prodData.product_id),
                 productName: prodData.product_name,
@@ -559,6 +666,8 @@ export async function POST(req: Request) {
             assumptions: {
                 scalingFactor,
                 appliedDensityFactor: prodData.density_factor ? Number(prodData.density_factor) : undefined,
+                packagingMultiplier,
+                effectiveBaseQuantity: effectiveTargetQty,
                 expectedYieldPercentage: Number(versionData.expected_yield_percentage || 100),
                 calculationTimestamp: new Date().toISOString(),
                 disclaimer: "Simulation estimation only. Does not reserve stock, generate Job Orders, or guarantee plant workstation/labor capacity.",

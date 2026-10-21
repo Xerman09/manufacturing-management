@@ -75,6 +75,11 @@ export const CalculationSummaryBanner: React.FC<CalculationSummaryBannerProps> =
                             {verdictConfig.subtitle} Target output:{" "}
                             <span className="font-semibold text-foreground">
                                 {targetQuantity.toLocaleString()} {targetUomShortcut}
+                                {result.assumptions.packagingMultiplier && result.assumptions.packagingMultiplier > 1 ? (
+                                    <span className="font-mono text-primary font-bold ml-1">
+                                        (equiv. to {((result.effectiveTargetQuantity || (targetQuantity * result.assumptions.packagingMultiplier))).toLocaleString()} {finishedGood.baseUomShortcut || "Base Units"})
+                                    </span>
+                                ) : null}
                             </span>{" "}
                             of {finishedGood.productName} ({finishedGood.productCode})
                         </p>

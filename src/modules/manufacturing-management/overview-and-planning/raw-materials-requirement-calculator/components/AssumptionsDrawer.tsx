@@ -105,6 +105,14 @@ export const AssumptionsDrawer: React.FC<AssumptionsDrawerProps> = ({
                                     {targetQuantity.toLocaleString()} {targetUomShortcut}
                                 </span>
                             </div>
+                            {assumptions.packagingMultiplier && assumptions.packagingMultiplier > 1 && (
+                                <div className="flex items-center justify-between">
+                                    <span>Packaging Unit Multiplier:</span>
+                                    <span className="font-mono font-semibold text-primary">
+                                        1 {targetUomShortcut} = {assumptions.packagingMultiplier} {finishedGood.baseUomShortcut || "Base Units"}
+                                    </span>
+                                </div>
+                            )}
                             <div className="flex items-center justify-between">
                                 <span>Derived Scaling Factor:</span>
                                 <span className="font-mono font-semibold text-foreground">

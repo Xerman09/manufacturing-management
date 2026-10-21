@@ -88,10 +88,16 @@ export const TargetEntryCard: React.FC<TargetEntryCardProps> = ({
 
     // 4. Units Dropdown Options
     const unitOptions: SearchableSelectOption[] = useMemo(() => {
-        return units.map((u) => ({
-            value: String(u.unitId),
-            label: `${u.unitName} (${u.unitShortcut})`,
-        }));
+        return units.map((u) => {
+            const hasMultiplier = u.multiplier && u.multiplier > 1;
+            const label = hasMultiplier
+                ? `${u.unitName} (${u.unitShortcut} - ${u.multiplier} Base Units)`
+                : `${u.unitName} (${u.unitShortcut})`;
+            return {
+                value: String(u.unitId),
+                label,
+            };
+        });
     }, [units]);
 
     const canCalculate =
