@@ -60,3 +60,4 @@ public/men2.png
 scripts/check-onhand.js
 scripts/check-doc.js
 /scripts
+*.mjs
