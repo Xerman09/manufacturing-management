@@ -9,6 +9,7 @@ import {
     RotateCcw,
     Scale,
     Sparkles,
+    Ruler,
 } from "lucide-react";
 import {
     ProductOption,
@@ -37,7 +38,7 @@ interface TargetEntryCardProps {
     onVersionChange: (id: string) => void;
     onBranchChange: (id: string) => void;
     onTargetQuantityChange: (qty: string) => void;
-    onUomChange: (uomId: string) => void;
+    onUomChange?: (uomId: string) => void;
     onCalculate: () => void;
     onReset: () => void;
 }
@@ -58,7 +59,6 @@ export const TargetEntryCard: React.FC<TargetEntryCardProps> = ({
     onVersionChange,
     onBranchChange,
     onTargetQuantityChange,
-    onUomChange,
     onCalculate,
     onReset,
 }) => {
@@ -86,19 +86,18 @@ export const TargetEntryCard: React.FC<TargetEntryCardProps> = ({
         }));
     }, [branches]);
 
-    // 4. Units Dropdown Options
-    const unitOptions: SearchableSelectOption[] = useMemo(() => {
-        return units.map((u) => {
-            const hasMultiplier = u.multiplier && u.multiplier > 1;
-            const label = hasMultiplier
-                ? `${u.unitName} (${u.unitShortcut} - ${u.multiplier} Base Units)`
-                : `${u.unitName} (${u.unitShortcut})`;
-            return {
-                value: String(u.unitId),
-                label,
-            };
-        });
-    }, [units]);
+    // 4. Units Dropdown Options & Selected Unit Label
+    const selectedUnitLabel = useMemo(() => {
+        const foundUnit = units.find((u) => String(u.unitId) === String(selectedUomId));
+        if (foundUnit) {
+            return foundUnit.unitShortcut || foundUnit.unitName;
+        }
+        const foundProd = products.find((p) => String(p.productId) === String(selectedProductId));
+        if (foundProd) {
+            return foundProd.unitShortcut || "Unit";
+        }
+        return "Unit";
+    }, [units, selectedUomId, products, selectedProductId]);
 
     const canCalculate =
         Boolean(selectedProductId) &&
@@ -144,7 +143,7 @@ export const TargetEntryCard: React.FC<TargetEntryCardProps> = ({
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.8fr)_minmax(0,1.8fr)_minmax(0,1.4fr)_minmax(0,1fr)_90px] gap-3.5 items-end">
                 {/* 1. Finished Good Product */}
                 <div className="min-w-0 space-y-1.5">
                     <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
@@ -203,14 +202,14 @@ export const TargetEntryCard: React.FC<TargetEntryCardProps> = ({
                     </div>
                 </div>
 
-                {/* 4. Target Output Quantity & UOM */}
+                {/* 4. Target Output Quantity */}
                 <div className="min-w-0 space-y-1.5">
                     <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                         <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
                         <span className="truncate">Target Output</span>
                         <span className="text-destructive">*</span>
                     </label>
-                    <div className="flex items-center gap-1.5 min-w-0 w-full">
+                    <div className="w-full min-w-0">
                         <input
                             type="number"
                             min="0.0001"
@@ -218,17 +217,26 @@ export const TargetEntryCard: React.FC<TargetEntryCardProps> = ({
                             value={targetQuantity}
                             onChange={(e) => onTargetQuantityChange(e.target.value)}
                             placeholder="e.g. 100"
-                            className="min-w-0 flex-1 h-9 rounded-md border border-input bg-background px-2.5 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         />
-                        <div className="w-24 shrink-0">
-                            <SearchableSelect
-                                options={unitOptions}
-                                value={selectedUomId}
-                                onValueChange={onUomChange}
-                                placeholder="UOM"
-                                className="h-9 text-xs w-full"
-                            />
-                        </div>
+                    </div>
+                </div>
+
+                {/* 5. Unit Parameter (Non-editable, reflects selected FG product) */}
+                <div className="min-w-0 space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <Ruler className="h-3.5 w-3.5 text-primary shrink-0" />
+                        <span className="truncate">Unit</span>
+                    </label>
+                    <div className="w-full min-w-0">
+                        <input
+                            type="text"
+                            readOnly
+                            disabled
+                            value={selectedUnitLabel}
+                            title={`Unit of measurement: ${selectedUnitLabel}`}
+                            className="w-full h-9 px-2.5 rounded-md border border-input bg-muted/60 text-muted-foreground font-semibold text-xs px-3 py-1 shadow-xs cursor-not-allowed select-none"
+                        />
                     </div>
                 </div>
             </div>

@@ -157,6 +157,14 @@ export default function StockProjectionTable({
                                     </div>
                                     <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground font-mono mt-0.5">
                                         <span>{item.product_code}</span>
+                                        {item.product_type_name && (
+                                            <>
+                                                <span>•</span>
+                                                <span className="text-primary/80 font-medium">
+                                                    {item.product_type_name}
+                                                </span>
+                                            </>
+                                        )}
                                         {item.category_name && (
                                             <>
                                                 <span>•</span>
