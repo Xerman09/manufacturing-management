@@ -125,7 +125,7 @@ export async function GET(request: Request) {
         ).then(async (res) => (res.ok ? ((await res.json()).data as DirectusProductTypeRaw[]) : []));
 
         const productsPromise = fetch(
-            `${DIRECTUS_URL}/items/products?filter[isActive][_eq]=1&limit=-1&fields=product_id,product_code,product_name,description,product_type.id,product_type.name,product_category.category_id,product_category.category_name,unit_of_measurement.unit_id,unit_of_measurement.unit_name,unit_of_measurement.unit_shortcut&_t=${timestamp}`,
+            `${DIRECTUS_URL}/items/products?filter[isActive][_eq]=1&limit=-1&fields=product_id,product_code,product_name,description,product_type,product_category.category_id,product_category.category_name,unit_of_measurement.unit_id,unit_of_measurement.unit_name,unit_of_measurement.unit_shortcut&_t=${timestamp}`,
             { headers: directusHeaders, cache: "no-store" }
         ).then(async (res) => (res.ok ? ((await res.json()).data as DirectusProductRaw[]) : []));
 
@@ -343,19 +343,32 @@ export async function GET(request: Request) {
 
         const displayBranchIds = selectedBranchIds.length > 0 ? selectedBranchIds : branches.map((b) => b.id);
 
+        // Build map for Product Types by ID
+        const productTypeMap = new Map<number, string>();
+        for (const pt of rawProductTypes) {
+            productTypeMap.set(Number(pt.id), pt.name);
+        }
+
         for (const p of rawProducts) {
             const pId = Number(p.product_id);
             if (!pId) continue;
 
-            const productTypeObj = typeof p.product_type === "object" ? p.product_type : null;
-            const categoryObj = typeof p.product_category === "object" ? p.product_category : null;
-            const uomObj = typeof p.unit_of_measurement === "object" ? p.unit_of_measurement : null;
+            const productTypeObj = typeof p.product_type === "object" && p.product_type !== null ? p.product_type : null;
+            const productTypeId = productTypeObj ? Number(productTypeObj.id) : (typeof p.product_type === "number" ? p.product_type : null);
+            const categoryObj = typeof p.product_category === "object" && p.product_category !== null ? p.product_category : null;
+            const uomObj = typeof p.unit_of_measurement === "object" && p.unit_of_measurement !== null ? p.unit_of_measurement : null;
 
             const displayName = String(p.product_name || p.description || `Product #${pId}`).trim();
             const displayCode = String(p.product_code || `P-${pId}`).trim();
             const uomShortcut = uomObj?.unit_shortcut || "PCS";
             const categoryName = categoryObj?.category_name || null;
-            const productTypeName = productTypeObj?.name || "Raw Material";
+
+            // Resolve real product type name from object or from productTypeMap via ID
+            const resolvedTypeName =
+                productTypeObj?.name ||
+                (productTypeId ? productTypeMap.get(productTypeId) : null) ||
+                (productTypeId === 389 ? "Raw Materials" : productTypeId === 390 ? "Packaging Items" : productTypeId === 388 ? "Finished Goods" : "Other");
+            const productTypeName = resolvedTypeName;
 
             for (const bId of displayBranchIds) {
                 const branchName = branchMap.get(bId) || `Branch #${bId}`;
@@ -402,7 +415,7 @@ export async function GET(request: Request) {
                     product_id: pId,
                     product_code: displayCode,
                     product_name: displayName,
-                    product_type_id: productTypeObj?.id ?? null,
+                    product_type_id: productTypeId,
                     product_type_name: productTypeName,
                     category_name: categoryName,
                     unit_id: uomObj?.unit_id ?? null,
