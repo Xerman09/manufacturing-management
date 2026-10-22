@@ -115,6 +115,7 @@ export function MilestoneTimelineModal({ isOpen, onClose, order }: MilestoneTime
                         <div className="relative pl-6 space-y-6 before:absolute before:left-3 before:top-2 before:bottom-2 before:w-0.5 before:bg-border">
                             {order.milestones.map((m) => {
                                 const isRecorded = Boolean(m.timestamp);
+                                const isBypassed = m.status === "Bypassed";
                                 const stageDur = order.stages.find((s) => s.fromStage === m.stage);
 
                                 return (
@@ -124,11 +125,15 @@ export function MilestoneTimelineModal({ isOpen, onClose, order }: MilestoneTime
                                             className={`absolute -left-6 top-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
                                                 isRecorded
                                                     ? "bg-emerald-500 border-background text-white shadow-sm"
+                                                    : isBypassed
+                                                    ? "bg-muted border-border text-muted-foreground"
                                                     : "bg-background border-border text-muted-foreground border-dashed"
                                             }`}
                                         >
                                             {isRecorded ? (
                                                 <CheckCircle2 className="w-3.5 h-3.5" />
+                                            ) : isBypassed ? (
+                                                <span className="text-[9px] font-bold">N/A</span>
                                             ) : (
                                                 <Clock className="w-3 h-3 text-muted-foreground" />
                                             )}
@@ -139,15 +144,26 @@ export function MilestoneTimelineModal({ isOpen, onClose, order }: MilestoneTime
                                             className={`p-3.5 rounded-xl border text-xs transition-all ${
                                                 isRecorded
                                                     ? "bg-card border-border shadow-sm text-foreground"
+                                                    : isBypassed
+                                                    ? "bg-muted/10 border-border/50 text-muted-foreground opacity-75"
                                                     : "bg-muted/20 border-dashed border-border text-muted-foreground"
                                             }`}
                                         >
                                             <div className="flex items-center justify-between gap-2">
-                                                <div className="font-bold text-foreground text-sm">
-                                                    {m.stageName}
+                                                <div className="font-bold text-foreground text-sm flex items-center gap-2">
+                                                    <span>{m.stageName}</span>
+                                                    {isBypassed && (
+                                                        <span className="text-[10px] font-normal px-1.5 py-0.2 rounded bg-muted text-muted-foreground border border-border">
+                                                            Direct Fulfillment
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <div className="text-muted-foreground font-mono text-[11px]">
-                                                    {m.timestamp ? new Date(m.timestamp).toLocaleString() : "Pending Event"}
+                                                    {m.timestamp
+                                                        ? new Date(m.timestamp).toLocaleString()
+                                                        : isBypassed
+                                                        ? "Not Applicable"
+                                                        : "Pending Event"}
                                                 </div>
                                             </div>
 

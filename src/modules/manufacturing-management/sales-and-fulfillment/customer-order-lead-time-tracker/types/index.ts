@@ -19,7 +19,7 @@ export interface LifecycleMilestone {
     recordedBy?: string | number | null;
     referenceDocumentNo?: string;
     referenceModule?: string;
-    status: "Completed" | "Pending" | "Skipped" | "Reversed";
+    status: "Completed" | "Pending" | "Skipped" | "Bypassed" | "Reversed";
     remarks?: string;
 }
 

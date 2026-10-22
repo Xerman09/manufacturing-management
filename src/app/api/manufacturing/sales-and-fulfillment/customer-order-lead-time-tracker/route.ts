@@ -219,7 +219,7 @@ export async function GET(req: NextRequest) {
                     stage: "FOR_APPROVAL",
                     stageName: "Submitted for Approval",
                     timestamp: forApprovalTimeStr,
-                    status: forApprovalTimeStr ? "Completed" : (isCompleted ? "Skipped" : "Pending"),
+                    status: forApprovalTimeStr ? "Completed" : (isCompleted ? "Bypassed" : "Pending"),
                     referenceDocumentNo: order.order_no,
                     referenceModule: "Sales Order",
                 },
@@ -228,7 +228,7 @@ export async function GET(req: NextRequest) {
                     stage: "APPROVED_FOR_CONSOLIDATION",
                     stageName: "Approved for Fulfillment",
                     timestamp: approvalTimeStr,
-                    status: approvalTimeStr ? "Completed" : (isCompleted ? "Skipped" : "Pending"),
+                    status: approvalTimeStr ? "Completed" : (isCompleted ? "Bypassed" : "Pending"),
                     referenceDocumentNo: order.order_no,
                     referenceModule: "Sales Order",
                 },
@@ -237,7 +237,7 @@ export async function GET(req: NextRequest) {
                     stage: "CONSOLIDATION_PLANNED",
                     stageName: "Consolidation Planned",
                     timestamp: consolidationTimeStr,
-                    status: consolidationTimeStr ? "Completed" : (isCompleted ? "Skipped" : "Pending"),
+                    status: consolidationTimeStr ? "Completed" : (isCompleted ? "Bypassed" : "Pending"),
                     referenceDocumentNo: order.order_no,
                     referenceModule: "Consolidation",
                 },
@@ -246,7 +246,7 @@ export async function GET(req: NextRequest) {
                     stage: "PICKING_COMPLETED",
                     stageName: "Picking Completed",
                     timestamp: pickingTimeStr,
-                    status: pickingTimeStr ? "Completed" : (isCompleted ? "Skipped" : "Pending"),
+                    status: pickingTimeStr ? "Completed" : (isCompleted ? "Bypassed" : "Pending"),
                     referenceDocumentNo: order.order_no,
                     referenceModule: "Picking & Staging",
                 },
@@ -255,7 +255,7 @@ export async function GET(req: NextRequest) {
                     stage: "INVOICED",
                     stageName: "Invoiced",
                     timestamp: invoicingTimeStr,
-                    status: invoicingTimeStr ? "Completed" : (isCompleted ? "Skipped" : "Pending"),
+                    status: invoicingTimeStr ? "Completed" : (isCompleted ? "Bypassed" : "Pending"),
                     referenceDocumentNo: earliestInvoice?.invoice_no || undefined,
                     referenceModule: "Invoicing",
                 },
@@ -264,7 +264,7 @@ export async function GET(req: NextRequest) {
                     stage: "DISPATCHED",
                     stageName: "Dispatched",
                     timestamp: dispatchTimeStr,
-                    status: dispatchTimeStr ? "Completed" : (isCompleted ? "Skipped" : "Pending"),
+                    status: dispatchTimeStr ? "Completed" : (isCompleted ? "Bypassed" : "Pending"),
                     referenceDocumentNo: earliestInvoice?.invoice_no || undefined,
                     referenceModule: "Logistics Dispatch",
                 },
@@ -293,29 +293,35 @@ export async function GET(req: NextRequest) {
             const missingMilestonesList: string[] = [];
             let hasNegativeDurations = false;
 
-            for (let i = 0; i < milestones.length - 1; i++) {
-                const curr = milestones[i];
-                const next = milestones[i + 1];
+            // Only track elapsed durations between milestones that actually took place
+            const recordedMilestones = milestones.filter((m) => Boolean(m.timestamp));
+            for (let i = 0; i < recordedMilestones.length - 1; i++) {
+                const curr = recordedMilestones[i];
+                const next = recordedMilestones[i + 1];
 
-                if (curr.timestamp && next.timestamp) {
-                    const fromT = new Date(curr.timestamp).getTime();
-                    const toT = new Date(next.timestamp).getTime();
-                    const diffHours = (toT - fromT) / (1000 * 60 * 60);
-                    const isNeg = diffHours < 0;
-                    if (isNeg) hasNegativeDurations = true;
+                const fromT = new Date(curr.timestamp as string).getTime();
+                const toT = new Date(next.timestamp as string).getTime();
+                const diffHours = (toT - fromT) / (1000 * 60 * 60);
+                const isNeg = diffHours < 0;
+                if (isNeg) hasNegativeDurations = true;
 
-                    stages.push({
-                        fromStage: curr.stage,
-                        toStage: next.stage,
-                        stageLabel: `${curr.stageName} → ${next.stageName}`,
-                        durationHours: Math.round(diffHours * 10) / 10,
-                        durationFormatted: formatHumanDuration(diffHours),
-                        isNegative: isNeg,
-                        isDelayed: diffHours > 48,
-                    });
-                } else if (isCompleted && !curr.timestamp) {
-                    missingMilestonesList.push(curr.stageName);
-                }
+                stages.push({
+                    fromStage: curr.stage,
+                    toStage: next.stage,
+                    stageLabel: `${curr.stageName} → ${next.stageName}`,
+                    durationHours: Math.round(diffHours * 10) / 10,
+                    durationFormatted: formatHumanDuration(diffHours),
+                    isNegative: isNeg,
+                    isDelayed: diffHours > 48,
+                });
+            }
+
+            // A truly missing milestone anomaly only occurs if a completed order has no creation date or no delivery date at all
+            if (isCompleted && !finalDeliveryTimeStr) {
+                missingMilestonesList.push("Final Delivery Confirmation");
+            }
+            if (!creationTimeStr) {
+                missingMilestonesList.push("Order Created");
             }
 
             // Determine reporting status
