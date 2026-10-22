@@ -38,7 +38,7 @@ interface TargetEntryCardProps {
     onVersionChange: (id: string) => void;
     onBranchChange: (id: string) => void;
     onTargetQuantityChange: (qty: string) => void;
-    onUomChange: (uomId: string) => void;
+    onUomChange?: (uomId: string) => void;
     onCalculate: () => void;
     onReset: () => void;
 }
@@ -59,7 +59,6 @@ export const TargetEntryCard: React.FC<TargetEntryCardProps> = ({
     onVersionChange,
     onBranchChange,
     onTargetQuantityChange,
-    onUomChange,
     onCalculate,
     onReset,
 }) => {

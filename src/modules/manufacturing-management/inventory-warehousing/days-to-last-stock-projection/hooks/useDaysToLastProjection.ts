@@ -61,14 +61,15 @@ export function useDaysToLastProjection() {
         }
     }, []);
 
+    const { branch_id, assessment_window_months, working_days_per_month } = filters;
     useEffect(() => {
-        loadData(filters);
-    }, [
-        loadData,
-        filters.branch_id,
-        filters.assessment_window_months,
-        filters.working_days_per_month,
-    ]);
+        loadData({
+            ...DEFAULT_FILTERS,
+            branch_id,
+            assessment_window_months,
+            working_days_per_month,
+        });
+    }, [loadData, branch_id, assessment_window_months, working_days_per_month]);
 
     // Apply client-side filters instantly without refetching for fast response
     const filteredItems = useMemo(() => {
@@ -141,7 +142,7 @@ export function useDaysToLastProjection() {
     }, []);
 
     const handleExport = useCallback(() => {
-        if (items.length === 0) {
+        if (filteredItems.length === 0) {
             toast.warning("No projection data available to export");
             return;
         }
@@ -162,7 +163,7 @@ export function useDaysToLastProjection() {
             "Status",
         ];
 
-        const rows = items.map((i) => [
+        const rows = filteredItems.map((i) => [
             `"${i.product_code}"`,
             `"${i.product_name}"`,
             `"${i.category_name || ""}"`,
