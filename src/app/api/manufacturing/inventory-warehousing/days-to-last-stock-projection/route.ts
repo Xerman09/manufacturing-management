@@ -115,7 +115,7 @@ export async function GET(request: Request) {
 
         // 2. Query Master Data (Branches, Products, Product Types) in Parallel
         const branchesPromise = fetch(
-            `${DIRECTUS_URL}/items/branches?filter[isActive][_eq]=1&filter[isBadStock][_eq]=0&limit=-1&sort=branch_name&fields=id,branch_name,branch_code,isActive,isBadStock&_t=${timestamp}`,
+            `${DIRECTUS_URL}/items/branches?filter[isActive][_eq]=1&limit=-1&sort=branch_name&fields=id,branch_name,branch_code,isActive,isBadStock&_t=${timestamp}`,
             { headers: directusHeaders, cache: "no-store" }
         ).then(async (res) => (res.ok ? ((await res.json()).data as DirectusBranchRaw[]) : []));
 
