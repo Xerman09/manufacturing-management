@@ -1,24 +1,72 @@
 import React from "react";
-import { ClipboardList, Database, Layers, AlertTriangle } from "lucide-react";
+import { AlertTriangle, ClipboardList, Database, Layers } from "lucide-react";
+import { formatPlanningLastUpdated } from "./PlanningDataStatus";
+
+export interface PlanningMetricLoadState {
+    loading: boolean;
+    error: string | null;
+    lastUpdatedAt: string | null;
+}
+
+export type PlanningBranchState = "loading" | "error" | "none" | "unselected" | "selected";
 
 export interface PlanningSummaryCardsProps {
     demandLinesCount: number;
     shortfallItemsCount: number | null;
-    unreleasedJobsCount: number;
-    familyGroupsCount: number;
+    queueJobOrdersCount: number;
+    queueEntriesCount: number;
+    branchState: PlanningBranchState;
+    demandState: PlanningMetricLoadState;
+    requirementsState: PlanningMetricLoadState;
+    queueState: PlanningMetricLoadState;
     onSelectTab?: (tab: "demand" | "inventory" | "queue") => void;
 }
 
 type SummaryDestination = "demand" | "inventory" | "queue";
 
+function metricDisplay(
+    count: number | null,
+    state: PlanningMetricLoadState,
+    branchState: PlanningBranchState,
+    loadingLabel = "Loading results..."
+) {
+    if (branchState === "loading") return { value: "Loading...", description: "Loading target branches." };
+    if (branchState === "error") return { value: "Unavailable", description: "Target branches could not be loaded." };
+    if (branchState === "none") return { value: "—", description: "No active target branches are available." };
+    if (branchState === "unselected") return { value: "—", description: "Select a target branch to view results." };
+    if (state.error && !state.lastUpdatedAt) return { value: "Unavailable", description: "Request failed. Open this section to retry." };
+    if (state.loading && !state.lastUpdatedAt) return { value: loadingLabel, description: "Results are being calculated." };
+    if (count === null) return { value: "Unavailable", description: "Results are not available." };
+
+    const updatedAt = state.lastUpdatedAt ? formatPlanningLastUpdated(state.lastUpdatedAt) : null;
+    const description = state.error && updatedAt
+        ? `Refresh failed. Showing data last updated ${updatedAt}.`
+        : state.loading && updatedAt
+            ? `Refreshing. Last updated ${updatedAt}.`
+            : updatedAt
+                ? `Last updated ${updatedAt}.`
+                : "Results are not available yet.";
+
+    return { value: count.toLocaleString(), description };
+}
+
 export function PlanningSummaryCards({
     demandLinesCount,
     shortfallItemsCount,
-    unreleasedJobsCount,
-    familyGroupsCount,
+    queueJobOrdersCount,
+    queueEntriesCount,
+    branchState,
+    demandState,
+    requirementsState,
+    queueState,
     onSelectTab
 }: PlanningSummaryCardsProps) {
-    const hasShortfallCount = shortfallItemsCount !== null;
+    const demand = metricDisplay(demandLinesCount, demandState, branchState, "Loading demand...");
+    const shortfalls = metricDisplay(shortfallItemsCount, requirementsState, branchState, "Calculating...");
+    const jobOrders = metricDisplay(queueJobOrdersCount, queueState, branchState, "Loading Job Order queue...");
+    const queueEntries = metricDisplay(queueEntriesCount, queueState, branchState, "Loading Job Order queue...");
+    const hasShortfallCount = shortfallItemsCount !== null && branchState === "selected"
+        && (!requirementsState.loading || Boolean(requirementsState.lastUpdatedAt));
     const hasShortfalls = hasShortfallCount && shortfallItemsCount > 0;
 
     const renderCard = (
@@ -32,9 +80,7 @@ export function PlanningSummaryCards({
             onSelectTab ? `cursor-pointer ${hoverClassName}` : ""
         }`;
 
-        if (!onSelectTab) {
-            return <div className={className}>{content}</div>;
-        }
+        if (!onSelectTab) return <div className={className}>{content}</div>;
 
         return (
             <button
@@ -48,104 +94,91 @@ export function PlanningSummaryCards({
         );
     };
 
-    const shortfallCountLabel = shortfallItemsCount === null
-        ? "count unavailable"
-        : `${shortfallItemsCount.toLocaleString()} ${shortfallItemsCount === 1 ? "item" : "items"}`;
-
     return (
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            {/* Card 1: Residual planning demand */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
             {renderCard(
                 "demand",
-                `View Schedulable SO Demand: ${demandLinesCount.toLocaleString()} demand ${demandLinesCount === 1 ? "line" : "lines"}. Open the Demand tab.`,
+                `View schedulable Sales Order demand: ${demand.value}. Open the Demand tab.`,
                 "hover:border-primary/50 hover:shadow-md",
                 "",
                 <>
                     <span className="block min-w-0 space-y-1" title="Unfulfilled Sales Order lines for the selected branch.">
-                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">
-                            Schedulable SO Demand
-                        </span>
-                        <span className="block text-xl font-black text-foreground sm:text-2xl">
-                            {demandLinesCount.toLocaleString()}
-                        </span>
+                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">Schedulable SO Demand</span>
+                        <span className="block text-xl font-black text-foreground sm:text-2xl">{demand.value}</span>
+                        {branchState === "selected" && demandState.lastUpdatedAt && (
+                            <span className="block text-[9px] text-muted-foreground sm:text-[10px]">Residual demand ready for JO planning.</span>
+                        )}
                         <span className="block text-[9px] text-muted-foreground sm:text-[10px]">
-                            Residual demand ready for JO planning
+                            {demand.description}
                         </span>
                     </span>
-                    <span aria-hidden="true" className="h-8 w-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0 sm:h-10 sm:w-10">
+                    <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary sm:h-10 sm:w-10">
                         <ClipboardList className="h-5 w-5" />
                     </span>
                 </>
             )}
 
-            {/* Card 2: Net Shortfall Items */}
             {renderCard(
                 "inventory",
-                `View Material Shortfalls: ${shortfallCountLabel}. Open the Net Requirements tab.`,
+                `View product and sub-assembly shortfalls: ${shortfalls.value}. Open the Net Requirements tab.`,
                 "hover:border-amber-500/50 hover:shadow-md",
                 hasShortfalls ? "border-amber-500/30 bg-amber-500/5" : "",
                 <>
-                    <span className="block min-w-0 space-y-1" title="Net requirement items that need purchasing or replenishment.">
-                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">
-                            Material Shortfalls
-                        </span>
+                    <span className="block min-w-0 space-y-1" title="Schedulable Sales Order products and mapped BOM components with a calculated shortfall. Raw material requirements are not included.">
+                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">Product &amp; Sub-assembly Shortfalls</span>
                         <span className={`block text-xl font-black sm:text-2xl ${hasShortfalls ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
-                            {hasShortfallCount ? shortfallItemsCount.toLocaleString() : "—"}
+                            {hasShortfallCount ? shortfallItemsCount!.toLocaleString() : shortfalls.value}
                         </span>
                         <span className="block text-[9px] text-muted-foreground sm:text-[10px]">
-                            {hasShortfallCount ? "Items needing PR or replenishment" : "Requirements calculation unavailable"}
+                            {hasShortfallCount && shortfallItemsCount === 0
+                                ? `No product or mapped component shortfalls. ${shortfalls.description}`
+                                : hasShortfallCount
+                                    ? `Affected product/component rows, not units. Raw materials are excluded. ${shortfalls.description}`
+                                    : shortfalls.description}
                         </span>
                     </span>
-                    <span aria-hidden="true" className={`h-8 w-8 rounded-xl flex items-center justify-center shrink-0 sm:h-10 sm:w-10 ${hasShortfalls ? "bg-amber-500/10 border border-amber-500/20 text-amber-500" : "bg-muted border text-muted-foreground"}`}>
+                    <span aria-hidden="true" className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border sm:h-10 sm:w-10 ${hasShortfalls ? "border-amber-500/20 bg-amber-500/10 text-amber-500" : "bg-muted text-muted-foreground"}`}>
                         {hasShortfalls ? <AlertTriangle className="h-5 w-5" /> : <Database className="h-5 w-5" />}
                     </span>
                 </>
             )}
 
-            {/* Card 3: Unreleased Job Orders */}
             {renderCard(
                 "queue",
-                `View Job Order Queue: ${unreleasedJobsCount.toLocaleString()} ${unreleasedJobsCount === 1 ? "Job Order" : "Job Orders"}. Open the queue tab.`,
+                `View Job Order queue: ${jobOrders.value} individual Job Orders. Open the queue tab.`,
                 "hover:border-sky-500/50 hover:shadow-md",
                 "",
                 <>
-                    <span className="block min-w-0 space-y-1" title="Scheduled and released Job Orders for the selected branch, including their staging state.">
-                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">
-                            Job Order Queue
-                        </span>
-                        <span className="block text-xl font-black text-foreground sm:text-2xl">
-                            {unreleasedJobsCount.toLocaleString()}
-                        </span>
-                        <span className="block text-[9px] text-muted-foreground sm:text-[10px]">
-                            Scheduled &amp; released Job Orders
-                        </span>
+                    <span className="block min-w-0 space-y-1" title="All recognized, non-cancelled Job Orders for the selected branch, including Closed Job Orders.">
+                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">Individual Job Orders</span>
+                        <span className="block text-xl font-black text-foreground sm:text-2xl">{jobOrders.value}</span>
+                        {branchState === "selected" && queueState.lastUpdatedAt && (
+                            <span className="block text-[9px] text-muted-foreground sm:text-[10px]">All non-cancelled statuses, including Closed.</span>
+                        )}
+                        <span className="block text-[9px] text-muted-foreground sm:text-[10px]">{jobOrders.description}</span>
                     </span>
-                    <span aria-hidden="true" className="h-8 w-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-500 shrink-0 sm:h-10 sm:w-10">
+                    <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-sky-500/20 bg-sky-500/10 text-sky-500 sm:h-10 sm:w-10">
                         <Layers className="h-5 w-5" />
                     </span>
                 </>
             )}
 
-            {/* Card 4: Family Groups */}
             {renderCard(
                 "queue",
-                `View Active Family Groups: ${familyGroupsCount.toLocaleString()} ${familyGroupsCount === 1 ? "group" : "groups"}. Open the Job Order Queue tab.`,
+                `View Job Order queue: ${queueEntries.value} grouped queue entries. Family entries may include multiple Job Orders.`,
                 "hover:border-emerald-500/50 hover:shadow-md",
                 "",
                 <>
                     <span className="block min-w-0 space-y-1">
-                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">
-                            Active Family Groups
-                        </span>
-                        <span className="block text-xl font-black text-foreground sm:text-2xl">
-                            {familyGroupsCount.toLocaleString()}
-                        </span>
-                        <span className="block text-[9px] text-muted-foreground sm:text-[10px]">
-                            Parent &amp; Sub-Assembly Job Bundles
-                        </span>
+                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">Queue Entries</span>
+                        <span className="block text-xl font-black text-foreground sm:text-2xl">{queueEntries.value}</span>
+                        {branchState === "selected" && queueState.lastUpdatedAt && (
+                            <span className="block text-[9px] text-muted-foreground sm:text-[10px]">A family entry can contain multiple Job Orders.</span>
+                        )}
+                        <span className="block text-[9px] text-muted-foreground sm:text-[10px]">{queueEntries.description}</span>
                     </span>
-                    <span aria-hidden="true" className="h-8 w-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 shrink-0 sm:h-10 sm:w-10">
-                        <Layers className="h-5 w-5 text-emerald-500" />
+                    <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-500 sm:h-10 sm:w-10">
+                        <Layers className="h-5 w-5" />
                     </span>
                 </>
             )}

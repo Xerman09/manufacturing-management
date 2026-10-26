@@ -94,6 +94,23 @@ export interface SalesOrder {
     branch_id?: number | null;
 }
 
+export interface NetRequirementSalesOrderSource {
+    order_id: number;
+    order_no: string;
+    detail_id: number;
+    customer_name?: string | null;
+    ordered_quantity: number;
+}
+
+export interface NetRequirementParentDemandSource {
+    parent_product_id: number;
+    parent_product_name: string;
+    quantity_required: number;
+    parent_shortfall: number;
+    derived_demand: number;
+    sales_order_lines: NetRequirementSalesOrderSource[];
+}
+
 export interface NetRequirementItem {
     product_id: number;
     product_name: string;
@@ -107,6 +124,8 @@ export interface NetRequirementItem {
     safety_stock: number;
     net_shortfall: number;
     is_sub_assembly?: boolean;
+    contributing_sales_order_lines?: NetRequirementSalesOrderSource[];
+    derived_parent_demands?: NetRequirementParentDemandSource[];
 }
 
 // -------------------------------------------------------------

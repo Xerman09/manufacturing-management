@@ -24,7 +24,8 @@ import { ReleaseJODialog } from "./components/ReleaseJODialog";
 import { CreateBufferJODialog } from "./components/CreateBufferJODialog";
 import { DraftJobOrderEditor } from "./components/DraftJobOrderEditor";
 import { PlanningSummaryCards } from "./components/PlanningSummaryCards";
-import { JOFilterBar } from "./components/JOFilterBar";
+import { PlanningDataStatus } from "./components/PlanningDataStatus";
+import { JOFilterBar, type PlanningQueueView } from "./components/JOFilterBar";
 import { JOTable } from "./components/JOTable";
 import { JobOrderTraveler } from "./components/JobOrderTraveler";
 import { fetchJobMaterials } from "./services/planning-api";
@@ -38,7 +39,7 @@ import { isManufacturingEvidenceVideo } from "../production-workflow/services/pr
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { isCancelledJobOrderStatus, isJobOrderStatus, isTerminatedJobOrder, JOB_ORDER_STATUS, normalizeJobOrderStatus, displayJobOrderStatus } from "../job-order-status";
+import { isActiveJobOrderStatus, isCancelledJobOrderStatus, isJobOrderStatus, isTerminatedJobOrder, JOB_ORDER_STATUS, normalizeJobOrderStatus, displayJobOrderStatus } from "../job-order-status";
 import { calculateCumulativeRouteWorkloadHours, calculatePipelinedLineDurationHours, resolveProductionShiftHours } from "./utils/production-timing";
 import { getUnitOfMeasureLabel } from "./utils/unit-of-measure";
 import JsBarcode from "jsbarcode";
@@ -72,6 +73,69 @@ type PlanningTabItem = {
     badgeClassName?: string;
 };
 type PlanningPageValues = Pick<PlanningPaginationState, "page" | "pageSize">;
+
+function matchesPlanningQueueView(jobOrder: any, queueView: PlanningQueueView): boolean {
+    if (queueView === "active") return isActiveJobOrderStatus(jobOrder.status);
+    if (queueView === "ready-to-initialize") return isJobOrderStatus(jobOrder.status, JOB_ORDER_STATUS.DRAFT);
+    if (queueView === "awaiting-staging") return isJobOrderStatus(jobOrder.status, JOB_ORDER_STATUS.FOR_PICKING);
+    if (queueView === "all") return normalizeJobOrderStatus(jobOrder.status) !== null && !isCancelledJobOrderStatus(jobOrder.status);
+
+    const status = normalizeJobOrderStatus(queueView.slice("status:".length));
+    return status !== null && isJobOrderStatus(jobOrder.status, status);
+}
+
+function groupQueueJobOrders(jobOrders: any[]) {
+    if (jobOrders.length === 0) return [];
+
+    const childrenMap = new Map<string, any[]>();
+    const allNos = new Set(jobOrders.map((jobOrder) => String(jobOrder.jo_id || jobOrder.job_order_no || "")));
+    const allIds = new Set(jobOrders.map((jobOrder) => Number(jobOrder.job_order_id || jobOrder.id || 0)));
+
+    jobOrders.forEach((jobOrder) => {
+        const joNo = String(jobOrder.jo_id || jobOrder.job_order_no || "");
+        const parentId = Number(jobOrder.parent_job_order_id || 0);
+
+        let parentKey: string | null = null;
+        if (parentId > 0 && allIds.has(parentId)) {
+            const parent = jobOrders.find((candidate) => Number(candidate.job_order_id || candidate.id) === parentId);
+            if (parent) parentKey = String(parent.jo_id || parent.job_order_no);
+        } else if (joNo.includes("-SUB")) {
+            const parentNumber = joNo.split("-SUB")[0];
+            if (allNos.has(parentNumber)) parentKey = parentNumber;
+        }
+
+        if (parentKey) {
+            const children = childrenMap.get(parentKey) || [];
+            children.push(jobOrder);
+            childrenMap.set(parentKey, children);
+        }
+    });
+
+    const groups: { familyId: string; parentJo: any; childJos: any[]; isFamily: boolean }[] = [];
+    const processedNos = new Set<string>();
+
+    jobOrders.forEach((jobOrder) => {
+        const joNo = String(jobOrder.jo_id || jobOrder.job_order_no || "");
+        const isChild = jobOrder.parent_job_order_id || joNo.includes("-SUB");
+
+        if (!isChild && !processedNos.has(joNo)) {
+            processedNos.add(joNo);
+            const children = childrenMap.get(joNo) || [];
+            children.forEach((child) => processedNos.add(String(child.jo_id || child.job_order_no)));
+            groups.push({ familyId: joNo, parentJo: jobOrder, childJos: children, isFamily: children.length > 0 });
+        }
+    });
+
+    jobOrders.forEach((jobOrder) => {
+        const joNo = String(jobOrder.jo_id || jobOrder.job_order_no || "");
+        if (!processedNos.has(joNo)) {
+            processedNos.add(joNo);
+            groups.push({ familyId: joNo, parentJo: jobOrder, childJos: [], isFamily: false });
+        }
+    });
+
+    return groups;
+}
 
 function MaterialLoadErrorState({ message, onRetry }: { message?: string; onRetry: () => void }) {
     return (
@@ -143,11 +207,18 @@ function JobOrderStatusHistoryPanel({ history }: { history?: any[] }) {
 export default function PlanningEngineeringModule() {
     const {
         loadingBranches,
+        branchesError,
+        branchesLastUpdatedAt,
         loadingOrders,
+        ordersError,
+        ordersLastUpdatedAt,
         loadingRequirements,
+        requirementsError,
+        requirementsLastUpdatedAt,
+        requirementsScopeIsCurrent,
+        retryNetRequirements,
         subAssemblyLookupStatus,
         subAssemblyLookupError,
-        retrySubAssemblyLookup,
         releasingJO,
         branches,
         netRequirements,
@@ -177,6 +248,7 @@ export default function PlanningEngineeringModule() {
         productionSalesOrderGroups,
         loadingProductionOrders,
         productionOrdersError,
+        productionOrdersLastUpdatedAt,
         loadInProductionSalesOrders,
         selectedLines,
         releaseGroups,
@@ -199,6 +271,11 @@ export default function PlanningEngineeringModule() {
         unreleasedJobs,
         cancelledJobs,
         loadingJobs,
+        jobOrdersError,
+        jobOrdersLastUpdatedAt,
+        loadBranches,
+        loadPlanningOrders,
+        loadJobOrders,
         releasingDraftId,
         handleReleaseDraftFromPlanning,
         deepLinkJo,
@@ -297,7 +374,7 @@ export default function PlanningEngineeringModule() {
 
     // Filter bar state for JO Queue
     const [searchQuery, setSearchQuery] = useState("");
-    const [statusFilter, setStatusFilter] = useState("all");
+    const [queueView, setQueueView] = useState<PlanningQueueView>("active");
     const [cancelledSearchQuery, setCancelledSearchQuery] = useState("");
 
     const demandPagination = useMemo<PlanningPaginationState>(() => ({
@@ -357,17 +434,15 @@ export default function PlanningEngineeringModule() {
         isSubAssembly?: boolean;
     } | null>(null);
 
-    // Filter unreleased jobs
-    const filteredUnreleasedJobs = useMemo(() => {
-        return unreleasedJobs.filter((jo: any) => {
-            const normalizedFilter = normalizeJobOrderStatus(statusFilter);
-            const matchesStatus = statusFilter === "all" || (normalizedFilter !== null && isJobOrderStatus(
-                jo.status,
-                normalizedFilter
-            ));
-            return matchesStatus && matchesJobOrderSearch(jo, searchQuery);
-        });
-    }, [unreleasedJobs, statusFilter, searchQuery]);
+    // Queue views filter individual Job Orders before family grouping and pagination.
+    const queueViewJobs = useMemo(
+        () => unreleasedJobs.filter((jobOrder: any) => matchesPlanningQueueView(jobOrder, queueView)),
+        [unreleasedJobs, queueView]
+    );
+    const filteredUnreleasedJobs = useMemo(
+        () => queueViewJobs.filter((jobOrder: any) => matchesJobOrderSearch(jobOrder, searchQuery)),
+        [queueViewJobs, searchQuery]
+    );
 
     const filteredCancelledJobs = useMemo(
         () => cancelledJobs.filter((jobOrder: any) => matchesJobOrderSearch(jobOrder, cancelledSearchQuery)),
@@ -384,75 +459,12 @@ export default function PlanningEngineeringModule() {
         [filteredCancelledJobs]
     );
 
-    const familyGroups = useMemo(() => {
-        if (!filteredUnreleasedJobs || filteredUnreleasedJobs.length === 0) return [];
-
-        const childrenMap = new Map<string, any[]>();
-        const allNos = new Set(filteredUnreleasedJobs.map((j: any) => String(j.jo_id || j.job_order_no || "")));
-        const allIds = new Set(filteredUnreleasedJobs.map((j: any) => Number(j.job_order_id || j.id || 0)));
-
-        filteredUnreleasedJobs.forEach((j: any) => {
-            const joNo = String(j.jo_id || j.job_order_no || "");
-            const pId = Number(j.parent_job_order_id || 0);
-
-            let parentKey: string | null = null;
-            if (pId > 0 && allIds.has(pId)) {
-                const parentObj = filteredUnreleasedJobs.find((p: any) => Number(p.job_order_id || p.id) === pId);
-                if (parentObj) parentKey = String(parentObj.jo_id || parentObj.job_order_no);
-            } else if (joNo.includes("-SUB")) {
-                const pNo = joNo.split("-SUB")[0];
-                if (allNos.has(pNo)) {
-                    parentKey = pNo;
-                }
-            }
-
-            if (parentKey) {
-                const existing = childrenMap.get(parentKey) || [];
-                existing.push(j);
-                childrenMap.set(parentKey, existing);
-            }
-        });
-
-        const groups: { familyId: string; parentJo: any; childJos: any[]; isFamily: boolean }[] = [];
-        const processedNos = new Set<string>();
-
-        filteredUnreleasedJobs.forEach((j: any) => {
-            const joNo = String(j.jo_id || j.job_order_no || "");
-            const isChild = j.parent_job_order_id || joNo.includes("-SUB");
-
-            if (!isChild && !processedNos.has(joNo)) {
-                processedNos.add(joNo);
-                const children = childrenMap.get(joNo) || [];
-                children.forEach(c => processedNos.add(String(c.jo_id || c.job_order_no)));
-
-                groups.push({
-                    familyId: joNo,
-                    parentJo: j,
-                    childJos: children,
-                    isFamily: children.length > 0
-                });
-            }
-        });
-
-        filteredUnreleasedJobs.forEach((j: any) => {
-            const joNo = String(j.jo_id || j.job_order_no || "");
-            if (!processedNos.has(joNo)) {
-                processedNos.add(joNo);
-                groups.push({
-                    familyId: joNo,
-                    parentJo: j,
-                    childJos: [],
-                    isFamily: false
-                });
-            }
-        });
-
-        return groups;
-    }, [filteredUnreleasedJobs]);
+    const allQueueFamilyGroups = useMemo(() => groupQueueJobOrders(unreleasedJobs), [unreleasedJobs]);
+    const familyGroups = useMemo(() => groupQueueJobOrders(filteredUnreleasedJobs), [filteredUnreleasedJobs]);
 
     useEffect(() => {
         updateTabPage("queue", 1);
-    }, [selectedBranchId, searchQuery, statusFilter, updateTabPage]);
+    }, [selectedBranchId, searchQuery, queueView, updateTabPage]);
 
     useEffect(() => {
         updateTabPage("cancelled", 1);
@@ -1231,7 +1243,7 @@ export default function PlanningEngineeringModule() {
             subAssemblyVersionMap: draft.subAssemblyVersionMap ?? current?.subAssemblyVersionMap,
             sub_assembly_version_map: draft.subAssemblyVersionMap ?? current?.sub_assembly_version_map
         } : current);
-        await loadInitialData(true);
+        await loadInitialData();
     };
 
     const leaveDraftEditor = () => {
@@ -1304,29 +1316,59 @@ export default function PlanningEngineeringModule() {
         );
     }
 
-    const shortfallCount = subAssemblyLookupStatus === "ready" && !loadingRequirements && selectedBranchId !== null
+    const branchState = loadingBranches && branches.length === 0
+        ? "loading"
+        : branchesError && branches.length === 0
+            ? "error"
+            : branches.length === 0
+                ? "none"
+                : selectedBranchId === null
+                    ? "unselected"
+                    : "selected";
+    const currentRequirementsLastUpdatedAt = requirementsScopeIsCurrent ? requirementsLastUpdatedAt : null;
+    const currentRequirementsError = (requirementsScopeIsCurrent ? requirementsError : null)
+        || subAssemblyLookupError
+        || (ordersError ? `Demand data could not be refreshed: ${ordersError}` : null);
+    const currentRequirementsLoading = loadingRequirements
+        || (branchState === "selected" && !requirementsScopeIsCurrent && !ordersError && subAssemblyLookupStatus !== "error");
+    const shortfallCount = selectedBranchId !== null && (currentRequirementsLastUpdatedAt !== null
+        || (!currentRequirementsLoading && !currentRequirementsError && subAssemblyLookupStatus === "ready"))
         ? netRequirements.filter((n: any) => n.net_shortfall > 0).length
         : null;
     const schedulableDemandLineCount = salesOrderGroups.reduce(
         (count, group) => count + group.selectableLines.length,
         0
     );
+    const branchScopeMessage = branchState === "unselected"
+        ? "Select a target branch"
+        : branchState === "none"
+            ? "No active target branches"
+            : branchState === "error"
+                ? "Target branches unavailable"
+                : "Loading target branches";
+    const demandCountAvailable = branchState === "selected" && Boolean(ordersLastUpdatedAt || (!loadingOrders && !ordersError));
+    const productionCountAvailable = branchState === "selected" && Boolean(productionOrdersLastUpdatedAt || (!loadingProductionOrders && !productionOrdersError));
+    const queueCountAvailable = branchState === "selected" && Boolean(jobOrdersLastUpdatedAt || (!loadingJobs && !jobOrdersError));
     const planningTabItems: PlanningTabItem[] = [
         {
             value: "demand",
             fullLabel: "Schedulable SO Demand",
             compactLabel: "SO Demand",
-            countDescription: `${schedulableDemandLineCount} schedulable demand ${schedulableDemandLineCount === 1 ? "line" : "lines"}`,
+            countDescription: demandCountAvailable
+                ? `${schedulableDemandLineCount} schedulable demand ${schedulableDemandLineCount === 1 ? "line" : "lines"}`
+                : branchState === "selected" ? (ordersError ? "Demand unavailable" : "Loading demand") : branchScopeMessage,
             icon: <ClipboardList className="h-4 w-4 text-primary" />,
-            badgeText: `${schedulableDemandLineCount} ${schedulableDemandLineCount === 1 ? "line" : "lines"}`,
+            badgeText: demandCountAvailable ? `${schedulableDemandLineCount} ${schedulableDemandLineCount === 1 ? "line" : "lines"}` : undefined,
         },
         {
             value: "production",
             fullLabel: "In Production SOs",
             compactLabel: "Production",
-            countDescription: `${productionSalesOrderGroups.length} sales ${productionSalesOrderGroups.length === 1 ? "order" : "orders"} in production`,
+            countDescription: productionCountAvailable
+                ? `${productionSalesOrderGroups.length} sales ${productionSalesOrderGroups.length === 1 ? "order" : "orders"} in production`
+                : branchState === "selected" ? (productionOrdersError ? "Production orders unavailable" : "Loading production orders") : branchScopeMessage,
             icon: <Factory className="h-4 w-4 text-sky-600" />,
-            badgeText: `${productionSalesOrderGroups.length} ${productionSalesOrderGroups.length === 1 ? "SO" : "SOs"}`,
+            badgeText: productionCountAvailable ? `${productionSalesOrderGroups.length} ${productionSalesOrderGroups.length === 1 ? "SO" : "SOs"}` : undefined,
             badgeClassName: "bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold",
         },
         {
@@ -1334,8 +1376,8 @@ export default function PlanningEngineeringModule() {
             fullLabel: "Net Requirements",
             compactLabel: "Net Req.",
             countDescription: shortfallCount === null
-                ? "material shortfall count is not available yet"
-                : `${shortfallCount} material shortfall ${shortfallCount === 1 ? "item" : "items"}`,
+                ? branchState !== "selected" ? branchScopeMessage : requirementsError || subAssemblyLookupError ? "Net requirements unavailable" : "Calculating net requirements"
+                : `${shortfallCount} product/component shortfall ${shortfallCount === 1 ? "row" : "rows"}`,
             icon: <Database className="h-4 w-4 text-indigo-500" />,
             badgeText: shortfallCount !== null && shortfallCount > 0
                 ? `${shortfallCount} ${shortfallCount === 1 ? "shortfall" : "shortfalls"}`
@@ -1346,18 +1388,22 @@ export default function PlanningEngineeringModule() {
             value: "queue",
             fullLabel: "Job Order Queue",
             compactLabel: "JO Queue",
-            countDescription: `${unreleasedJobs.length} ${unreleasedJobs.length === 1 ? "job order" : "job orders"} in the queue`,
+            countDescription: queueCountAvailable
+                ? `${unreleasedJobs.length} ${unreleasedJobs.length === 1 ? "job order" : "job orders"} in the queue`
+                : branchState === "selected" ? (jobOrdersError ? "Job Order queue unavailable" : "Loading Job Order queue") : branchScopeMessage,
             icon: <Layers className="h-4 w-4 text-sky-500" />,
-            badgeText: `${unreleasedJobs.length} ${unreleasedJobs.length === 1 ? "JO" : "JOs"}`,
+            badgeText: queueCountAvailable ? `${unreleasedJobs.length} ${unreleasedJobs.length === 1 ? "JO" : "JOs"}` : undefined,
             badgeClassName: "bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold",
         },
         {
             value: "cancelled",
             fullLabel: "Cancelled JOs",
             compactLabel: "Cancelled",
-            countDescription: `${cancelledJobs.length} cancelled ${cancelledJobs.length === 1 ? "job order" : "job orders"}`,
+            countDescription: queueCountAvailable
+                ? `${cancelledJobs.length} cancelled ${cancelledJobs.length === 1 ? "job order" : "job orders"}`
+                : branchState === "selected" ? (jobOrdersError ? "Cancelled Job Orders unavailable" : "Loading cancelled Job Orders") : branchScopeMessage,
             icon: <XCircle className="h-4 w-4 text-rose-500" />,
-            badgeText: `${cancelledJobs.length} ${cancelledJobs.length === 1 ? "JO" : "JOs"}`,
+            badgeText: queueCountAvailable ? `${cancelledJobs.length} ${cancelledJobs.length === 1 ? "JO" : "JOs"}` : undefined,
             badgeClassName: "bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold",
         },
     ];
@@ -1374,31 +1420,45 @@ export default function PlanningEngineeringModule() {
                 </div>
                 <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                     {/* Branch Dropdown */}
-                    {loadingBranches ? (
+                    {loadingBranches && branches.length === 0 ? (
                         <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                             <span className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Target Branch:</span>
                             <div role="status" aria-busy="true" aria-label="Loading branches" className="w-full min-w-0 sm:w-auto">
                                 <Skeleton className="h-11 w-full rounded-md sm:h-9 sm:w-[200px]" />
                             </div>
                         </div>
+                    ) : branchesError && branches.length === 0 ? (
+                        <div className="w-full sm:w-auto">
+                            <PlanningDataStatus label="target branches" loading={loadingBranches} error={branchesError} lastUpdatedAt={branchesLastUpdatedAt} onRetry={() => { void loadBranches(); }} />
+                        </div>
                     ) : (
-                        <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-                            <span className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Target Branch:</span>
-                            <Select
-                                value={selectedBranchId === null ? "" : String(selectedBranchId)}
-                                onValueChange={handleTargetBranchChange}
-                            >
-                                <SelectTrigger className="h-11 w-full min-w-0 font-semibold text-sm sm:h-9 sm:w-[200px]" aria-label="Target Branch" aria-required="true">
-                                    <SelectValue placeholder="Select Target Branch..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {branches.map((b) => (
-                                        <SelectItem key={b.id} value={String(b.id)}>
-                                             {b.branch_name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                        <div className="flex min-w-0 flex-col gap-2 sm:w-auto">
+                            <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+                                <span className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Target Branch:</span>
+                                <Select
+                                    value={selectedBranchId === null ? "" : String(selectedBranchId)}
+                                    onValueChange={handleTargetBranchChange}
+                                    disabled={branches.length === 0}
+                                >
+                                    <SelectTrigger className="h-11 w-full min-w-0 font-semibold text-sm sm:h-9 sm:w-[200px]" aria-label="Target Branch" aria-required="true">
+                                        <SelectValue placeholder="Select Target Branch..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {branches.map((b) => (
+                                            <SelectItem key={b.id} value={String(b.id)}>
+                                                 {b.branch_name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <PlanningDataStatus
+                                label="target branches"
+                                loading={loadingBranches}
+                                error={branchesError}
+                                lastUpdatedAt={branchesLastUpdatedAt}
+                                onRetry={() => { void loadBranches(); }}
+                            />
                         </div>
                     )}
 
@@ -1417,12 +1477,20 @@ export default function PlanningEngineeringModule() {
             <PlanningSummaryCards
                 demandLinesCount={schedulableDemandLineCount}
                 shortfallItemsCount={shortfallCount}
-                unreleasedJobsCount={unreleasedJobs.length}
-                familyGroupsCount={familyGroups.filter((group) => group.isFamily).length}
+                queueJobOrdersCount={unreleasedJobs.length}
+                queueEntriesCount={allQueueFamilyGroups.length}
+                branchState={branchState}
+                demandState={{ loading: loadingOrders, error: ordersError, lastUpdatedAt: ordersLastUpdatedAt }}
+                requirementsState={{
+                    loading: currentRequirementsLoading || subAssemblyLookupStatus === "loading",
+                    error: currentRequirementsError,
+                    lastUpdatedAt: currentRequirementsLastUpdatedAt
+                }}
+                queueState={{ loading: loadingJobs, error: jobOrdersError, lastUpdatedAt: jobOrdersLastUpdatedAt }}
                 onSelectTab={setActiveMainTab}
             />
 
-            {!loadingBranches && !hasValidTargetBranch && (
+            {!loadingBranches && !branchesError && !hasValidTargetBranch && (
                 <div role="status" className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-semibold text-amber-700 dark:text-amber-400">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                     <span>{branches.length > 0 ? "Select Target Branch... to load branch-scoped demand, inventory, and MRP data." : "No active target branches are available. Contact an administrator before creating a Job Order."}</span>
@@ -1535,6 +1603,10 @@ export default function PlanningEngineeringModule() {
                         />
                         <DemandLinesTable
                             loadingOrders={loadingOrders}
+                            error={ordersError}
+                            lastUpdatedAt={ordersLastUpdatedAt}
+                            hasBranchSelected={selectedBranchId !== null}
+                            onRetry={() => { void loadPlanningOrders(); }}
                             salesOrderGroups={salesOrderGroups}
                             selectedLines={selectedLines}
                             releaseGroups={releaseGroups}
@@ -1551,6 +1623,8 @@ export default function PlanningEngineeringModule() {
                     <InProductionSalesOrdersTable
                         loadingOrders={loadingProductionOrders}
                         error={productionOrdersError}
+                        lastUpdatedAt={productionOrdersLastUpdatedAt}
+                        hasBranchSelected={selectedBranchId !== null}
                         salesOrderGroups={productionSalesOrderGroups}
                         onRetry={() => { void loadInProductionSalesOrders(); }}
                         onCreateJobOrder={handleInitiateReplacementRelease}
@@ -1562,11 +1636,14 @@ export default function PlanningEngineeringModule() {
                 <TabsContent value="inventory" className="space-y-6 outline-none">
                     <div className="bg-card border rounded-xl shadow-sm">
                         <NetRequirementsTable
-                            loadingRequirements={loadingRequirements}
+                            loadingRequirements={currentRequirementsLoading}
+                            requirementsError={currentRequirementsError}
+                            requirementsLastUpdatedAt={currentRequirementsLastUpdatedAt}
+                            hasSchedulableDemand={schedulableDemandLineCount > 0}
+                            onRetryRequirements={retryNetRequirements}
                             subAssemblyLookupStatus={subAssemblyLookupStatus}
                             subAssemblyLookupError={subAssemblyLookupError}
-                            onRetrySubAssemblyLookup={retrySubAssemblyLookup}
-                            netRequirements={netRequirements}
+                            netRequirements={requirementsScopeIsCurrent ? netRequirements : []}
                             selectedBranchId={selectedBranchId}
                             branches={branches}
                             pagination={inventoryPagination}
@@ -1584,33 +1661,40 @@ export default function PlanningEngineeringModule() {
                                     Job Order Queue
                                 </h2>
                                 <p className="text-sm text-muted-foreground">
-                                    Track Job Orders across all active statuses, from release through production and closing. Each row shows the current stage and the next step.
+                                    Focus on active work, drafts to initialize, or Job Orders awaiting staging. Select All orders to include Closed Job Orders.
                                 </p>
                             </div>
-                            {loadingJobs && (
-                                <div role="status" aria-busy="true" aria-label="Refreshing Job Order queue" className="shrink-0">
-                                    <Skeleton className="h-4 w-24 rounded-md" />
-                                </div>
-                            )}
                         </div>
+
+                        <PlanningDataStatus label="Job Order queue" loading={loadingJobs} error={jobOrdersError} lastUpdatedAt={jobOrdersLastUpdatedAt} onRetry={() => { void loadJobOrders(); }} />
+
+                        {selectedBranchId === null ? (
+                            <div className="rounded-md border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Select a target branch to view its Job Orders.</div>
+                        ) : jobOrdersError && !jobOrdersLastUpdatedAt ? null : (
+                            <>
 
                         {/* Filter Bar */}
                         <JOFilterBar
                             searchQuery={searchQuery}
                             setSearchQuery={setSearchQuery}
-                            statusFilter={statusFilter}
-                            setStatusFilter={setStatusFilter}
-                            totalCount={unreleasedJobs.length}
+                            queueView={queueView}
+                            setQueueView={setQueueView}
+                            totalCount={queueViewJobs.length}
                             filteredCount={filteredUnreleasedJobs.length}
                         />
+
+                        <p className="text-[11px] text-muted-foreground" role="note">
+                            Counts show individual Job Orders. Pagination counts queue entries; a family entry may include its parent and sub-assembly Job Orders.
+                        </p>
 
                         {/* Job Orders Table */}
                         <JOTable
                             unreleasedJobs={filteredUnreleasedJobs}
                             familyGroups={paginatedFamilyGroups}
-                            loadingJobs={loadingJobs}
+                            loadingJobs={loadingJobs && !jobOrdersLastUpdatedAt}
                             handleOpenDetails={handleOpenDetails}
                             handleEditDraft={handleEditDraft}
+                            emptyMessage={branchState === "unselected" ? "Select a target branch to view its Job Orders." : "No Job Orders match this queue view and search."}
                         />
                         <PlanningPaginationControls
                             {...queuePagination}
@@ -1618,6 +1702,8 @@ export default function PlanningEngineeringModule() {
                             totalItems={familyGroups.length}
                             itemLabel="queue entries"
                         />
+                            </>
+                        )}
                     </div>
                 </TabsContent>
 
@@ -1634,18 +1720,19 @@ export default function PlanningEngineeringModule() {
                                     Review cancelled Job Orders and their planning history. Cancelled records are read-only and require no further workflow action.
                                 </p>
                             </div>
-                            {loadingJobs && (
-                                <div role="status" aria-busy="true" aria-label="Refreshing cancelled Job Orders" className="shrink-0">
-                                    <Skeleton className="h-4 w-32 rounded-md" />
-                                </div>
-                            )}
                         </div>
 
+                        <PlanningDataStatus label="cancelled Job Orders" loading={loadingJobs} error={jobOrdersError} lastUpdatedAt={jobOrdersLastUpdatedAt} onRetry={() => { void loadJobOrders(); }} />
+
+                        {selectedBranchId === null ? (
+                            <div className="rounded-md border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Select a target branch to view its cancelled Job Orders.</div>
+                        ) : jobOrdersError && !jobOrdersLastUpdatedAt ? null : (
+                            <>
                         <JOFilterBar
                             searchQuery={cancelledSearchQuery}
                             setSearchQuery={setCancelledSearchQuery}
-                            statusFilter={JOB_ORDER_STATUS.CANCELLED}
-                            setStatusFilter={() => undefined}
+                            queueView="all"
+                            setQueueView={() => undefined}
                             lockedStatus={{ value: JOB_ORDER_STATUS.CANCELLED, label: JOB_ORDER_STATUS.CANCELLED }}
                             totalCount={cancelledJobs.length}
                             filteredCount={filteredCancelledJobs.length}
@@ -1654,7 +1741,7 @@ export default function PlanningEngineeringModule() {
                         <JOTable
                             unreleasedJobs={filteredCancelledJobs}
                             familyGroups={paginatedCancelledFamilyGroups}
-                            loadingJobs={loadingJobs}
+                            loadingJobs={loadingJobs && !jobOrdersLastUpdatedAt}
                             handleOpenDetails={handleOpenDetails}
                             handleEditDraft={handleEditDraft}
                             readOnly
@@ -1665,6 +1752,8 @@ export default function PlanningEngineeringModule() {
                             totalItems={cancelledFamilyGroups.length}
                             itemLabel="cancelled JOs"
                         />
+                            </>
+                        )}
                     </div>
                 </TabsContent>
             </Tabs>

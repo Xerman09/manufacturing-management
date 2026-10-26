@@ -5,17 +5,36 @@ import { Button } from "@/components/ui/button";
 import {
     Select,
     SelectContent,
+    SelectGroup,
+    SelectLabel,
+    SelectSeparator,
     SelectItem,
     SelectTrigger,
     SelectValue
 } from "@/components/ui/select";
 import { JOB_ORDER_STATUS } from "../../job-order-status";
 
+type SpecificQueueStatus =
+    | typeof JOB_ORDER_STATUS.PICKED
+    | typeof JOB_ORDER_STATUS.IN_PRODUCTION
+    | typeof JOB_ORDER_STATUS.ON_HOLD
+    | typeof JOB_ORDER_STATUS.QA_HOLD
+    | typeof JOB_ORDER_STATUS.PRODUCTION_COMPLETED
+    | typeof JOB_ORDER_STATUS.FOR_QA_RECONCILIATION
+    | typeof JOB_ORDER_STATUS.CLOSED;
+
+export type PlanningQueueView =
+    | "active"
+    | "ready-to-initialize"
+    | "awaiting-staging"
+    | "all"
+    | `status:${SpecificQueueStatus}`;
+
 export interface JOFilterBarProps {
     searchQuery: string;
     setSearchQuery: (query: string) => void;
-    statusFilter: string;
-    setStatusFilter: (status: string) => void;
+    queueView: PlanningQueueView;
+    setQueueView: (view: PlanningQueueView) => void;
     totalCount: number;
     filteredCount: number;
     lockedStatus?: {
@@ -27,17 +46,17 @@ export interface JOFilterBarProps {
 export function JOFilterBar({
     searchQuery,
     setSearchQuery,
-    statusFilter,
-    setStatusFilter,
+    queueView,
+    setQueueView,
     totalCount,
     filteredCount,
     lockedStatus
 }: JOFilterBarProps) {
-    const hasActiveFilters = searchQuery.trim() !== "" || (!lockedStatus && statusFilter !== "all");
+    const hasActiveFilters = searchQuery.trim() !== "" || (!lockedStatus && queueView !== "active");
 
     const handleClear = () => {
         setSearchQuery("");
-        if (!lockedStatus) setStatusFilter("all");
+        if (!lockedStatus) setQueueView("active");
     };
 
     return (
@@ -68,21 +87,29 @@ export function JOFilterBar({
                             {lockedStatus.label}
                         </div>
                     ) : (
-                        <Select value={statusFilter} onValueChange={setStatusFilter}>
-                            <SelectTrigger className="h-9 font-semibold text-xs bg-card border-input w-full sm:w-[200px]">
-                                <SelectValue placeholder="Status Filter" />
+                        <Select value={queueView} onValueChange={(value) => setQueueView(value as PlanningQueueView)}>
+                            <SelectTrigger className="h-9 font-semibold text-xs bg-card border-input w-full sm:w-[230px]" aria-label="Job Order queue view">
+                                <SelectValue placeholder="Queue view" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="all">All Statuses</SelectItem>
-                                <SelectItem value="Draft">Draft</SelectItem>
-                                <SelectItem value={JOB_ORDER_STATUS.FOR_PICKING}>For Picking</SelectItem>
-                                <SelectItem value={JOB_ORDER_STATUS.PICKED}>Picked</SelectItem>
-                                <SelectItem value={JOB_ORDER_STATUS.IN_PRODUCTION}>In Production</SelectItem>
-                                <SelectItem value={JOB_ORDER_STATUS.ON_HOLD}>On Hold</SelectItem>
-                                <SelectItem value={JOB_ORDER_STATUS.QA_HOLD}>QA Hold</SelectItem>
-                                <SelectItem value={JOB_ORDER_STATUS.PRODUCTION_COMPLETED}>Production Completed</SelectItem>
-                                <SelectItem value={JOB_ORDER_STATUS.FOR_QA_RECONCILIATION}>For QA and Reconciliation</SelectItem>
-                                <SelectItem value={JOB_ORDER_STATUS.CLOSED}>Closed</SelectItem>
+                                <SelectGroup>
+                                    <SelectLabel>Queue views</SelectLabel>
+                                    <SelectItem value="active">Active orders</SelectItem>
+                                    <SelectItem value="ready-to-initialize">Ready to initialize · Draft</SelectItem>
+                                    <SelectItem value="awaiting-staging">Awaiting staging · For Picking</SelectItem>
+                                    <SelectItem value="all">All orders · includes Closed</SelectItem>
+                                </SelectGroup>
+                                <SelectSeparator />
+                                <SelectGroup>
+                                    <SelectLabel>Specific status</SelectLabel>
+                                    <SelectItem value={`status:${JOB_ORDER_STATUS.PICKED}`}>Picked</SelectItem>
+                                    <SelectItem value={`status:${JOB_ORDER_STATUS.IN_PRODUCTION}`}>In Production</SelectItem>
+                                    <SelectItem value={`status:${JOB_ORDER_STATUS.ON_HOLD}`}>On Hold</SelectItem>
+                                    <SelectItem value={`status:${JOB_ORDER_STATUS.QA_HOLD}`}>QA Hold</SelectItem>
+                                    <SelectItem value={`status:${JOB_ORDER_STATUS.PRODUCTION_COMPLETED}`}>Production Completed</SelectItem>
+                                    <SelectItem value={`status:${JOB_ORDER_STATUS.FOR_QA_RECONCILIATION}`}>For QA and Reconciliation</SelectItem>
+                                    <SelectItem value={`status:${JOB_ORDER_STATUS.CLOSED}`}>Closed</SelectItem>
+                                </SelectGroup>
                             </SelectContent>
                         </Select>
                     )}
@@ -101,7 +128,7 @@ export function JOFilterBar({
             </div>
 
             <div className="text-[11px] text-muted-foreground font-medium text-right shrink-0">
-                Showing <strong className="text-foreground">{filteredCount}</strong> of <strong className="text-foreground">{totalCount}</strong> Job Orders
+                Showing <strong className="text-foreground">{filteredCount}</strong> of <strong className="text-foreground">{totalCount}</strong> Job Orders in this view
             </div>
         </div>
     );
