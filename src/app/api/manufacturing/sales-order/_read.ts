@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { selectPreferredActiveVersion } from "../finished-goods/versions/versions-helper";
-import { acceptedQuantityByJobOrder, buildQAYieldAssessments } from "../production/_qa-accepted-output";
+import { buildQAYieldAssessments } from "../production/_qa-accepted-output";
 import { isProductionSchedulingStatus } from "./_status";
 import { isCancelledJobOrderStatus, isTerminalJobOrderStatus } from "@/modules/manufacturing-management/job-order-status";
 import {
@@ -118,6 +118,7 @@ export interface LinkedJobOrder {
     status: string;
     allocatedQuantity: number;
     producedQuantity: number;
+    qaAcceptedQuantity: number;
     isTerminated: boolean;
 }
 
@@ -252,6 +253,7 @@ export async function findLinkedJobOrders(read: DirectusReader, details: Row[]) 
             status: String(jobOrder.status || "Unknown"),
             allocatedQuantity: safeQuantity,
             producedQuantity: 0,
+            qaAcceptedQuantity: 0,
             isTerminated
         });
     }
@@ -268,11 +270,36 @@ export async function findLinkedJobOrders(read: DirectusReader, details: Row[]) 
             read("manufacturing_daily_qa_inspections", productionParams),
             read("manufacturing_job_order_routes", productionParams)
         ]);
-        const producedByJobOrder = acceptedQuantityByJobOrder(
-            buildQAYieldAssessments(yieldRows.data, inspectionRows.data, routeRows.data)
-        );
-        for (const linkedJobOrder of linkedByKey.values()) {
-            linkedJobOrder.producedQuantity = producedByJobOrder.get(linkedJobOrder.jobOrderId) || 0;
+        const quantitiesByJobOrder = new Map<number, { producedQuantity: number; qaAcceptedQuantity: number }>();
+        for (const assessment of buildQAYieldAssessments(yieldRows.data, inspectionRows.data, routeRows.data)) {
+            const quantities = quantitiesByJobOrder.get(assessment.jobOrderId) || {
+                producedQuantity: 0,
+                qaAcceptedQuantity: 0
+            };
+            quantities.producedQuantity += assessment.goodQuantity;
+            quantities.qaAcceptedQuantity += assessment.acceptedQuantity;
+            quantitiesByJobOrder.set(assessment.jobOrderId, quantities);
+        }
+        const linkedByJobOrder = new Map<number, { detailId: number; linkedJobOrder: LinkedJobOrder }[]>();
+        for (const [key, linkedJobOrder] of linkedByKey) {
+            const detailId = Number(key.split(":", 1)[0]);
+            const linked = linkedByJobOrder.get(linkedJobOrder.jobOrderId) || [];
+            linked.push({ detailId, linkedJobOrder });
+            linkedByJobOrder.set(linkedJobOrder.jobOrderId, linked);
+        }
+        for (const [jobOrderId, linked] of linkedByJobOrder) {
+            const quantities = quantitiesByJobOrder.get(jobOrderId);
+            let producedRemaining = quantities?.producedQuantity || 0;
+            let qaAcceptedRemaining = quantities?.qaAcceptedQuantity || 0;
+            // Attribute shared Job Order output once across its linked Sales Order allocations.
+            for (const { linkedJobOrder } of linked.sort((left, right) => left.detailId - right.detailId)) {
+                const producedForAllocation = Math.min(producedRemaining, linkedJobOrder.allocatedQuantity);
+                const acceptedForAllocation = Math.min(qaAcceptedRemaining, linkedJobOrder.allocatedQuantity);
+                linkedJobOrder.producedQuantity = producedForAllocation;
+                linkedJobOrder.qaAcceptedQuantity = acceptedForAllocation;
+                producedRemaining = Math.max(0, producedRemaining - producedForAllocation);
+                qaAcceptedRemaining = Math.max(0, qaAcceptedRemaining - acceptedForAllocation);
+            }
         }
     }
 
@@ -467,16 +494,17 @@ export async function enrichSalesOrderReadModel(
         const product = products.get(rawProductId);
         const uomId = Number(product?.unit_of_measurement?.unit_id || product?.unit_of_measurement || 0);
         const unitObj = unitsMap.get(uomId) || (typeof product?.unit_of_measurement === "object" ? product.unit_of_measurement : null);
-        const unitName = unitObj?.unit_name || unitObj?.unit_shortcut || "Pieces";
-        const unitShortcut = unitObj?.unit_shortcut || unitObj?.unit_name || "PCS";
+        const unitName = unitObj?.unit_name || null;
+        const unitShortcut = unitObj?.unit_shortcut || null;
+        const unitLabel = unitName || unitShortcut || "Pieces";
 
         detail.product_id = product ? {
             product_id: Number(product.product_id),
             product_name: product.description || product.product_name,
             product_code: product.product_code,
             description: product.description || product.product_name,
-            uom: unitName,
-            uom_id: uomId,
+            uom: unitLabel,
+            uom_id: uomId || null,
             uom_name: unitName,
             uom_shortcut: unitShortcut,
             unit_name: unitName,
@@ -494,9 +522,10 @@ export async function enrichSalesOrderReadModel(
             product_code: `CODE-${rawProductId}`,
             uom: "Pieces",
             uom_id: null,
-            uom_name: "Pieces",
-            uom_shortcut: "PCS",
-            unit_name: "Pieces",
+            uom_name: null,
+            uom_shortcut: null,
+            unit_name: null,
+            unit_shortcut: null,
             uom_count: 1,
             parent_id: null,
             brand: "N/A",

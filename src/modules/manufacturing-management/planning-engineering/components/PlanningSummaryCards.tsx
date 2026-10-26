@@ -28,7 +28,7 @@ export function PlanningSummaryCards({
         cardClassName: string,
         content: React.ReactNode
     ) => {
-        const className = `bg-card border rounded-xl p-4 shadow-sm flex items-center justify-between transition-all ${cardClassName} ${
+        const className = `bg-card border rounded-xl p-3 sm:p-4 shadow-sm flex items-center justify-between gap-2 transition-all ${cardClassName} ${
             onSelectTab ? `cursor-pointer ${hoverClassName}` : ""
         }`;
 
@@ -53,7 +53,7 @@ export function PlanningSummaryCards({
         : `${shortfallItemsCount.toLocaleString()} ${shortfallItemsCount === 1 ? "item" : "items"}`;
 
     return (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             {/* Card 1: Residual planning demand */}
             {renderCard(
                 "demand",
@@ -61,18 +61,18 @@ export function PlanningSummaryCards({
                 "hover:border-primary/50 hover:shadow-md",
                 "",
                 <>
-                    <span className="block space-y-1" title="Unfulfilled Sales Order lines for the selected branch.">
-                        <span className="block text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    <span className="block min-w-0 space-y-1" title="Unfulfilled Sales Order lines for the selected branch.">
+                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">
                             Schedulable SO Demand
                         </span>
-                        <span className="block text-2xl font-black text-foreground">
+                        <span className="block text-xl font-black text-foreground sm:text-2xl">
                             {demandLinesCount.toLocaleString()}
                         </span>
-                        <span className="block text-[10px] text-muted-foreground">
+                        <span className="block text-[9px] text-muted-foreground sm:text-[10px]">
                             Residual demand ready for JO planning
                         </span>
                     </span>
-                    <span aria-hidden="true" className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+                    <span aria-hidden="true" className="h-8 w-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0 sm:h-10 sm:w-10">
                         <ClipboardList className="h-5 w-5" />
                     </span>
                 </>
@@ -85,18 +85,18 @@ export function PlanningSummaryCards({
                 "hover:border-amber-500/50 hover:shadow-md",
                 hasShortfalls ? "border-amber-500/30 bg-amber-500/5" : "",
                 <>
-                    <span className="block space-y-1" title="Net requirement items that need purchasing or replenishment.">
-                        <span className="block text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    <span className="block min-w-0 space-y-1" title="Net requirement items that need purchasing or replenishment.">
+                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">
                             Material Shortfalls
                         </span>
-                        <span className={`block text-2xl font-black ${hasShortfalls ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
+                        <span className={`block text-xl font-black sm:text-2xl ${hasShortfalls ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
                             {hasShortfallCount ? shortfallItemsCount.toLocaleString() : "—"}
                         </span>
-                        <span className="block text-[10px] text-muted-foreground">
+                        <span className="block text-[9px] text-muted-foreground sm:text-[10px]">
                             {hasShortfallCount ? "Items needing PR or replenishment" : "Requirements calculation unavailable"}
                         </span>
                     </span>
-                    <span aria-hidden="true" className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${hasShortfalls ? "bg-amber-500/10 border border-amber-500/20 text-amber-500" : "bg-muted border text-muted-foreground"}`}>
+                    <span aria-hidden="true" className={`h-8 w-8 rounded-xl flex items-center justify-center shrink-0 sm:h-10 sm:w-10 ${hasShortfalls ? "bg-amber-500/10 border border-amber-500/20 text-amber-500" : "bg-muted border text-muted-foreground"}`}>
                         {hasShortfalls ? <AlertTriangle className="h-5 w-5" /> : <Database className="h-5 w-5" />}
                     </span>
                 </>
@@ -109,18 +109,18 @@ export function PlanningSummaryCards({
                 "hover:border-sky-500/50 hover:shadow-md",
                 "",
                 <>
-                    <span className="block space-y-1" title="Scheduled and released Job Orders for the selected branch, including their staging state.">
-                        <span className="block text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    <span className="block min-w-0 space-y-1" title="Scheduled and released Job Orders for the selected branch, including their staging state.">
+                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">
                             Job Order Queue
                         </span>
-                        <span className="block text-2xl font-black text-foreground">
+                        <span className="block text-xl font-black text-foreground sm:text-2xl">
                             {unreleasedJobsCount.toLocaleString()}
                         </span>
-                        <span className="block text-[10px] text-muted-foreground">
+                        <span className="block text-[9px] text-muted-foreground sm:text-[10px]">
                             Scheduled &amp; released Job Orders
                         </span>
                     </span>
-                    <span aria-hidden="true" className="h-10 w-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-500 shrink-0">
+                    <span aria-hidden="true" className="h-8 w-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-500 shrink-0 sm:h-10 sm:w-10">
                         <Layers className="h-5 w-5" />
                     </span>
                 </>
@@ -133,18 +133,18 @@ export function PlanningSummaryCards({
                 "hover:border-emerald-500/50 hover:shadow-md",
                 "",
                 <>
-                    <span className="block space-y-1">
-                        <span className="block text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    <span className="block min-w-0 space-y-1">
+                        <span className="block text-[11px] font-bold uppercase tracking-wider text-muted-foreground sm:text-xs">
                             Active Family Groups
                         </span>
-                        <span className="block text-2xl font-black text-foreground">
+                        <span className="block text-xl font-black text-foreground sm:text-2xl">
                             {familyGroupsCount.toLocaleString()}
                         </span>
-                        <span className="block text-[10px] text-muted-foreground">
+                        <span className="block text-[9px] text-muted-foreground sm:text-[10px]">
                             Parent &amp; Sub-Assembly Job Bundles
                         </span>
                     </span>
-                    <span aria-hidden="true" className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 shrink-0">
+                    <span aria-hidden="true" className="h-8 w-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 shrink-0 sm:h-10 sm:w-10">
                         <Layers className="h-5 w-5 text-emerald-500" />
                     </span>
                 </>

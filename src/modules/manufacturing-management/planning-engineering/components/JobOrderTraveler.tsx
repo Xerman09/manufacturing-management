@@ -23,6 +23,7 @@ import {
 } from "../types";
 import { displayJobOrderStatus } from "../../job-order-status";
 import { resolveProductionShiftHours } from "../utils/production-timing";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 import { buildTravelerSheetHtml, formatTravelerOperators, resolveTravelerOperationName } from "../utils/traveler-sheet-print";
 import type { OperatorNameMap } from "../utils/traveler-sheet-print";
 
@@ -129,7 +130,7 @@ export function JobOrderTraveler({
         const cProductName = currentJo.product_name || `Product #${currentJo.product_id}`;
         const cProductCode = currentJo.product_code || `SKU-${currentJo.product_id}`;
         const cTargetQty = Number(currentJo.target_quantity || currentJo.quantity || 0);
-        const cUom = currentJo.unit_of_measurement || "PCS";
+        const cUom = getUnitOfMeasureLabel(currentJo);
         const cBatchNo = `LOT-${cJoNo}`;
         const cShiftHours = resolveProductionShiftHours(currentJo.shift_option);
         const cStatus = displayJobOrderStatus(currentJo.status || "Planned");
@@ -262,7 +263,7 @@ export function JobOrderTraveler({
                                     const resQty = Number(mat.reserved_quantity || reqQty);
                                     const matName = mat.product_name || `Component #${mat.product_id}`;
                                     const matCode = mat.product_code || `SKU-${mat.product_id}`;
-                                    const matUom = mat.unit_of_measurement || "pcs";
+                                    const matUom = getUnitOfMeasureLabel(mat);
                                     const lotAllocations = mat.allocations || [];
                                     const lotText = lotAllocations.length > 0 
                                         ? lotAllocations.map((a: JobOrderAllocation) => a.batch_no || `LOT-${a.lot_id}`).join(", ")

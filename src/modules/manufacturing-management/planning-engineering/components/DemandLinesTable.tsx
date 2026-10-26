@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/table";
 import { SalesOrderDemandGroup, SalesOrderDetail, SalesOrderReleaseGroup } from "../types";
 import { displayJobOrderStatus } from "../../job-order-status";
-import { isSchedulableSalesOrderLine, remainingQuantity } from "../utils/demand-groups";
+import { isSchedulableSalesOrderLine, linkedJobOrderQuantityTotals, remainingQuantity, SALES_ORDER_QUANTITY_GUIDANCE } from "../utils/demand-groups";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 import { PlanningPaginationControls, type PlanningPaginationState } from "./PlanningPaginationControls";
 import { PlanningTableSearchBar } from "./PlanningTableSearchBar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -103,8 +104,9 @@ export function DemandLinesTable({
                         Schedulable Sales Order Demand
                     </CardTitle>
                     <CardDescription className="text-sm text-muted-foreground">
-                        Select residual For Production or In Production demand with no active Job Order. Prior output reduces the remaining quantity only after final QA approval and receipt.
+                        Select residual For Production or In Production demand with no active Job Order.
                     </CardDescription>
+                    <p className="mt-2 text-xs text-muted-foreground">{SALES_ORDER_QUANTITY_GUIDANCE}</p>
                 </div>
             </CardHeader>
             <div className="px-6 pb-4">
@@ -147,16 +149,16 @@ export function DemandLinesTable({
             <CardContent className="p-0">
                 {loadingOrders ? (
                     <>
-                        <div role="status" aria-busy="true" aria-label="Loading Sales Order demand" className="hidden 2xl:block">
-                            <DemandHtmlTable className="w-full table-fixed">
+                        <div role="status" aria-busy="true" aria-label="Loading Sales Order demand" className="hidden 2xl:block overflow-x-auto">
+                            <DemandHtmlTable className="w-full min-w-[1400px] table-fixed">
                                 <colgroup>
-                                    {["4%", "12%", "18%", "12%", "14%", "9%", "8%", "11%", "12%"].map((width, index) => (
+                                    {["4%", "11%", "16%", "10%", "14%", "8%", "7%", "7%", "7%", "7%", "9%"].map((width, index) => (
                                         <col key={index} style={{ width }} />
                                     ))}
                                 </colgroup>
                                 <TableHeader className="bg-muted/5">
                                     <TableRow>
-                                        {Array.from({ length: 9 }, (_, index) => (
+                                        {Array.from({ length: 11 }, (_, index) => (
                                             <TableHead key={index}>
                                                 <Skeleton className={`h-4 ${index === 0 ? "w-5" : index < 5 ? "w-24" : "w-16 ml-auto"}`} />
                                             </TableHead>
@@ -166,7 +168,7 @@ export function DemandLinesTable({
                                 <TableBody>
                                     {Array.from({ length: 5 }, (_, row) => (
                                         <TableRow key={row}>
-                                            {Array.from({ length: 9 }, (_, column) => (
+                                            {Array.from({ length: 11 }, (_, column) => (
                                                 <TableCell key={column} className="py-4">
                                                     <Skeleton className={`h-4 ${column === 0 ? "w-5 mx-auto" : column >= 5 ? "w-14 ml-auto" : "w-3/4"}`} />
                                                 </TableCell>
@@ -195,10 +197,10 @@ export function DemandLinesTable({
                     <div className="p-12 text-center text-xs text-muted-foreground font-semibold">No matching Sales Order demand found.</div>
                 ) : (
                     <>
-                        <div className="hidden 2xl:block">
-                        <DemandHtmlTable className="w-full table-fixed">
+                        <div className="hidden 2xl:block overflow-x-auto">
+                        <DemandHtmlTable className="w-full min-w-[1400px] table-fixed">
                             <colgroup>
-                                {["4%", "12%", "18%", "12%", "14%", "9%", "8%", "11%", "12%"].map((width, index) => (
+                                {["4%", "11%", "16%", "10%", "14%", "8%", "7%", "7%", "7%", "7%", "9%"].map((width, index) => (
                                     <col key={index} style={{ width }} />
                                 ))}
                             </colgroup>
@@ -218,15 +220,19 @@ export function DemandLinesTable({
                                     <TableHead className="whitespace-normal break-words font-bold text-xs">Production Status</TableHead>
                                     <TableHead className="whitespace-normal break-words font-bold text-xs">Connected JO</TableHead>
                                     <TableHead className="whitespace-normal break-words text-right font-bold text-xs">Ordered</TableHead>
-                                    <TableHead className="whitespace-normal break-words text-right font-bold text-xs">Planned</TableHead>
-                                    <TableHead className="whitespace-normal break-words text-right font-bold text-xs">Prior QA Credit</TableHead>
-                                    <TableHead className="whitespace-normal break-words text-right font-bold text-xs">Remaining</TableHead>
+                                    <TableHead className="whitespace-normal break-words text-right font-bold text-xs">Active planned</TableHead>
+                                    <TableHead className="whitespace-normal break-words text-right font-bold text-xs">Produced</TableHead>
+                                    <TableHead className="whitespace-normal break-words text-right font-bold text-xs">QA accepted</TableHead>
+                                    <TableHead className="whitespace-normal break-words text-right font-bold text-xs">Prior QA credit</TableHead>
+                                    <TableHead className="whitespace-normal break-words text-right font-bold text-xs">Remaining to plan</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody className="divide-y divide-border">
                                 {visibleLines.map((line) => {
                                     const isSchedulable = isSchedulableSalesOrderLine(line);
                                     const isChecked = selectedIds.has(line.detail_id);
+                                    const linkedQuantities = linkedJobOrderQuantityTotals(line);
+                                    const unit = getUnitOfMeasureLabel(line.product_id);
                                     return (
                                         <TableRow key={line.detail_id} className="hover:bg-muted/5 align-middle">
                                             <TableCell className="px-2 py-3 text-center align-top whitespace-normal">
@@ -245,7 +251,7 @@ export function DemandLinesTable({
                                                 <div className="font-semibold text-foreground break-words" title={line.product_id?.product_name || "Unknown product"}>
                                                     {line.product_id?.product_name || "Unknown product"}
                                                     <span className="ml-1 text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">
-                                                        {line.product_id?.uom || "Pieces"}{line.product_id?.uom_count && line.product_id.uom_count > 1 ? ` (${line.product_id.uom_count} pcs)` : ""}
+                                                        {getUnitOfMeasureLabel(line.product_id)}
                                                     </span>
                                                 </div>
                                                 <div className="text-[10px] font-medium text-primary break-words">Ver: {line.bom_version_name || "No Version"}</div>
@@ -261,23 +267,29 @@ export function DemandLinesTable({
                                                         {line.linkedJobOrders.map((jobOrder) => (
                                                             <div key={jobOrder.jobOrderId}>
                                                                 <div className="font-mono font-semibold text-foreground break-all" title={jobOrder.jobOrderNo}>{jobOrder.jobOrderNo}</div>
-                                                                <div className="text-[10px] text-muted-foreground break-words">{displayJobOrderStatus(jobOrder.status)}</div>
+                                                                <div className="text-[10px] text-muted-foreground break-words">{displayJobOrderStatus(jobOrder.status)} · {jobOrder.allocatedQuantity.toLocaleString()} {unit} allocated · {jobOrder.producedQuantity.toLocaleString()} {unit} produced · {jobOrder.qaAcceptedQuantity.toLocaleString()} {unit} QA accepted</div>
                                                             </div>
                                                         ))}
                                                     </div>
                                             ) : <span className="text-muted-foreground">—</span>}
                                             </TableCell>
                                             <TableCell className="px-2 py-3 text-right align-top font-bold text-xs whitespace-normal break-words">
-                                                <span>{Number(line.ordered_quantity || 0).toLocaleString()} <span className="text-[10px] text-muted-foreground font-normal lowercase">{line.product_id?.uom || "pcs"}</span></span>
+                                                <span className="tabular-nums">{Number(line.ordered_quantity || 0).toLocaleString()} <span className="text-[10px] text-muted-foreground font-normal">{getUnitOfMeasureLabel(line.product_id)}</span></span>
                                             </TableCell>
                                             <TableCell className="px-2 py-3 text-right align-top font-semibold text-xs text-amber-700 whitespace-normal break-words">
-                                                <span>{Number(line.planned_quantity || 0).toLocaleString()}</span>
+                                                <span className="tabular-nums">{Number(line.planned_quantity || 0).toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{unit}</span></span>
+                                            </TableCell>
+                                            <TableCell className="px-2 py-3 text-right align-top font-semibold text-xs text-foreground whitespace-normal break-words">
+                                                <span className="tabular-nums">{linkedQuantities.producedQuantity.toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{unit}</span></span>
                                             </TableCell>
                                             <TableCell className="px-2 py-3 text-right align-top font-semibold text-xs text-sky-700 whitespace-normal break-words">
-                                                <span>{Number(line.replacement_credit_quantity || 0).toLocaleString()}</span>
+                                                <span className="tabular-nums">{linkedQuantities.qaAcceptedQuantity.toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{unit}</span></span>
+                                            </TableCell>
+                                            <TableCell className="px-2 py-3 text-right align-top font-semibold text-xs text-sky-700 whitespace-normal break-words">
+                                                <span className="tabular-nums">{Number(line.replacement_credit_quantity || 0).toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{unit}</span></span>
                                             </TableCell>
                                             <TableCell className="px-2 py-3 text-right align-top font-bold text-xs text-emerald-700 whitespace-normal break-words">
-                                                <span>{remainingQuantity(line).toLocaleString()} <span className="text-[10px] text-muted-foreground font-normal lowercase">{line.product_id?.uom || "pcs"}</span></span>
+                                                <span className="tabular-nums">{remainingQuantity(line).toLocaleString()} <span className="text-[10px] text-muted-foreground font-normal">{getUnitOfMeasureLabel(line.product_id)}</span></span>
                                             </TableCell>
                                         </TableRow>
                                     );
@@ -327,7 +339,7 @@ export function DemandLinesTable({
                                             <div className="text-sm font-semibold text-foreground break-words">{line.product_id?.product_name || "Unknown product"}</div>
                                             <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                                                 <span className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-semibold text-primary">
-                                                    {line.product_id?.uom || "Pieces"}{line.product_id?.uom_count && line.product_id.uom_count > 1 ? ` (${line.product_id.uom_count} pcs)` : ""}
+                                                    {getUnitOfMeasureLabel(line.product_id)}
                                                 </span>
                                                 <span className="text-muted-foreground">BOM version: {line.bom_version_name || "No Version"}</span>
                                             </div>
@@ -337,30 +349,41 @@ export function DemandLinesTable({
                                             {line.linkedJobOrders && line.linkedJobOrders.length > 0 ? (
                                                 <div className="mt-1 space-y-1">
                                                     {line.linkedJobOrders.map((jobOrder) => (
-                                                        <div key={jobOrder.jobOrderId} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-xs">
-                                                            <span className="break-all font-mono font-semibold text-foreground">{jobOrder.jobOrderNo}</span>
-                                                            <span className="text-muted-foreground">{displayJobOrderStatus(jobOrder.status)}</span>
+                                                        <div key={jobOrder.jobOrderId} className="rounded bg-muted/30 px-2 py-1 text-xs">
+                                                            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                                                                <span className="break-all font-mono font-semibold text-foreground">{jobOrder.jobOrderNo}</span>
+                                                                <span className="text-muted-foreground">{displayJobOrderStatus(jobOrder.status)}</span>
+                                                            </div>
+                                                            <div className="mt-1 text-[10px] text-muted-foreground">{jobOrder.allocatedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)} allocated · {jobOrder.producedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)} produced · {jobOrder.qaAcceptedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)} QA accepted</div>
                                                         </div>
                                                     ))}
                                                 </div>
                                             ) : <div className="mt-1 text-xs text-muted-foreground">—</div>}
                                         </div>
-                                        <div className="mt-3 grid grid-cols-2 gap-2 border-t pt-3 sm:grid-cols-4">
+                                        <div className="mt-3 grid grid-cols-2 gap-2 border-t pt-3 sm:grid-cols-3">
                                             <div className="rounded-md bg-muted/30 p-2">
                                                 <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Ordered</div>
-                                                <div className="mt-1 text-xs font-bold text-foreground">{Number(line.ordered_quantity || 0).toLocaleString()} {line.product_id?.uom || "pcs"}</div>
+                                                <div className="mt-1 text-right text-xs font-bold tabular-nums text-foreground">{Number(line.ordered_quantity || 0).toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
                                             </div>
                                             <div className="rounded-md bg-muted/30 p-2">
-                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Planned</div>
-                                                <div className="mt-1 text-xs font-bold text-amber-700">{Number(line.planned_quantity || 0).toLocaleString()}</div>
+                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Active planned</div>
+                                                <div className="mt-1 text-right text-xs font-bold tabular-nums text-amber-700">{Number(line.planned_quantity || 0).toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
                                             </div>
                                             <div className="rounded-md bg-muted/30 p-2">
-                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Prior QA Credit</div>
-                                                <div className="mt-1 text-xs font-bold text-sky-700">{Number(line.replacement_credit_quantity || 0).toLocaleString()}</div>
+                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Produced</div>
+                                                <div className="mt-1 text-right text-xs font-bold tabular-nums text-foreground">{linkedJobOrderQuantityTotals(line).producedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
                                             </div>
                                             <div className="rounded-md bg-muted/30 p-2">
-                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Remaining</div>
-                                                <div className="mt-1 text-xs font-bold text-emerald-700">{remainingQuantity(line).toLocaleString()} {line.product_id?.uom || "pcs"}</div>
+                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">QA accepted</div>
+                                                <div className="mt-1 text-right text-xs font-bold tabular-nums text-sky-700">{linkedJobOrderQuantityTotals(line).qaAcceptedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
+                                            </div>
+                                            <div className="rounded-md bg-muted/30 p-2">
+                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Prior QA credit</div>
+                                                <div className="mt-1 text-right text-xs font-bold tabular-nums text-sky-700">{Number(line.replacement_credit_quantity || 0).toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
+                                            </div>
+                                            <div className="rounded-md bg-muted/30 p-2">
+                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Remaining to plan</div>
+                                                <div className="mt-1 text-right text-xs font-bold tabular-nums text-emerald-700">{remainingQuantity(line).toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
                                             </div>
                                         </div>
                                     </article>

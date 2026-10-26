@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table";
 import { Branch, NetRequirementItem } from "../types";
 import { PlanningPaginationControls, type PlanningPaginationState } from "./PlanningPaginationControls";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -213,6 +214,7 @@ export function NetRequirementsTable({
                             <TableBody className="divide-y divide-border">
                                 {visibleRequirements.map((item) => {
                                     const hasShortfall = item.net_shortfall > 0;
+                                    const uomLabel = getUnitOfMeasureLabel(item);
                                     return (
                                         <TableRow
                                             key={item.product_id}
@@ -231,7 +233,7 @@ export function NetRequirementsTable({
                                                     )}
                                                     <span className={item.is_sub_assembly ? "text-foreground" : ""}>{item.product_name}</span>
                                                     <span className="text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded shrink-0">
-                                                        {item.uom_name || item.unit_of_measurement || "Pieces"}
+                                                        {uomLabel}
                                                     </span>
                                                 </div>
                                                 <div className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
@@ -239,23 +241,23 @@ export function NetRequirementsTable({
                                                 </div>
                                             </TableCell>
                                             <TableCell className="text-right font-semibold text-sm">
-                                                {item.gross_demand.toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{item.uom_name || item.uom_shortcut || "pcs"}</span>
+                                                <span className="tabular-nums">{item.gross_demand.toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{uomLabel}</span></span>
                                             </TableCell>
                                             <TableCell className="text-right text-sm">
-                                                {item.on_hand.toLocaleString()}
+                                                <span className="tabular-nums">{item.on_hand.toLocaleString()} <span className="text-[10px] text-muted-foreground">{uomLabel}</span></span>
                                             </TableCell>
                                             <TableCell className="text-right text-sm text-muted-foreground">
-                                                {item.safety_stock.toLocaleString()}
+                                                <span className="tabular-nums">{item.safety_stock.toLocaleString()} <span className="text-[10px]">{uomLabel}</span></span>
                                             </TableCell>
                                             <TableCell className="text-right py-3">
                                                 {hasShortfall ? (
                                                     item.is_sub_assembly ? (
                                                         <Badge variant="outline" className="font-bold font-mono px-2 py-0.5 text-xs text-sky-400 border-sky-500/30 bg-sky-500/5">
-                                                            {item.net_shortfall.toLocaleString()} Short
+                                                            {item.net_shortfall.toLocaleString()} {uomLabel} Short
                                                         </Badge>
                                                     ) : (
                                                         <Badge variant="destructive" className="font-bold font-mono px-2 py-0.5 text-xs">
-                                                            {item.net_shortfall.toLocaleString()} Short
+                                                            {item.net_shortfall.toLocaleString()} {uomLabel} Short
                                                         </Badge>
                                                     )
                                                 ) : (
