@@ -8,6 +8,7 @@ import { JobOrderJourneyBar } from "../../shared/components/JobOrderJourneyBar";
 import { JobOrderStatusBadge } from "../../shared/components/JobOrderStatusBadge";
 import { displayJobOrderStatus, isCancelledJobOrderStatus, isJobOrderStatus, isTerminatedJobOrder, JOB_ORDER_STATUS, normalizeJobOrderStatus } from "../../job-order-status";
 import { calculateCumulativeRouteWorkloadHours, calculatePipelinedLineDurationHours, resolveProductionShiftHours } from "../utils/production-timing";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 import { getPlanningQueueWorkflowSummary } from "../utils/queue-workflow-summary";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -119,14 +120,14 @@ function JobOrderResponsiveCard({
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <span className="break-words font-bold text-foreground">{jobOrder.product_name}</span>
                         <span className="rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                            {jobOrder.uom_name || jobOrder.unit_of_measurement || "Pieces"}
+                            {getUnitOfMeasureLabel(jobOrder)}
                         </span>
                     </div>
                 </div>
                 <div>
                     <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Target Qty</div>
-                    <div className="mt-1 font-semibold text-foreground">
-                        {jobOrder.quantity?.toLocaleString()} <span className="font-normal text-muted-foreground">{jobOrder.uom_name || jobOrder.uom_shortcut || "pcs"}</span>
+                    <div className="mt-1 text-right font-semibold tabular-nums text-foreground">
+                        {jobOrder.quantity?.toLocaleString()} <span className="font-normal text-muted-foreground">{getUnitOfMeasureLabel(jobOrder)}</span>
                     </div>
                 </div>
                 <div>
@@ -399,12 +400,12 @@ export function JOTable({
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <span className="min-w-0 break-words font-bold text-foreground">{jo.product_name}</span>
                                             <span className="text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md shrink-0">
-                                                {jo.uom_name || jo.unit_of_measurement || "Pieces"}
+                                                {getUnitOfMeasureLabel(jo)}
                                             </span>
                                         </div>
                                     </td>
                                     <td className="px-2 py-3 break-all text-right font-semibold">
-                                        {jo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{jo.uom_name || jo.uom_shortcut || "pcs"}</span>
+                                        <span className="tabular-nums">{jo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{getUnitOfMeasureLabel(jo)}</span></span>
                                     </td>
                                     <td className="px-2 py-3 font-medium">
                                         {metrics.leadTimeHours > 0 ? (
@@ -524,12 +525,12 @@ export function JOTable({
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <span className="min-w-0 break-words font-bold text-foreground">{fg.parentJo.product_name}</span>
                                             <span className="text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md shrink-0">
-                                                {fg.parentJo.uom_name || fg.parentJo.unit_of_measurement || "Pieces"}
+                                                {getUnitOfMeasureLabel(fg.parentJo)}
                                             </span>
                                         </div>
                                     </td>
                                     <td className="px-2 py-3 break-all text-right font-semibold">
-                                        {fg.parentJo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{fg.parentJo.uom_name || fg.parentJo.uom_shortcut || "pcs"}</span>
+                                        <span className="tabular-nums">{fg.parentJo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{getUnitOfMeasureLabel(fg.parentJo)}</span></span>
                                     </td>
                                     <td className="px-2 py-3 font-medium">
                                         {pMetrics.leadTimeHours > 0 ? (
@@ -609,12 +610,12 @@ export function JOTable({
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                     <span className="min-w-0 break-words font-medium text-foreground">{cJo.product_name}</span>
                                                     <span className="text-[10px] font-semibold text-sky-700 dark:text-sky-300 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-md shrink-0">
-                                                        {cJo.uom_name || cJo.unit_of_measurement || "Pieces"}
+                                                        {getUnitOfMeasureLabel(cJo)}
                                                     </span>
                                                 </div>
                                             </td>
                                             <td className="px-2 py-3 break-all text-right font-semibold">
-                                                {cJo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{cJo.uom_name || cJo.uom_shortcut || "pcs"}</span>
+                                                <span className="tabular-nums">{cJo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{getUnitOfMeasureLabel(cJo)}</span></span>
                                             </td>
                                             <td className="px-2 py-3 font-medium">
                                                 {cMetrics.leadTimeHours > 0 ? (

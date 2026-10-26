@@ -18,6 +18,7 @@ import { Step2BOMReview } from "./buffer-jo/Step2BOMReview";
 import { Step3Scheduling } from "./buffer-jo/Step3Scheduling";
 import { Step4Review } from "./buffer-jo/Step4Review";
 import { addCalendarDaysToDateInput, formatPhtDate, getPhtDateInputValue } from "../../shared/pht-date";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 
 interface CreateBufferJODialogProps {
     isOpen: boolean;
@@ -147,11 +148,11 @@ export function CreateBufferJODialog({
 
     const parentProductOptions = useMemo(() => {
         return parentProducts.map((prod) => {
-            const uomName = prod.unit_of_measurement?.unit_name || "";
+            const uomName = getUnitOfMeasureLabel(prod);
             const unitCount = prod.unit_of_measurement_count !== undefined && prod.unit_of_measurement_count !== null
                 ? Number(prod.unit_of_measurement_count)
                 : 1;
-            const suffix = uomName ? ` ${uomName} (${unitCount})` : "";
+            const suffix = uomName === "UOM unavailable" ? ` ${uomName}` : ` ${uomName} (${unitCount})`;
             return {
                 value: String(prod.product_id),
                 label: `${prod.product_name}${suffix}`
@@ -170,8 +171,8 @@ export function CreateBufferJODialog({
 
     const uomOptions = useMemo(() => {
         return familyProducts.map((prod) => {
-            const uomName = prod.unit_of_measurement?.unit_name || "";
-            const uomShortcut = prod.unit_of_measurement?.unit_shortcut || "PCS";
+            const uomName = prod.unit_of_measurement?.unit_name || getUnitOfMeasureLabel(prod);
+            const uomShortcut = prod.unit_of_measurement?.unit_shortcut || prod.unit_of_measurement?.unit_name || "UOM unavailable";
             return {
                 product_id: String(prod.product_id),
                 uom_id: Number(prod.unit_of_measurement?.unit_id || prod.unit_of_measurement || 0),
@@ -654,7 +655,7 @@ export function CreateBufferJODialog({
     const totalEstimatedHours = boxEstimatedHours;
 
     // Dynamic UOM labels
-    const parentUomLabel = (selectedProdObj?.unit_of_measurement?.unit_name || selectedProdObj?.uom_name || selectedProdObj?.uom_shortcut || "Box").toUpperCase();
+    const parentUomLabel = getUnitOfMeasureLabel(selectedProdObj).toUpperCase();
 
     const containerMetrics = useMemo(() => {
         if (!selectedProdObj) return null;
@@ -711,7 +712,7 @@ export function CreateBufferJODialog({
             name: comp.component_product_id?.product_name || `Product #${compProductId}`,
             code: comp.component_product_id?.product_code || "",
             category: comp.component_product_id?.category_name || "Uncategorized",
-            uom: comp.unit_of_measurement || "pcs",
+            uom: getUnitOfMeasureLabel(comp),
             kilogramsPerUnit: comp.component_product_id?.kilograms_per_inventory_unit ?? null,
             needed,
             demandNeeded: materialPlan.demandRequired,
@@ -789,9 +790,9 @@ export function CreateBufferJODialog({
                 const children = subAssemblyBoms[Number(cId)] || [];
                 return children.length > 0 || comp.component_product_id?.product_type === 388 || comp.component_product_id?.is_finished_good;
             })
-            .map(comp => comp.unit_of_measurement || "Piece")
+            .map(comp => getUnitOfMeasureLabel(comp))
     ));
-    const subAssemblyUomLabel = subAssemblyUomList.length > 0 ? subAssemblyUomList.join(", ") : "Piece";
+    const subAssemblyUomLabel = subAssemblyUomList.length > 0 ? subAssemblyUomList.join(", ") : "UOM unavailable";
 
     const hasShortfalls = components.some((comp) => {
         const compProductId = comp.component_product_id?.product_id;
@@ -823,7 +824,7 @@ export function CreateBufferJODialog({
             ).plannedRequired;
             const available = compProductId ? (inventories[Number(compProductId)]?.main_store_on_hand || 0) : 0;
             const shortfall = Math.max(0, needed - available);
-            const uom = comp.unit_of_measurement || "pcs";
+            const uom = getUnitOfMeasureLabel(comp);
             const children = subAssemblyBoms[Number(compProductId)] || [];
             const isSubAssembly = children.length > 0 || comp.component_product_id?.product_type === 388 || comp.component_product_id?.is_finished_good;
 
@@ -854,7 +855,7 @@ export function CreateBufferJODialog({
                     );
                     const ccAvailable = ccId ? (inventories[Number(ccId)]?.main_store_on_hand || 0) : 0;
                     const ccShortfall = Math.max(0, ccNeeded - ccAvailable);
-                    const ccUom = cc.unit_of_measurement || "pcs";
+                    const ccUom = getUnitOfMeasureLabel(cc);
 
                     if (ccShortfall > 0 && printSelection[`child-${compProductId}-${ccId}`]) {
                         tableRowsHtml += `
@@ -927,7 +928,7 @@ export function CreateBufferJODialog({
                             </div>
                             <div>
                                 <div class="jo-summary-label">Plan Output Quantity</div>
-                                <div class="jo-summary-value">${productionTargetQuantity.toLocaleString()} units</div>
+                                <div class="jo-summary-value">${productionTargetQuantity.toLocaleString()} ${parentUomLabel}</div>
                             </div>
                             <div>
                                 <div class="jo-summary-label">Estimated Days</div>
@@ -1030,7 +1031,7 @@ export function CreateBufferJODialog({
             const isSubAssembly = children.length > 0 || comp.component_product_id?.product_type === 388 || comp.component_product_id?.is_finished_good;
             const name = comp.component_product_id?.product_name || `Component #${compProductId}`;
             const code = comp.component_product_id?.product_code || "";
-            const uom = comp.unit_of_measurement || "pcs";
+            const uom = getUnitOfMeasureLabel(comp);
             
             const needed = calculatePerUnitMaterialRequirement(
                 qty,
@@ -1056,7 +1057,7 @@ export function CreateBufferJODialog({
                     const childId = child.component_product_id?.product_id;
                     const childName = child.component_product_id?.product_name || `Child #${childId}`;
                     const childCode = child.component_product_id?.product_code || "";
-                    const childUom = child.unit_of_measurement || "pcs";
+                    const childUom = getUnitOfMeasureLabel(child);
                     
                     const childNeeded = calculatePerUnitMaterialRequirement(
                         needed,
@@ -1104,7 +1105,7 @@ export function CreateBufferJODialog({
                     <div class="meta">
                         <div>
                             <strong>Target Product:</strong> ${productName}<br/>
-                            <strong>Production Qty:</strong> ${qty.toLocaleString()} units<br/>
+                            <strong>Production Qty:</strong> ${qty.toLocaleString()} ${parentUomLabel}<br/>
                             <strong>Date Created:</strong> ${formatPhtDate(new Date())}<br/>
                         </div>
                         <div style="text-align: right;">

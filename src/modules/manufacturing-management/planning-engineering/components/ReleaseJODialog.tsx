@@ -27,6 +27,7 @@ import {
 } from "../utils/cogs-helper";
 import { calculateProductionMetrics } from "../utils/production-metrics";
 import { remainingQuantity } from "../utils/demand-groups";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 import { resolveSalesOrderTargetSellingPrice } from "../utils/sales-order-pricing";
 import { calculateAggregateRunHours, calculateFullBatchTarget, calculatePerUnitMaterialRequirement, calculateReleaseMaterialRequirementPlan, calculateRequiredBatchCount, convergeToFullBatch, DEFAULT_PRODUCTION_SHIFT_HOURS, formatProductionValue, isPieceProductionUom, normalizeProductionOutputQuantity, readUomId, resolveProductionShiftHours, resolveRecipeBatchSizeDisplay, sanitizeQuantityDraft } from "../utils/production-timing";
 import { buildReleaseSummaryHtml, type ReleaseSummaryComponent, type ReleaseSummaryFinancials, type ReleaseSummaryRoutingStep } from "../utils/release-summary-print";
@@ -185,6 +186,7 @@ export function ReleaseJODialog({
         || (selectedLines[0]?.product_id as any)?.uom
         || (selectedLines[0] as any)?.unit_of_measurement
         || "units";
+    const releaseSummaryUomLabel = getUnitOfMeasureLabel(selectedLines[0]?.product_id);
     const operationalRequestedTargetQuantity = normalizeProductionOutputQuantity(requestedTargetQuantity, releaseSummaryUom);
     const requestedProductionQuantity = isMultiRelease
         ? requestedTargetQuantity
@@ -689,7 +691,7 @@ export function ReleaseJODialog({
             name: comp.component_product_id?.product_name || `Product #${compProductId}`,
             code: comp.component_product_id?.product_code || "",
             category: comp.component_product_id?.category_name || "Uncategorized",
-            uom: comp.unit_of_measurement || "pcs",
+            uom: getUnitOfMeasureLabel(comp),
             kilogramsPerUnit: comp.component_product_id?.kilograms_per_inventory_unit ?? null,
             needed,
             demandNeeded: materialPlan.demandRequired,
@@ -784,7 +786,7 @@ export function ReleaseJODialog({
             recipeVersion: selectedLines[0]?.bom_version_name || "Default",
             branchName: selectedBranch?.branch_name || "Main Branch",
             targetQuantity,
-            uom: releaseSummaryUom,
+            uom: releaseSummaryUomLabel,
             plannedDate,
             dueDate,
             shiftHours: shiftOption,
@@ -815,7 +817,7 @@ export function ReleaseJODialog({
             ).plannedRequired;
             const available = compProductId ? (inventories[Number(compProductId)]?.main_store_on_hand || 0) : 0;
             const shortfall = Math.max(0, needed - available);
-            const uom = comp.unit_of_measurement || "pcs";
+            const uom = getUnitOfMeasureLabel(comp);
             const children = subAssemblyBoms[Number(compProductId)] || [];
             const isSubAssembly = children.length > 0 || comp.component_product_id?.product_type === 388 || comp.component_product_id?.is_finished_good;
 
@@ -846,7 +848,7 @@ export function ReleaseJODialog({
                     );
                     const ccAvailable = ccId ? (inventories[Number(ccId)]?.main_store_on_hand || 0) : 0;
                     const ccShortfall = Math.max(0, ccNeeded - ccAvailable);
-                    const ccUom = cc.unit_of_measurement || "pcs";
+                    const ccUom = getUnitOfMeasureLabel(cc);
 
                     if (ccShortfall > 0 && printSelection[`child-${compProductId}-${ccId}`]) {
                         tableRowsHtml += `
@@ -919,7 +921,7 @@ export function ReleaseJODialog({
                             </div>
                             <div>
                                 <div class="jo-summary-label">Plan Output Quantity</div>
-                                <div class="jo-summary-value">${targetQuantity.toLocaleString()} units</div>
+                                <div class="jo-summary-value">${targetQuantity.toLocaleString()} ${releaseSummaryUomLabel}</div>
                             </div>
                             <div>
                                 <div class="jo-summary-label">Estimated Days</div>
@@ -1065,7 +1067,7 @@ export function ReleaseJODialog({
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-muted-foreground">Target UOM:</span>
-                                        <span className="font-semibold text-foreground">{(selectedLines[0].product_id as any)?.uom_name || (selectedLines[0].product_id as any)?.uom || "Pieces"}</span>
+                                        <span className="font-semibold text-foreground">{getUnitOfMeasureLabel(selectedLines[0].product_id)}</span>
                                     </div>
                                     <div className="flex justify-between pt-1 border-t border-border/50">
                                         <span className="text-muted-foreground">Recipe Batch Size (Gross Base Qty):</span>
@@ -1074,7 +1076,7 @@ export function ReleaseJODialog({
                                                 <Skeleton className="h-4 w-24" />
                                             </div>
                                         ) : (
-                                            <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">{bomBaseQty.toLocaleString()} {releaseSummaryUom}</span>
+                                            <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">{bomBaseQty.toLocaleString()} {releaseSummaryUomLabel}</span>
                                         )}
                                     </div>
                                     <div className="flex justify-between">
@@ -1084,7 +1086,7 @@ export function ReleaseJODialog({
                                                 ? <div role="status" aria-busy="true" aria-label="Loading expected net output"><Skeleton className="h-4 w-24" /></div>
                                                 : <span className="font-bold text-blue-600 dark:text-blue-400 font-mono text-xs">—</span>
                                         ) : (
-                                            <span className="font-bold text-blue-600 dark:text-blue-400 font-mono">{batchSizeDisplay.expectedNetQuantity.toLocaleString()} {releaseSummaryUom}</span>
+                                            <span className="font-bold text-blue-600 dark:text-blue-400 font-mono">{batchSizeDisplay.expectedNetQuantity.toLocaleString()} {releaseSummaryUomLabel}</span>
                                         )}
                                     </div>
                                     {versionDrift && !loadingDetails && (
@@ -1095,7 +1097,7 @@ export function ReleaseJODialog({
                                                     Pinned recipe #{versionDrift.pinnedId} differs from {versionDrift.latestName} #{versionDrift.latestId}.
                                                 </p>
                                                 <p className="text-amber-700/80 dark:text-amber-300/80">
-                                                    Batch math uses the pinned version ({versionDrift.pinnedBase.toLocaleString()} vs latest {Number.isFinite(versionDrift.latestBase) ? versionDrift.latestBase.toLocaleString() : "—"} {releaseSummaryUom}).
+                                                    Batch math uses the pinned version ({versionDrift.pinnedBase.toLocaleString()} vs latest {Number.isFinite(versionDrift.latestBase) ? versionDrift.latestBase.toLocaleString() : "—"} {releaseSummaryUomLabel}).
                                                     {versionDrift.understatePct !== null && versionDrift.understatePct > 0
                                                         ? ` Material plans understate by ~${versionDrift.understatePct.toFixed(1)}% until re-pinned or corrected.`
                                                         : " Re-pin the SO line or correct master data if the pinned row is stale."}
@@ -1221,7 +1223,7 @@ export function ReleaseJODialog({
                                             <Input
                                                 id="target-effective-input"
                                                 type="text"
-                                                value={loadingDetails || !hasLoadedDetails ? "" : `${convergedTarget.effective.toLocaleString()} ${releaseSummaryUom}`}
+                                                value={loadingDetails || !hasLoadedDetails ? "" : `${convergedTarget.effective.toLocaleString()} ${releaseSummaryUomLabel}`}
                                                 readOnly
                                                 disabled
                                                 className="h-9 font-semibold bg-muted text-muted-foreground border-input font-mono"
@@ -1239,7 +1241,7 @@ export function ReleaseJODialog({
                                         <p className="text-[10px] text-muted-foreground">
                                             {!hasLoadedDetails
                                                 ? "Loading the recipe batch target and production details."
-                                                : `Effective production target: ${formatProductionValue(targetQuantity)} ${releaseSummaryUom} (${requiredBatchCount || 0} full recipe batch${requiredBatchCount === 1 ? "" : "es"}). SO demand remains ${formatProductionValue(requestedTargetQuantity)} ${releaseSummaryUom}. ${isPieceProductionUom(releaseSummaryUom) ? "Piece targets are shown as whole units." : ""}`}
+                                                : `Effective production target: ${formatProductionValue(targetQuantity)} ${releaseSummaryUomLabel} (${requiredBatchCount || 0} full recipe batch${requiredBatchCount === 1 ? "" : "es"}). SO demand remains ${formatProductionValue(requestedTargetQuantity)} ${releaseSummaryUomLabel}. ${isPieceProductionUom(releaseSummaryUom) ? "Piece targets are shown as whole units." : ""}`}
                                         </p>
                                     )}
 
@@ -1558,7 +1560,7 @@ export function ReleaseJODialog({
                                                                 const available = summaryComponent.available;
                                                                 const shortfall = Math.max(0, needed - available);
                                                                 const isSufficient = summaryComponent.sufficient;
-                                                                const uom = comp.unit_of_measurement || "pcs";
+                                                                const uom = getUnitOfMeasureLabel(comp);
                                                                 const kilogramsPerUnit = comp.component_product_id?.kilograms_per_inventory_unit;
                                                                 const neededDisplay = formatInventoryQuantity(needed, uom, kilogramsPerUnit);
                                                                 const demandDisplay = formatInventoryQuantity(materialPlan.demandRequired, uom, kilogramsPerUnit);
@@ -1690,7 +1692,7 @@ export function ReleaseJODialog({
                                                                             );
                                                                             const ccAvailable = ccId ? (inventories[Number(ccId)]?.main_store_on_hand || 0) : 0;
                                                                             const ccShortfall = Math.max(0, ccNeeded - ccAvailable);
-                                                                            const ccUom = cc.unit_of_measurement || "pcs";
+                                                                            const ccUom = getUnitOfMeasureLabel(cc);
                                                                             const ccKilogramsPerUnit = cc.component_product_id?.kilograms_per_inventory_unit;
                                                                             const ccNeededDisplay = formatInventoryQuantity(ccNeeded, ccUom, ccKilogramsPerUnit);
                                                                             const ccShortfallDisplay = formatInventoryQuantity(ccShortfall, ccUom, ccKilogramsPerUnit);
@@ -1831,7 +1833,7 @@ export function ReleaseJODialog({
                                                     <span className="font-mono font-bold text-primary">{joNumberProp}-{String(index + 1).padStart(2, "0")}</span>
                                                 </div>
                                                 <div className="text-muted-foreground">{group.bomVersionName} · {group.lines.length} detail line{group.lines.length === 1 ? "" : "s"}</div>
-                                                <div className="font-bold text-emerald-700">Full remaining: {group.totalRemainingQuantity.toLocaleString()} {group.lines[0]?.product_id?.uom || "units"}</div>
+                                                <div className="font-bold tabular-nums text-emerald-700">Full remaining: {group.totalRemainingQuantity.toLocaleString()} {getUnitOfMeasureLabel(group.lines[0]?.product_id)}</div>
                                                 <div className="text-muted-foreground">Operators assigned: {Object.values(groupAssignments[group.key] || {}).reduce((sum, ids) => sum + ids.length, 0)}</div>
                                             </div>
                                         ))}
@@ -1850,7 +1852,7 @@ export function ReleaseJODialog({
                                                 { label: "Product Name", value: selectedLines[0]?.product_id?.product_name || "N/A" },
                                                 { label: "Recipe Version", value: selectedLines[0]?.bom_version_name || "Default" },
                                                 { label: "Target Branch", value: selectedBranch?.branch_name || "N/A" },
-                                                { label: "Target Quantity", value: `${targetQuantity.toLocaleString()} ${releaseSummaryUom}` },
+                                                { label: "Target Quantity", value: `${targetQuantity.toLocaleString()} ${releaseSummaryUomLabel}` },
                                                 { label: "Planned Date / Due", value: `${plannedDate || "Not set"} / ${dueDate || "Not set"}` },
                                                 { label: "Target Duration", value: `${formatProductionValue(totalEstimatedHours)} hrs (Shift: ${shiftOption} hrs)` },
                                                 { label: "Consolidated Orders", value: releaseSummaryOrders.length > 0 ? releaseSummaryOrders.join(", ") : "—" }

@@ -40,6 +40,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isCancelledJobOrderStatus, isJobOrderStatus, isTerminatedJobOrder, JOB_ORDER_STATUS, normalizeJobOrderStatus, displayJobOrderStatus } from "../job-order-status";
 import { calculateCumulativeRouteWorkloadHours, calculatePipelinedLineDurationHours, resolveProductionShiftHours } from "./utils/production-timing";
+import { getUnitOfMeasureLabel } from "./utils/unit-of-measure";
 import JsBarcode from "jsbarcode";
 import QRCode from "qrcode";
 import {
@@ -59,6 +60,7 @@ type MaterialLoadState = {
 };
 
 type PlanningTabKey = "demand" | "production" | "inventory" | "queue" | "cancelled";
+const WORKFLOW_GUIDE_DISMISSED_KEY = "planning-engineering-workflow-guide-dismissed";
 type PlanningTabItem = {
     value: PlanningTabKey;
     fullLabel: string;
@@ -259,6 +261,15 @@ export default function PlanningEngineeringModule() {
             : { ...current, [tab]: { page: 1, pageSize } });
     }, []);
     const [showWorkflowGuide, setShowWorkflowGuide] = useState(true);
+    useEffect(() => {
+        try {
+            if (window.localStorage.getItem(WORKFLOW_GUIDE_DISMISSED_KEY) === "true") {
+                setShowWorkflowGuide(false);
+            }
+        } catch {
+            // Keep the guide available when browser storage is unavailable.
+        }
+    }, []);
     const [pendingBranchChange, setPendingBranchChange] = useState<{
         branchId: number | null;
         fromBranchName: string;
@@ -892,7 +903,7 @@ export default function PlanningEngineeringModule() {
 
                 <div class="info-box">
                     <strong>Primary Product:</strong> ${activeFamilyJo.product_name} &bull;
-                    <strong>Target Run Qty:</strong> ${activeFamilyJo.quantity?.toLocaleString()} pcs &bull;
+                    <strong>Target Run Qty:</strong> ${activeFamilyJo.quantity?.toLocaleString()} ${escapeWorksheetHtml(getUnitOfMeasureLabel(activeFamilyJo))} &bull;
                     <strong>Shift Duration:</strong> ${resolveProductionShiftHours(activeFamilyJo.shiftOption)} hrs
                 </div>
 
@@ -980,7 +991,7 @@ export default function PlanningEngineeringModule() {
             const joQr = await worksheetQrDataUrl(`JO:${joNo}|QTY:${jo.quantity || 0}`);
             const joStatus = displayJobOrderStatus(jo.status || "Draft");
             const joVersion = jo.version_name || jo.recipe_version_name || (jo.version_id ? `v${jo.version_id}` : "Standard");
-            const joUom = jo.uom_name || jo.unit_of_measurement || "pcs";
+            const joUom = getUnitOfMeasureLabel(jo);
             const routingRows = routingSteps.map((t: any, index: number) => `
                 <tr>
                     <td style="padding: 8px; border: 1px solid #e5e7eb; text-align: center; font-weight: bold;">${t.sequence_order ?? index + 1}</td>
@@ -1353,40 +1364,31 @@ export default function PlanningEngineeringModule() {
 
     return (
         <div className="space-y-6 p-1 sm:p-2">
-            {/* Summary Cards */}
-            <PlanningSummaryCards
-                demandLinesCount={schedulableDemandLineCount}
-                shortfallItemsCount={shortfallCount}
-                unreleasedJobsCount={unreleasedJobs.length}
-                familyGroupsCount={familyGroups.filter((group) => group.isFamily).length}
-                onSelectTab={setActiveMainTab}
-            />
-
             {/* Header banner */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-card border rounded-xl p-6 shadow-sm">
-                <div className="space-y-1">
+            <div className="flex flex-col gap-4 bg-card border rounded-xl p-6 shadow-sm">
+                <div className="min-w-0 space-y-1">
                     <h1 className="text-2xl font-bold tracking-tight">Job Order Planning & MRP Engine</h1>
                     <p className="text-sm text-muted-foreground">
                         Schedule residual For Production and In Production demand by branch, run branch-scoped Net Requirements calculations, and create Job Orders for the shop floor.
                     </p>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                     {/* Branch Dropdown */}
                     {loadingBranches ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                             <span className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Target Branch:</span>
-                            <div role="status" aria-busy="true" aria-label="Loading branches">
-                                <Skeleton className="h-9 w-[200px] rounded-md" />
+                            <div role="status" aria-busy="true" aria-label="Loading branches" className="w-full min-w-0 sm:w-auto">
+                                <Skeleton className="h-11 w-full rounded-md sm:h-9 sm:w-[200px]" />
                             </div>
                         </div>
                     ) : (
-                        <div className="flex items-center gap-2">
+                        <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                             <span className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Target Branch:</span>
                             <Select
                                 value={selectedBranchId === null ? "" : String(selectedBranchId)}
                                 onValueChange={handleTargetBranchChange}
                             >
-                                <SelectTrigger className="w-[200px] h-9 font-semibold text-sm" aria-label="Target Branch" aria-required="true">
+                                <SelectTrigger className="h-11 w-full min-w-0 font-semibold text-sm sm:h-9 sm:w-[200px]" aria-label="Target Branch" aria-required="true">
                                     <SelectValue placeholder="Select Target Branch..." />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1400,15 +1402,25 @@ export default function PlanningEngineeringModule() {
                         </div>
                     )}
 
-                    <Button variant="default" className="h-9 font-semibold" onClick={() => setIsBufferDialogOpen(true)}>
+                    <Button variant="default" className="h-11 w-full font-semibold sm:h-9 sm:w-auto" onClick={() => setIsBufferDialogOpen(true)}>
                         Create Buffer JO
                     </Button>
 
-                    <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => loadInitialData()} title="Reload Data">
+                    <Button variant="outline" className="h-11 w-full sm:h-9 sm:w-9 sm:px-0" onClick={() => loadInitialData()} title="Reload Data" aria-label="Refresh planning data">
                         <RefreshCw className="h-4 w-4" />
+                        <span className="sm:sr-only">Refresh</span>
                     </Button>
                 </div>
             </div>
+
+            {/* Summary Cards */}
+            <PlanningSummaryCards
+                demandLinesCount={schedulableDemandLineCount}
+                shortfallItemsCount={shortfallCount}
+                unreleasedJobsCount={unreleasedJobs.length}
+                familyGroupsCount={familyGroups.filter((group) => group.isFamily).length}
+                onSelectTab={setActiveMainTab}
+            />
 
             {!loadingBranches && !hasValidTargetBranch && (
                 <div role="status" className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-semibold text-amber-700 dark:text-amber-400">
@@ -1457,7 +1469,19 @@ export default function PlanningEngineeringModule() {
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                             <StatusLegendPopover />
-                            <Button variant="ghost" size="sm" onClick={() => setShowWorkflowGuide(false)} className="h-8 text-xs">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                    setShowWorkflowGuide(false);
+                                    try {
+                                        window.localStorage.setItem(WORKFLOW_GUIDE_DISMISSED_KEY, "true");
+                                    } catch {
+                                        // Dismissing the guide still works for the current visit.
+                                    }
+                                }}
+                                className="h-8 text-xs"
+                            >
                                 Dismiss
                             </Button>
                         </div>
@@ -1794,7 +1818,7 @@ export default function PlanningEngineeringModule() {
                                     {activeFamilyJo?.jo_id}
                                 </DialogTitle>
                                 <DialogDescription className="text-xs text-muted-foreground mt-1">
-                                    Product: <span className="font-bold text-foreground">{activeFamilyJo?.product_name}</span> • Quantity: <span className="font-bold text-foreground">{activeFamilyJo?.quantity?.toLocaleString()} pcs</span>
+                                    Product: <span className="font-bold text-foreground">{activeFamilyJo?.product_name}</span> • Quantity: <span className="font-bold tabular-nums text-foreground">{activeFamilyJo?.quantity?.toLocaleString()} {getUnitOfMeasureLabel(activeFamilyJo)}</span>
                                 </DialogDescription>
                             </div>
                             <div className="flex flex-col items-end gap-2">
@@ -1947,11 +1971,11 @@ export default function PlanningEngineeringModule() {
                                             </span>
                                             <h3 className="font-extrabold text-lg text-foreground">{selectedUnreleasedJo?.jo_id}</h3>
                                             <span className="text-xs text-muted-foreground font-medium">
-                                                ({selectedUnreleasedJo?.product_name} • <strong className="text-foreground font-semibold">{selectedUnreleasedJo?.uom_name || selectedUnreleasedJo?.unit_of_measurement || "Pieces"}</strong>)
+                                                ({selectedUnreleasedJo?.product_name} • <strong className="text-foreground font-semibold">{getUnitOfMeasureLabel(selectedUnreleasedJo)}</strong>)
                                             </span>
                                         </div>
                                         <span className="text-xs font-bold text-foreground bg-muted px-3 py-1 rounded-full border border-border">
-                                            {selectedUnreleasedJo?.quantity?.toLocaleString()} {selectedUnreleasedJo?.uom_name || selectedUnreleasedJo?.uom_shortcut || "pcs"}
+                                            {selectedUnreleasedJo?.quantity?.toLocaleString()} {getUnitOfMeasureLabel(selectedUnreleasedJo)}
                                         </span>
                                     </div>
 
@@ -2078,11 +2102,11 @@ export default function PlanningEngineeringModule() {
                                                     </span>
                                                     <h3 className="font-extrabold text-lg text-foreground">{childJo.jo_id}</h3>
                                                     <span className="text-xs text-muted-foreground font-medium">
-                                                        ({childJo.product_name} • <strong className="text-foreground font-semibold">{childJo.uom_name || childJo.unit_of_measurement || "Pieces"}</strong>)
+                                                        ({childJo.product_name} • <strong className="text-foreground font-semibold">{getUnitOfMeasureLabel(childJo)}</strong>)
                                                     </span>
                                                 </div>
                                                 <span className="text-xs font-bold text-sky-700 dark:text-sky-300 bg-sky-500/10 px-3 py-1 rounded-full border border-sky-500/20">
-                                                    {childJo.quantity?.toLocaleString()} {childJo.uom_name || childJo.uom_shortcut || "pcs"}
+                                                    {childJo.quantity?.toLocaleString()} {getUnitOfMeasureLabel(childJo)}
                                                 </span>
                                             </div>
 
