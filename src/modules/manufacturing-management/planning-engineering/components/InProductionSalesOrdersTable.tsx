@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Activity, Plus, RefreshCw } from "lucide-react";
+import { Activity, Plus } from "lucide-react";
 import {
     Card,
     CardContent,
@@ -23,10 +23,13 @@ import { canCreateReplacementJobOrder, linkedJobOrderQuantityTotals, remainingQu
 import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 import { PlanningPaginationControls, type PlanningPaginationState } from "./PlanningPaginationControls";
 import { PlanningTableSearchBar } from "./PlanningTableSearchBar";
+import { PlanningDataStatus } from "./PlanningDataStatus";
 
 interface InProductionSalesOrdersTableProps {
     loadingOrders: boolean;
     error?: string | null;
+    lastUpdatedAt: string | null;
+    hasBranchSelected: boolean;
     salesOrderGroups: SalesOrderDemandGroup[];
     onRetry: () => void;
     onCreateJobOrder: (detailId: number) => void;
@@ -86,6 +89,8 @@ function ProductionTableSkeleton() {
 export function InProductionSalesOrdersTable({
     loadingOrders,
     error,
+    lastUpdatedAt,
+    hasBranchSelected,
     salesOrderGroups,
     onRetry,
     onCreateJobOrder,
@@ -146,41 +151,21 @@ export function InProductionSalesOrdersTable({
                 />
             </div>
             <CardContent className="p-0">
-                {loadingOrders ? (
+                {!hasBranchSelected ? (
+                    <div className="px-6 py-12 text-center text-sm text-muted-foreground">Select a target branch to view branch-scoped production orders.</div>
+                ) : loadingOrders && !lastUpdatedAt ? (
                     <ProductionTableSkeleton />
-                ) : error && salesOrderGroups.length === 0 ? (
-                    <div role="alert" className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-                        <p className="text-sm font-bold text-destructive">Unable to load Sales Orders in production</p>
-                        <p className="max-w-xl text-xs text-muted-foreground">{error}</p>
-                        <Button type="button" variant="outline" size="sm" onClick={onRetry} className="gap-2 font-bold">
-                            <RefreshCw className="h-3.5 w-3.5" />
-                            Retry
-                        </Button>
-                    </div>
-                ) : filteredGroups.length === 0 ? (
-                    <>
-                        {error && (
-                            <div role="status" className="flex items-center justify-between gap-3 border-b px-6 py-3 text-xs text-amber-700 dark:text-amber-400">
-                                <span>{error}</span>
-                                <Button type="button" variant="outline" size="sm" onClick={onRetry} className="shrink-0 gap-2 font-bold">
-                                    <RefreshCw className="h-3.5 w-3.5" /> Retry
-                                </Button>
-                            </div>
-                        )}
-                        <div role="status" className="px-6 py-16 text-center text-xs font-semibold text-muted-foreground">
-                            {searchQuery ? "No In Production Sales Orders match your search." : "No Sales Orders are currently In Production."}
-                        </div>
-                    </>
+                ) : error && !lastUpdatedAt ? (
+                    <PlanningDataStatus label="Sales Orders in production" loading={loadingOrders} error={error} lastUpdatedAt={lastUpdatedAt} onRetry={onRetry} />
                 ) : (
                     <>
-                        {error && (
-                            <div role="status" className="flex items-center justify-between gap-3 border-b px-6 py-3 text-xs text-amber-700 dark:text-amber-400">
-                                <span>{error} Showing the last successfully loaded results.</span>
-                                <Button type="button" variant="outline" size="sm" onClick={onRetry} className="shrink-0 gap-2 font-bold">
-                                    <RefreshCw className="h-3.5 w-3.5" /> Retry
-                                </Button>
+                        <PlanningDataStatus label="Sales Orders in production" loading={loadingOrders} error={error || null} lastUpdatedAt={lastUpdatedAt} onRetry={onRetry} />
+                        {filteredGroups.length === 0 ? (
+                            <div role="status" className="px-6 py-16 text-center text-xs font-semibold text-muted-foreground">
+                                {searchQuery ? "No In Production Sales Orders match your search." : "No Sales Orders are currently In Production."}
                             </div>
-                        )}
+                        ) : (
+                            <>
                         <div className="2xl:hidden max-h-[50vh] space-y-3 overflow-y-auto p-3">
                             {visibleGroups.map((group) => (
                                 <article key={group.order.order_id} className="rounded-lg border bg-card p-3 shadow-sm">
@@ -202,15 +187,17 @@ export function InProductionSalesOrdersTable({
                                     <div className="mt-3 space-y-3">
                                         {group.lines.map((line) => (
                                             <section key={line.detail_id} className="space-y-3 border-t pt-3">
-                                                <div>
+                                                <div className="min-w-0 space-y-2">
                                                     <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Product / BOM Version</div>
-                                                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm font-semibold text-foreground">
-                                                        <span className="break-words">{line.product_id?.product_name || "Unknown product"}</span>
-                                                        <span className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                                                            {getUnitOfMeasureLabel(line.product_id)}
-                                                        </span>
+                                                    <div className="space-y-1.5">
+                                                        <div className="break-words text-sm font-semibold leading-snug text-foreground">{line.product_id?.product_name || "Unknown product"}</div>
+                                                        <div>
+                                                            <span className="inline-flex max-w-full whitespace-normal break-words rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-snug text-primary">
+                                                                {getUnitOfMeasureLabel(line.product_id)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="break-words text-[11px] font-medium leading-snug text-primary">BOM version: {line.bom_version_name || "No Version"}</div>
                                                     </div>
-                                                    <div className="text-[11px] font-medium text-primary">BOM version: {line.bom_version_name || "No Version"}</div>
                                                 </div>
 
                                                 <div>
@@ -313,14 +300,18 @@ export function InProductionSalesOrdersTable({
                                         </TableCell>
                                         <TableCell className="min-w-[240px] py-3 text-xs">
                                             <LineStack lines={group.lines} render={(line) => (
-                                                <div>
-                                                    <div className="flex flex-wrap items-center gap-1.5 font-semibold text-foreground">
-                                                        <span>{line.product_id?.product_name || "Unknown product"}</span>
-                                                        <span className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                                                            {getUnitOfMeasureLabel(line.product_id)}
-                                                        </span>
+                                                <div className="min-w-0 space-y-2">
+                                                    <div className="break-words font-semibold leading-snug text-foreground">
+                                                        {line.product_id?.product_name || "Unknown product"}
                                                     </div>
-                                                    <div className="text-[10px] font-medium text-primary">Ver: {line.bom_version_name || "No Version"}</div>
+                                                    <div className="space-y-1.5">
+                                                        <div>
+                                                            <span className="inline-flex max-w-full whitespace-normal break-words rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-snug text-primary">
+                                                                {getUnitOfMeasureLabel(line.product_id)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="break-words text-[10px] font-medium leading-snug text-primary">Ver: {line.bom_version_name || "No Version"}</div>
+                                                    </div>
                                                 </div>
                                             )} />
                                         </TableCell>
@@ -398,6 +389,8 @@ export function InProductionSalesOrdersTable({
                             totalItems={filteredGroups.length}
                             itemLabel="Sales Orders"
                         />
+                            </>
+                        )}
                     </>
                 )}
             </CardContent>

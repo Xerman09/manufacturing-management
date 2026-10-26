@@ -53,8 +53,14 @@ export function usePlanningEngineering() {
 
     // UI State
     const [loadingBranches, setLoadingBranches] = useState(true);
+    const [branchesError, setBranchesError] = useState<string | null>(null);
+    const [branchesLastUpdatedAt, setBranchesLastUpdatedAt] = useState<string | null>(null);
     const [loadingOrders, setLoadingOrders] = useState(true);
+    const [ordersError, setOrdersError] = useState<string | null>(null);
+    const [ordersLastUpdatedAt, setOrdersLastUpdatedAt] = useState<string | null>(null);
     const [loadingRequirements, setLoadingRequirements] = useState(false);
+    const [requirementsError, setRequirementsError] = useState<string | null>(null);
+    const [requirementsLastUpdatedAt, setRequirementsLastUpdatedAt] = useState<string | null>(null);
     const [releasingJO, setReleasingJO] = useState(false);
     const [directAllocating, setDirectAllocating] = useState(false);
     const [versionStock, setVersionStock] = useState<number | null>(null);
@@ -71,6 +77,7 @@ export function usePlanningEngineering() {
     const [productionDetailsMap, setProductionDetailsMap] = useState<Record<number, SalesOrderDetail[]>>({});
     const [loadingProductionOrders, setLoadingProductionOrders] = useState(true);
     const [productionOrdersError, setProductionOrdersError] = useState<string | null>(null);
+    const [productionOrdersLastUpdatedAt, setProductionOrdersLastUpdatedAt] = useState<string | null>(null);
     const [netRequirements, setNetRequirements] = useState<NetRequirementItem[]>([]);
     const [subAssemblyMapping, setSubAssemblyMapping] = useState<Record<number, any[]>>({});
     const [subAssemblyLookupState, setSubAssemblyLookupState] = useState<{
@@ -103,14 +110,21 @@ export function usePlanningEngineering() {
     const [rawUnreleasedJobs, setRawUnreleasedJobs] = useState<any[]>([]);
     const [rawCancelledJobs, setRawCancelledJobs] = useState<any[]>([]);
     const [loadingJobs, setLoadingJobs] = useState(true);
+    const [jobOrdersError, setJobOrdersError] = useState<string | null>(null);
+    const [jobOrdersLastUpdatedAt, setJobOrdersLastUpdatedAt] = useState<string | null>(null);
     const [releasingDraftId, setReleasingDraftId] = useState<string | null>(null);
     const [pendingDeepLinkJo, setPendingDeepLinkJo] = useState<string | null>(null);
     const [deepLinkJo, setDeepLinkJo] = useState<any | null>(null);
     const [deepLinkNotice, setDeepLinkNotice] = useState<string | null>(null);
     const productionRequestIdRef = useRef(0);
+    const branchRequestIdRef = useRef(0);
+    const planningOrdersRequestIdRef = useRef(0);
+    const jobOrdersRequestIdRef = useRef(0);
     const isMountedRef = useRef(false);
     const netRequirementsRequestIdRef = useRef(0);
     const netRequirementsAbortControllerRef = useRef<AbortController | null>(null);
+    const netRequirementsScopeRef = useRef<string | null>(null);
+    const subAssemblyScopeRef = useRef<string | null>(null);
     const inventoryRefreshContextRef = useRef({ branchId: null as number | null, productIds: new Set<number>() });
     const refreshNetRequirementsRef = useRef<() => Promise<void>>(async () => undefined);
 
@@ -138,22 +152,72 @@ export function usePlanningEngineering() {
         );
     }, [rawCancelledJobs, selectedBranchId]);
 
-    const loadUnreleasedJobs = async () => {
-        setLoadingJobs(true);
+    const loadBranches = async () => {
+        const requestId = ++branchRequestIdRef.current;
+        setLoadingBranches(true);
+        setBranchesError(null);
         try {
-            const res = await fetch("/api/manufacturing/planning-engineering");
-            if (res.ok) {
-                const data = await res.json();
-                // The queue keeps released Job Orders visible so users can see
-                // where they moved after scheduling instead of losing them.
-                const { queuedJobs, cancelledJobs } = splitJobOrderQueues(data);
-                setRawUnreleasedJobs(queuedJobs);
-                setRawCancelledJobs(cancelledJobs);
-            }
+            const activeBranches = await fetchBranches();
+            if (!isMountedRef.current || requestId !== branchRequestIdRef.current) return;
+            setBranches(activeBranches);
+            setBranchesLastUpdatedAt(new Date().toISOString());
         } catch (err) {
-            console.error("Error loading unreleased job orders:", err);
+            if (!isMountedRef.current || requestId !== branchRequestIdRef.current) return;
+            const message = err instanceof Error ? err.message : "Failed to load branches.";
+            console.error("Error loading branches:", err);
+            setBranchesError(message);
         } finally {
-            setLoadingJobs(false);
+            if (isMountedRef.current && requestId === branchRequestIdRef.current) setLoadingBranches(false);
+        }
+    };
+
+    const loadPlanningOrders = async () => {
+        const requestId = ++planningOrdersRequestIdRef.current;
+        setLoadingOrders(true);
+        setOrdersError(null);
+        setRequirementsError(null);
+        try {
+            const soResult = await fetchSalesOrders("planning");
+            if (!isMountedRef.current || requestId !== planningOrdersRequestIdRef.current) return;
+            setSalesOrders(soResult.data || []);
+            setDetailsMap(soResult.detailsMap || {});
+            setOrdersLastUpdatedAt(new Date().toISOString());
+        } catch (err) {
+            if (!isMountedRef.current || requestId !== planningOrdersRequestIdRef.current
+                || (err instanceof Error && err.name === "AbortError")) return;
+            const message = err instanceof Error ? err.message : "Failed to load schedulable Sales Order demand.";
+            console.error("Error loading schedulable Sales Order demand:", err);
+            setOrdersError(message);
+        } finally {
+            if (isMountedRef.current && requestId === planningOrdersRequestIdRef.current) setLoadingOrders(false);
+        }
+    };
+
+    const loadJobOrders = async () => {
+        const requestId = ++jobOrdersRequestIdRef.current;
+        setLoadingJobs(true);
+        setJobOrdersError(null);
+        try {
+            const res = await fetch("/api/manufacturing/planning-engineering", { cache: "no-store" });
+            const payload = await res.json().catch(() => null);
+            if (!res.ok) {
+                throw new Error(typeof payload?.error === "string" ? payload.error : "Failed to load Job Order queue.");
+            }
+            if (!Array.isArray(payload)) throw new Error("Job Order queue returned an invalid response.");
+            if (!isMountedRef.current || requestId !== jobOrdersRequestIdRef.current) return;
+
+            // Keep released Job Orders visible so users can see where they moved.
+            const { queuedJobs, cancelledJobs } = splitJobOrderQueues(payload);
+            setRawUnreleasedJobs(queuedJobs);
+            setRawCancelledJobs(cancelledJobs);
+            setJobOrdersLastUpdatedAt(new Date().toISOString());
+        } catch (err) {
+            if (!isMountedRef.current || requestId !== jobOrdersRequestIdRef.current) return;
+            const message = err instanceof Error ? err.message : "Failed to load Job Order queue.";
+            console.error("Error loading Job Order queue:", err);
+            setJobOrdersError(message);
+        } finally {
+            if (isMountedRef.current && requestId === jobOrdersRequestIdRef.current) setLoadingJobs(false);
         }
     };
 
@@ -203,7 +267,7 @@ export function usePlanningEngineering() {
                     const forceMessage = "Job Order forcibly released. It stays in the queue ? next step: stage materials.";
                     if (forceWarnings.length > 0) toast.warning(`${forceMessage} ${forceWarnings.join(" ")}`);
                     else toast.success(forceMessage);
-                    await loadInitialData(true);
+                    await loadInitialData();
                     return true;
                 }
                 return false;
@@ -213,7 +277,7 @@ export function usePlanningEngineering() {
                 : Array.isArray(data.data?.warnings) ? data.data.warnings : [];
             toast.success("Job Order initialized. Next step: stage its materials on the shop floor.");
             if (warnings.length > 0) toast.warning(warnings.join(" "));
-            await loadInitialData(true);
+            await loadInitialData();
             return true;
         } catch (err: any) {
             console.error("Failed to release Draft JO:", err);
@@ -227,12 +291,14 @@ export function usePlanningEngineering() {
     const loadInProductionSalesOrders = async () => {
         const requestId = ++productionRequestIdRef.current;
         setLoadingProductionOrders(true);
+        setProductionOrdersError(null);
         try {
             const result = await fetchSalesOrders("in-production");
             if (requestId !== productionRequestIdRef.current) return;
             setProductionSalesOrders(result.data || []);
             setProductionDetailsMap(result.detailsMap || {});
             setProductionOrdersError(null);
+            setProductionOrdersLastUpdatedAt(new Date().toISOString());
         } catch (err) {
             if (requestId !== productionRequestIdRef.current || (err instanceof Error && err.name === "AbortError")) return;
             const message = err instanceof Error ? err.message : "Failed to load Sales Orders in production.";
@@ -245,45 +311,14 @@ export function usePlanningEngineering() {
         }
     };
 
-    // Initial Fetch: branches and all residual Sales Order demand eligible for planning.
-    const loadInitialData = async (silent = false) => {
-        if (!silent) {
-            setLoadingBranches(true);
-            setLoadingOrders(true);
-            setLoadingJobs(true);
-        }
-        void loadInProductionSalesOrders();
-        try {
-            const [activeBranches, soResult, jobOrderQueues] = await Promise.all([
-                fetchBranches(),
-                fetchSalesOrders("planning"),
-                fetch("/api/manufacturing/planning-engineering").then(async (res) => {
-                    if (res.ok) {
-                        const data = await res.json();
-                        return splitJobOrderQueues(data);
-                    }
-                    return { queuedJobs: [], cancelledJobs: [] };
-                }).catch(() => ({ queuedJobs: [], cancelledJobs: [] }))
-            ]);
-            if (!isMountedRef.current) return;
-
-            setBranches(activeBranches);
-
-            setSalesOrders(soResult.data || []);
-            setDetailsMap(soResult.detailsMap || {});
-            setRawUnreleasedJobs(jobOrderQueues.queuedJobs);
-            setRawCancelledJobs(jobOrderQueues.cancelledJobs);
-        } catch (err: any) {
-            if (err instanceof Error && err.name === "AbortError") return;
-            console.error("Error loading initial data:", err);
-            toast.error(err.message || "An error occurred while loading planning data.");
-        } finally {
-            if (isMountedRef.current && !silent) {
-                setLoadingBranches(false);
-                setLoadingOrders(false);
-                setLoadingJobs(false);
-            }
-        }
+    // Load independently so one failed endpoint cannot turn another source into a false empty result.
+    const loadInitialData = async () => {
+        await Promise.all([
+            loadBranches(),
+            loadPlanningOrders(),
+            loadJobOrders(),
+            loadInProductionSalesOrders()
+        ]);
     };
 
     useEffect(() => {
@@ -296,7 +331,7 @@ export function usePlanningEngineering() {
             throw new Error("The created Job Order did not return a valid reference.");
         }
 
-        await loadInitialData(true);
+        await loadInitialData();
         setDeepLinkNotice(null);
         setPendingDeepLinkJo(normalizedJobOrderNo);
         router.replace(`/mm/planning-engineering?jo=${encodeURIComponent(normalizedJobOrderNo)}`, { scroll: false });
@@ -497,7 +532,7 @@ export function usePlanningEngineering() {
     const subAssemblyLookupError = subAssemblyLookupState.productIdsKey === subAssemblyProductIdsKey
         ? subAssemblyLookupState.error
         : null;
-    const currentSubAssemblyMapping = subAssemblyLookupStatus === "ready" && subAssemblyProductIds.length > 0
+    const currentSubAssemblyMapping = subAssemblyLookupState.productIdsKey === subAssemblyProductIdsKey
         ? subAssemblyMapping
         : EMPTY_SUBASSEMBLY_MAPPING;
 
@@ -506,6 +541,7 @@ export function usePlanningEngineering() {
             ? subAssemblyProductIdsKey.split(",").map(Number)
             : [];
         if (uniqueProductIds.length === 0) {
+            subAssemblyScopeRef.current = subAssemblyProductIdsKey;
             setSubAssemblyMapping({});
             setSubAssemblyLookupState({ productIdsKey: subAssemblyProductIdsKey, status: "ready", error: null });
             return;
@@ -513,10 +549,16 @@ export function usePlanningEngineering() {
 
         const controller = new AbortController();
         let isDisposed = false;
+        const isNewScope = subAssemblyScopeRef.current !== subAssemblyProductIdsKey;
+        subAssemblyScopeRef.current = subAssemblyProductIdsKey;
         setSubAssemblyLookupState({ productIdsKey: subAssemblyProductIdsKey, status: "loading", error: null });
-        setSubAssemblyMapping({});
-        setNetRequirements([]);
-        setLoadingRequirements(true);
+        if (isNewScope) {
+            setSubAssemblyMapping({});
+            setNetRequirements([]);
+            setRequirementsError(null);
+            setRequirementsLastUpdatedAt(null);
+        }
+        if (isNewScope || netRequirements.length === 0) setLoadingRequirements(true);
         const loadSubAssemblyBoms = async () => {
             try {
                 const productIds = encodeURIComponent(uniqueProductIds.join(","));
@@ -545,12 +587,12 @@ export function usePlanningEngineering() {
                 });
                 setSubAssemblyMapping(mappings);
                 setSubAssemblyLookupState({ productIdsKey: subAssemblyProductIdsKey, status: "ready", error: null });
+                setRequirementsError(null);
             } catch (error) {
                 if (isDisposed || controller.signal.aborted) return;
                 console.error("Failed to load sub-assembly BOM components", error);
-                setSubAssemblyMapping({});
-                setNetRequirements([]);
                 setLoadingRequirements(false);
+                setRequirementsError(error instanceof Error ? error.message : "Unable to load sub-assembly BOM components.");
                 setSubAssemblyLookupState({
                     productIdsKey: subAssemblyProductIdsKey,
                     status: "error",
@@ -568,6 +610,7 @@ export function usePlanningEngineering() {
 
     const retrySubAssemblyLookup = () => {
         setSubAssemblyLookupState({ productIdsKey: subAssemblyProductIdsKey, status: "loading", error: null });
+        setRequirementsError(null);
         setSubAssemblyLookupRetryCount((count) => count + 1);
     };
 
@@ -592,6 +635,12 @@ export function usePlanningEngineering() {
         return Array.from(ids);
     }, [planningLines, currentSubAssemblyMapping]);
 
+    const netRequirementsScopeKey = [
+        selectedBranchId ?? "no-branch",
+        planningLines.map((line) => `${line.detail_id}:${line.product_id?.product_id ?? ""}:${line.ordered_quantity}`).join(","),
+        JSON.stringify(currentSubAssemblyMapping)
+    ].join("|");
+
     inventoryRefreshContextRef.current = {
         branchId: parseValidBranchId(selectedBranchId),
         productIds: subAssemblyLookupStatus === "ready"
@@ -600,25 +649,60 @@ export function usePlanningEngineering() {
     };
 
     // Fetch On-Hand & Safety Stock for the Net Requirements Calculation Grid
-    const runFetchNetRequirements = async (silent = false) => {
-        if (subAssemblyLookupStatus !== "ready") return;
-
+    const runFetchNetRequirements = async () => {
         const requestId = ++netRequirementsRequestIdRef.current;
         netRequirementsAbortControllerRef.current?.abort();
         netRequirementsAbortControllerRef.current = null;
 
-        const branchId = parseValidBranchId(selectedBranchId);
-        if (branchId === null || demandProductIds.length === 0) {
+        if (netRequirementsScopeRef.current !== netRequirementsScopeKey) {
+            netRequirementsScopeRef.current = netRequirementsScopeKey;
             setNetRequirements([]);
+            setRequirementsError(null);
+            setRequirementsLastUpdatedAt(null);
+        }
+
+        const branchId = parseValidBranchId(selectedBranchId);
+        if (branchId === null) {
+            setNetRequirements([]);
+            setRequirementsError(null);
+            setRequirementsLastUpdatedAt(null);
+            setLoadingRequirements(false);
+            return;
+        }
+
+        if (loadingOrders) {
+            setLoadingRequirements(true);
+            return;
+        }
+
+        if (ordersError) {
+            setRequirementsError(`Demand data could not be refreshed: ${ordersError}`);
+            setLoadingRequirements(false);
+            return;
+        }
+
+        if (subAssemblyLookupStatus === "error") {
+            setLoadingRequirements(false);
+            return;
+        }
+
+        if (subAssemblyLookupStatus === "loading") {
+            setLoadingRequirements(true);
+            return;
+        }
+
+        if (demandProductIds.length === 0) {
+            setNetRequirements([]);
+            setRequirementsError(null);
+            setRequirementsLastUpdatedAt(new Date().toISOString());
             setLoadingRequirements(false);
             return;
         }
 
         const controller = new AbortController();
         netRequirementsAbortControllerRef.current = controller;
-        if (!silent || loadingRequirements || netRequirements.length === 0) {
-            setLoadingRequirements(true);
-        }
+        setLoadingRequirements(true);
+        setRequirementsError(null);
 
         try {
             const data = await fetchNetRequirementsRaw(demandProductIds, branchId, controller.signal);
@@ -627,20 +711,28 @@ export function usePlanningEngineering() {
             // Group gross demands from all outstanding lines, grouping by SKU product_id directly
             const grossDemandMap: Record<number, number> = {};
             const parentProductIds = new Set<number>();
-            const parentLineByProductId = new Map<number, SalesOrderDetail>();
+            const planningLinesByProductId = new Map<number, SalesOrderDetail[]>();
             planningLines.forEach((line) => {
                 const pInfo = line.product_id;
                 if (pInfo?.product_id !== undefined) {
                     parentProductIds.add(pInfo.product_id);
-                    if (!parentLineByProductId.has(pInfo.product_id)) {
-                        parentLineByProductId.set(pInfo.product_id, line);
-                    }
+                    const productLines = planningLinesByProductId.get(pInfo.product_id) || [];
+                    productLines.push(line);
+                    planningLinesByProductId.set(pInfo.product_id, productLines);
                 }
                 if (pInfo && pInfo.product_id) {
                     const pId = pInfo.product_id;
                     const qty = Number(line.ordered_quantity || 0);
                     grossDemandMap[pId] = (grossDemandMap[pId] || 0) + qty;
                 }
+            });
+
+            const toSalesOrderSource = (line: SalesOrderDetail) => ({
+                order_id: line.order_id,
+                order_no: line.order_no || `Sales Order #${line.order_id}`,
+                detail_id: line.detail_id,
+                customer_name: line.customer_name || null,
+                ordered_quantity: Number(line.ordered_quantity || 0)
             });
 
             const subAssemblyParentsByComponentId = new Map<number, { parentId: number; quantityRequired: number }[]>();
@@ -687,7 +779,8 @@ export function usePlanningEngineering() {
                         gross_demand: grossDemand,
                         on_hand: onHand,
                         safety_stock: safetyStock,
-                        net_shortfall: netShortfall
+                        net_shortfall: netShortfall,
+                        contributing_sales_order_lines: (planningLinesByProductId.get(pId) || []).map(toSalesOrderSource)
                     });
                 }
             });
@@ -697,18 +790,19 @@ export function usePlanningEngineering() {
                 const pId = Number(item.product_id);
                 const isParent = parentProductIds.has(pId);
                 if (!isParent) {
-                    let subAssemblyGrossDemand = 0;
-                    const associatedParentNames: string[] = [];
-
-                    (subAssemblyParentsByComponentId.get(pId) || []).forEach(({ parentId, quantityRequired }) => {
+                    const derivedParentDemands = (subAssemblyParentsByComponentId.get(pId) || []).map(({ parentId, quantityRequired }) => {
                         const parentShortfall = parentShortfalls[parentId] || 0;
-                        subAssemblyGrossDemand += parentShortfall * quantityRequired;
-
-                        const parentLine = parentLineByProductId.get(parentId);
-                        if (parentLine?.product_id?.product_name) {
-                            associatedParentNames.push(parentLine.product_id.product_name);
-                        }
+                        return {
+                            parent_product_id: parentId,
+                            parent_product_name: planningLinesByProductId.get(parentId)?.[0]?.product_id?.product_name || `Product #${parentId}`,
+                            quantity_required: quantityRequired,
+                            parent_shortfall: parentShortfall,
+                            derived_demand: parentShortfall * quantityRequired,
+                            sales_order_lines: (planningLinesByProductId.get(parentId) || []).map(toSalesOrderSource)
+                        };
                     });
+                    const subAssemblyGrossDemand = derivedParentDemands.reduce((total, source) => total + source.derived_demand, 0);
+                    const associatedParentNames = derivedParentDemands.map((source) => source.parent_product_name);
 
                     const onHand = Number(item.on_hand || 0);
                     const safetyStock = Number(item.safety_stock || 0);
@@ -716,7 +810,7 @@ export function usePlanningEngineering() {
 
                     calculated.push({
                         product_id: pId,
-                        product_name: item.product_name + (associatedParentNames.length > 0 ? ` (Sub-Assembly for ${associatedParentNames.join(", ")})` : ""),
+                        product_name: item.product_name + (associatedParentNames.length > 0 ? ` (BOM component for ${associatedParentNames.join(", ")})` : ""),
                         product_code: item.product_code,
                         uom_id: item.uom_id ?? null,
                         uom_name: item.uom_name ?? null,
@@ -726,17 +820,21 @@ export function usePlanningEngineering() {
                         on_hand: onHand,
                         safety_stock: safetyStock,
                         net_shortfall: netShortfall,
-                        is_sub_assembly: true
+                        is_sub_assembly: true,
+                        derived_parent_demands: derivedParentDemands
                     });
                 }
             });
 
             if (requestId === netRequirementsRequestIdRef.current) {
                 setNetRequirements(calculated);
+                setRequirementsLastUpdatedAt(new Date().toISOString());
+                setRequirementsError(null);
             }
         } catch (err: any) {
             if (!controller.signal.aborted && requestId === netRequirementsRequestIdRef.current) {
                 console.error("Error fetching net requirements:", err);
+                setRequirementsError(err instanceof Error ? err.message : "Failed to calculate net requirements.");
             }
         } finally {
             if (requestId === netRequirementsRequestIdRef.current) {
@@ -746,7 +844,7 @@ export function usePlanningEngineering() {
         }
     };
 
-    refreshNetRequirementsRef.current = () => runFetchNetRequirements(true);
+    refreshNetRequirementsRef.current = () => runFetchNetRequirements();
 
     useEffect(() => {
         void runFetchNetRequirements();
@@ -755,7 +853,20 @@ export function usePlanningEngineering() {
             netRequirementsAbortControllerRef.current?.abort();
             netRequirementsAbortControllerRef.current = null;
         };
-    }, [selectedBranchId, demandProductIds, planningLines, currentSubAssemblyMapping, subAssemblyLookupStatus]);
+    }, [selectedBranchId, demandProductIds, planningLines, currentSubAssemblyMapping, subAssemblyLookupStatus, loadingOrders, ordersError, netRequirementsScopeKey]);
+
+    const retryNetRequirements = () => {
+        if (ordersError) {
+            setRequirementsError(null);
+            void loadPlanningOrders();
+            return;
+        }
+        if (subAssemblyLookupStatus === "error") {
+            retrySubAssemblyLookup();
+            return;
+        }
+        void runFetchNetRequirements();
+    };
 
     const selectableLinesByDetailId = useMemo(() => {
         const linesByDetailId = new Map<number, SalesOrderDetail>();
@@ -1096,7 +1207,7 @@ export function usePlanningEngineering() {
             toast.success(`Direct allocation successful! Stock deducted and order lines ready for invoicing.`);
             setIsDirectAllocDialogOpen(false);
             setSelectedDetailIds([]);
-            loadInitialData(true);
+            loadInitialData();
         } catch (err: any) {
             console.error("Error during direct allocation:", err);
             toast.error(err.message || "An error occurred during direct allocation.");
@@ -1147,8 +1258,16 @@ export function usePlanningEngineering() {
 
     return {
         loadingBranches,
+        branchesError,
+        branchesLastUpdatedAt,
         loadingOrders,
+        ordersError,
+        ordersLastUpdatedAt,
         loadingRequirements,
+        requirementsError,
+        requirementsLastUpdatedAt,
+        requirementsScopeIsCurrent: netRequirementsScopeRef.current === netRequirementsScopeKey,
+        retryNetRequirements,
         subAssemblyLookupStatus,
         subAssemblyLookupError,
         retrySubAssemblyLookup,
@@ -1193,6 +1312,7 @@ export function usePlanningEngineering() {
         productionSalesOrderGroups,
         loadingProductionOrders,
         productionOrdersError,
+        productionOrdersLastUpdatedAt,
         loadInProductionSalesOrders,
         selectedLines,
         releaseGroups,
@@ -1214,7 +1334,12 @@ export function usePlanningEngineering() {
         unreleasedJobs,
         cancelledJobs,
         loadingJobs,
+        jobOrdersError,
+        jobOrdersLastUpdatedAt,
         releasingDraftId,
+        loadBranches,
+        loadPlanningOrders,
+        loadJobOrders,
         handleReleaseDraftFromPlanning
     };
 }

@@ -21,11 +21,16 @@ import { isSchedulableSalesOrderLine, linkedJobOrderQuantityTotals, remainingQua
 import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 import { PlanningPaginationControls, type PlanningPaginationState } from "./PlanningPaginationControls";
 import { PlanningTableSearchBar } from "./PlanningTableSearchBar";
+import { PlanningDataStatus } from "./PlanningDataStatus";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 interface DemandLinesTableProps {
     loadingOrders: boolean;
+    error: string | null;
+    lastUpdatedAt: string | null;
+    hasBranchSelected: boolean;
+    onRetry: () => void;
     salesOrderGroups: SalesOrderDemandGroup[];
     selectedLines: SalesOrderDetail[];
     releaseGroups: SalesOrderReleaseGroup[];
@@ -53,6 +58,10 @@ function lineSearchText(line: SalesOrderDetail): string {
 
 export function DemandLinesTable({
     loadingOrders,
+    error,
+    lastUpdatedAt,
+    hasBranchSelected,
+    onRetry,
     salesOrderGroups,
     selectedLines,
     releaseGroups,
@@ -122,7 +131,11 @@ export function DemandLinesTable({
                     itemLabel="Sales Order lines"
                 />
                 <p id={selectionScopeDescriptionId} className="mt-2 text-[11px] text-muted-foreground">
-                    {loadingOrders
+                    {!hasBranchSelected
+                        ? "Select a target branch before selecting demand lines."
+                        : error && !lastUpdatedAt
+                        ? "Demand is unavailable. Retry before selecting demand lines."
+                        : loadingOrders
                         ? "Bulk selection scope will be shown when demand finishes loading."
                         : `Select all applies to ${selectableFilteredLines.length.toLocaleString()} eligible lines matching this search across all pages.`}
                 </p>
@@ -147,7 +160,9 @@ export function DemandLinesTable({
                 )}
             </div>
             <CardContent className="p-0">
-                {loadingOrders ? (
+                {!hasBranchSelected ? (
+                    <div className="px-6 py-12 text-center text-sm text-muted-foreground">Select a target branch to view branch-scoped Sales Order demand.</div>
+                ) : loadingOrders && !lastUpdatedAt ? (
                     <>
                         <div role="status" aria-busy="true" aria-label="Loading Sales Order demand" className="hidden 2xl:block overflow-x-auto">
                             <DemandHtmlTable className="w-full min-w-[1400px] table-fixed">
@@ -193,10 +208,15 @@ export function DemandLinesTable({
                             ))}
                         </div>
                     </>
-                ) : filteredLines.length === 0 ? (
-                    <div className="p-12 text-center text-xs text-muted-foreground font-semibold">No matching Sales Order demand found.</div>
                 ) : (
                     <>
+                        <PlanningDataStatus label="schedulable Sales Order demand" loading={loadingOrders} error={error} lastUpdatedAt={lastUpdatedAt} onRetry={onRetry} />
+                        {error && !lastUpdatedAt ? null : filteredLines.length === 0 ? (
+                            <div className="p-12 text-center text-xs text-muted-foreground font-semibold">
+                                {searchQuery ? "No matching Sales Order demand found." : "No schedulable Sales Order demand for this branch."}
+                            </div>
+                        ) : (
+                        <>
                         <div className="hidden 2xl:block overflow-x-auto">
                         <DemandHtmlTable className="w-full min-w-[1400px] table-fixed">
                             <colgroup>
@@ -248,13 +268,19 @@ export function DemandLinesTable({
                                                 <div className="text-[10px] text-muted-foreground break-words" title={line.customer_name}>{line.customer_name}</div>
                                             </TableCell>
                                             <TableCell className="px-2 py-3 align-top text-xs whitespace-normal break-words">
-                                                <div className="font-semibold text-foreground break-words" title={line.product_id?.product_name || "Unknown product"}>
-                                                    {line.product_id?.product_name || "Unknown product"}
-                                                    <span className="ml-1 text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">
-                                                        {getUnitOfMeasureLabel(line.product_id)}
-                                                    </span>
+                                                <div className="min-w-0 space-y-2">
+                                                    <div className="break-words font-semibold leading-snug text-foreground" title={line.product_id?.product_name || "Unknown product"}>
+                                                        {line.product_id?.product_name || "Unknown product"}
+                                                    </div>
+                                                    <div className="min-w-0 space-y-1.5">
+                                                        <div>
+                                                            <span className="inline-flex max-w-full whitespace-normal break-words rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-snug text-primary">
+                                                                {getUnitOfMeasureLabel(line.product_id)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="break-words text-[10px] font-medium leading-snug text-primary">Ver: {line.bom_version_name || "No Version"}</div>
+                                                    </div>
                                                 </div>
-                                                <div className="text-[10px] font-medium text-primary break-words">Ver: {line.bom_version_name || "No Version"}</div>
                                             </TableCell>
                                             <TableCell className="px-2 py-3 align-top text-xs whitespace-normal break-words">
                                                 <span className={isSchedulable ? "font-semibold text-amber-700 dark:text-amber-400" : "font-semibold text-blue-700 dark:text-blue-400"}>
@@ -336,12 +362,14 @@ export function DemandLinesTable({
                                             </span>
                                         </div>
                                         <div className="mt-3 border-t pt-3">
-                                            <div className="text-sm font-semibold text-foreground break-words">{line.product_id?.product_name || "Unknown product"}</div>
-                                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
-                                                <span className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-semibold text-primary">
-                                                    {getUnitOfMeasureLabel(line.product_id)}
-                                                </span>
-                                                <span className="text-muted-foreground">BOM version: {line.bom_version_name || "No Version"}</span>
+                                            <div className="break-words text-sm font-semibold leading-snug text-foreground">{line.product_id?.product_name || "Unknown product"}</div>
+                                            <div className="mt-2 space-y-1.5 text-xs">
+                                                <div>
+                                                    <span className="inline-flex max-w-full whitespace-normal break-words rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-semibold leading-snug text-primary">
+                                                        {getUnitOfMeasureLabel(line.product_id)}
+                                                    </span>
+                                                </div>
+                                                <div className="break-words leading-snug text-muted-foreground">BOM version: {line.bom_version_name || "No Version"}</div>
                                             </div>
                                         </div>
                                         <div className="mt-3 border-t pt-3">
@@ -396,6 +424,8 @@ export function DemandLinesTable({
                             totalItems={filteredLines.length}
                             itemLabel="lines"
                         />
+                        </>
+                        )}
                     </>
                 )}
             </CardContent>
