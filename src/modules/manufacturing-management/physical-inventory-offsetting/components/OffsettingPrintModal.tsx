@@ -667,7 +667,7 @@ export default function OffsettingPrintModal({
                                         PHYSICAL INVENTORY RECONCILIATION & OFFSETTING REPORT
                                     </h1>
                                     <p className="text-xs text-slate-600 font-medium">
-                                        Official Audit Document for Product Discrepancy Offsetting & Stock Variance Settlement
+                                        Audit documentation for product discrepancies and variance justification
                                     </p>
                                 </div>
                                 <div className="text-right">
@@ -701,6 +701,9 @@ export default function OffsettingPrintModal({
                                     <span className="font-bold text-slate-900">{sheet.status}</span>
                                 </div>
                             </div>
+                            <p className="mt-2 rounded border border-blue-200 bg-blue-50 px-2.5 py-2 text-[10px] font-medium text-blue-900">
+                                Audit pairings document variance justification only. Saving this report does not change perpetual inventory; stock changes require separate approval and commit.
+                            </p>
                         </div>
 
                         {/* 2. EXECUTIVE FINANCIAL SUMMARY BLOCK */}
@@ -738,7 +741,7 @@ export default function OffsettingPrintModal({
                                     <div className="text-base font-black font-mono text-slate-950 mt-0.5 whitespace-nowrap">
                                         {formatCurrency(netUnresolvedVarianceValue)}
                                     </div>
-                                    <div className="text-[10px] text-slate-600 font-medium">Post to Stock Ledger</div>
+                                    <div className="text-[10px] text-slate-600 font-medium">Ledger changes require separate approval &amp; commit</div>
                                 </div>
                             </div>
                         </div>
