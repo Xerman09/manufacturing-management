@@ -70,6 +70,14 @@ export interface MmInventoryLot {
     created_by?: number | string | null;
 }
 
+export interface MmInventoryBatchOption extends Omit<MmInventoryLot, "inventory_lot_id"> {
+    batch_kind: "MASTER" | "DRAFT";
+    inventory_lot_id?: number;
+    draft_batch_id?: number;
+    id?: number;
+    is_draft?: boolean;
+}
+
 export interface MmPhysicalInventoryDetail {
     physical_inventory_detail_id?: number;
     id?: number;

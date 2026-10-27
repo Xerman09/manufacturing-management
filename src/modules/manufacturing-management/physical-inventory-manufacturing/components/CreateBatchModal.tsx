@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Product, MmLot, MmInventoryLot } from "../types";
+import { Product, MmLot, MmInventoryBatchOption } from "../types";
 import { createMmDraftBatch } from "../services/physical-inventory-manufacturing-api";
 import { X, AlertTriangle } from "lucide-react";
 
@@ -14,7 +14,7 @@ interface Props {
     products: Product[];
     piNo?: string;
     onClose: () => void;
-    onBatchCreated: (batch: MmInventoryLot) => void;
+    onBatchCreated: (batch: MmInventoryBatchOption) => void;
 }
 
 export default function CreateBatchModal({

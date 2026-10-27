@@ -12,7 +12,8 @@ import {
     StockType,
 } from "../types";
 import SearchableSelect from "./SearchableSelect";
-import { formatQty, formatMoney } from "./PhysicalInventoryList";
+import { formatMoney } from "./PhysicalInventoryList";
+import { formatQty } from "../utils/number-format";
 import { ArrowLeft, Plus, Save, Send, Trash2, RotateCcw, AlertTriangle, Layers, LayoutGrid, List, Tag, Loader2, GitCompare, CheckCircle2, Printer } from "lucide-react";
 
 interface Props {
@@ -33,7 +34,6 @@ interface Props {
         cutoff_date?: string;
         remarks?: string;
     }) => Promise<void>;
-    onPopulateSheet?: (productTypeId?: number | null) => Promise<void>;
     onOpenAddDetailModal: (lotId?: number) => void;
     onRemoveDetail: (detail: MmPhysicalInventoryDetail) => void;
     onSaveInlineCount?: (detail: MmPhysicalInventoryDetail, newPhysCount: number | null) => Promise<void>;
@@ -59,7 +59,6 @@ export default function PhysicalInventoryForm({
     loading,
     onBack,
     onSaveHeader,
-    onPopulateSheet,
     onOpenAddDetailModal,
     onRemoveDetail,
     onSaveInlineCount,
@@ -874,18 +873,6 @@ export default function PhysicalInventoryForm({
 
                                 {isDraft && (
                                     <div className="flex items-center gap-2">
-                                        {onPopulateSheet && (
-                                            <button
-                                                type="button"
-                                                onClick={() => onPopulateSheet?.(productTypeId > 0 ? productTypeId : null)}
-                                                disabled={loading || saving}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-sky-800 bg-sky-100 hover:bg-sky-200 border border-sky-300 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800 rounded-lg transition-colors shadow-xs disabled:opacity-50"
-                                                title="Fetch real-time inventory movements & system counts to auto-populate product line items"
-                                            >
-                                                <RotateCcw className="h-3.5 w-3.5" />
-                                                Auto-Populate System Stock
-                                            </button>
-                                        )}
                                         <button
                                             type="button"
                                             onClick={() => onOpenAddDetailModal()}
@@ -908,7 +895,7 @@ export default function PhysicalInventoryForm({
                                             Loading inventory line items...
                                         </span>
                                         <span className="text-xs text-muted-foreground max-w-sm">
-                                            Fetching system counts and auto-populating stock ledger data. Please wait a moment.
+                                            Please wait while the sheet loads.
                                         </span>
                                     </>
                                 ) : (
@@ -1135,10 +1122,10 @@ export default function PhysicalInventoryForm({
                                                                             const physItemPcs = phys * uomCount;
                                                                             return (
                                                                                 <div>
-                                                                                    <div>{sysItemPcs.toLocaleString()} pcs</div>
+                                                                                    <div>{formatQty(sysItemPcs)} pcs</div>
                                                                                     {physItemPcs > 0 && physItemPcs !== sysItemPcs ? (
                                                                                         <div className="text-[10px] text-muted-foreground font-normal">
-                                                                                            Counted: {physItemPcs.toLocaleString()} pcs
+                                                                                            Counted: {formatQty(physItemPcs)} pcs
                                                                                         </div>
                                                                                     ) : null}
                                                                                 </div>
@@ -1307,10 +1294,10 @@ export default function PhysicalInventoryForm({
                                                                 const physItemPcs = phys * uomCount;
                                                                 return (
                                                                     <div>
-                                                                        <div>{sysItemPcs.toLocaleString()} pcs</div>
+                                                                        <div>{formatQty(sysItemPcs)} pcs</div>
                                                                         {physItemPcs > 0 && physItemPcs !== sysItemPcs ? (
                                                                             <div className="text-[10px] text-muted-foreground font-normal">
-                                                                                Counted: {physItemPcs.toLocaleString()} pcs
+                                                                                Counted: {formatQty(physItemPcs)} pcs
                                                                             </div>
                                                                         ) : null}
                                                                     </div>

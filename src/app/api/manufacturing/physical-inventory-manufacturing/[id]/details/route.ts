@@ -50,10 +50,11 @@ export async function POST(request: NextRequest, context: RouteParams) {
         } = body;
 
         const inventoryLotId = extractId(inventory_lot_id);
+        const draftBatchId = extractId(body.draft_batch_id);
         const lotId = extractId(lot_id);
         const productId = extractId(product_id);
 
-        if (!inventoryLotId || !lotId || !productId) {
+        if ((inventoryLotId > 0) === (draftBatchId > 0) || inventoryLotId < 0 || draftBatchId < 0 || !lotId || !productId) {
             return NextResponse.json({ success: false, error: "Batch, Lot, and Product are required." }, { status: 400 });
         }
 
@@ -67,8 +68,6 @@ export async function POST(request: NextRequest, context: RouteParams) {
         const conditionStr = (inventory_condition || "GOOD").trim().toUpperCase();
 
         const isDraftLot = lotId < 0;
-        const isDraftBatch = inventoryLotId < 0;
-
         let finalLotId = lotId;
         let finalInventoryLotId = inventoryLotId;
 
@@ -108,113 +107,25 @@ export async function POST(request: NextRequest, context: RouteParams) {
             }
         }
 
-        // 2b. Resolve Draft Batch if inventoryLotId < 0
-        if (isDraftBatch) {
-            const batchNoClean = (body.batch_no || "").trim();
-            if (!batchNoClean) {
-                return NextResponse.json({ success: false, error: "Batch number is required for new batch." }, { status: 400 });
-            }
-
-            // Check if batch already exists in mm_inventory_lots
-            const findBatchUrl = `${DIRECTUS_URL}/items/mm_inventory_lots?filter[batch_no][_eq]=${encodeURIComponent(batchNoClean)}&filter[product_id][_eq]=${productId}&limit=1`;
-            const findBatchRes = await fetch(findBatchUrl, { headers, cache: "no-store" });
-            if (findBatchRes.ok) {
-                const findBatchJson = await findBatchRes.json();
-                if (findBatchJson.data && findBatchJson.data.length > 0) {
-                    finalInventoryLotId = extractId(findBatchJson.data[0].inventory_lot_id || findBatchJson.data[0].id);
-                }
-            }
-
-            if (finalInventoryLotId < 0) {
-                const authUserId = getJwtSubFromReq(request);
-                const mfgDateVal = body.manufacturing_date || null;
-                const expDateVal = body.expiry_date || body.expiration_date || null;
-                const costVal = body.unit_cost !== undefined ? Number(body.unit_cost) : 0;
-
-                const createBatchRes = await fetch(`${DIRECTUS_URL}/items/mm_inventory_lots`, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify({
-                        lot_id: finalLotId,
-                        branch_id: piBranchId,
-                        product_id: productId,
-                        batch_no: batchNoClean,
-                        manufacturing_date: mfgDateVal,
-                        expiry_date: expDateVal,
-                        expiration_date: expDateVal,
-                        unit_cost: costVal,
-                        qa_status: "GOOD",
-                        status: "INACTIVE", // Created in INACTIVE status until sheet Commit!
-                        source_type: "PHYSICAL_INVENTORY_DRAFT",
-                        source_reference: sheet.pi_no || `PI-#${sheetId}`,
-                        created_by: authUserId || null,
-                    }),
-                });
-
-                if (!createBatchRes.ok) {
-                    const errTxt = await createBatchRes.text();
-                    return NextResponse.json({ success: false, error: `Failed to create inventory batch #${batchNoClean}: ${errTxt}` }, { status: 500 });
-                }
-
-                const newBatch = (await createBatchRes.json()).data;
-                finalInventoryLotId = extractId(newBatch.inventory_lot_id || newBatch.id);
-            }
-        }
-
-        // 2c. Load & Server-Validate Batch from mm_inventory_lots
+        // 2b. Resolve the selected draft or master batch from its own collection.
         let batch: Record<string, unknown> | null = null;
-        const isDraftReq = parseBooleanFlag(body.is_draft) || parseBooleanFlag(body.draft_batch_id);
-
-        const tryDraftLookup = async (): Promise<Record<string, unknown> | null> => {
-            const draftRes = await fetch(`${DIRECTUS_URL}/items/mm_physical_inventory_draft_batches/${finalInventoryLotId}?fields=*,lot_id.*,product_id.*,product_id.unit_of_measurement.*`, { headers, cache: "no-store" });
-            if (draftRes.ok) {
-                const cand = (await draftRes.json()).data;
-                if (cand && extractId(cand.lot_id, "lot_id") === finalLotId && extractId(cand.product_id, "product_id") === productId) {
-                    return cand;
-                }
+        let draftBatch: Record<string, unknown> | null = null;
+        if (draftBatchId > 0) {
+            const draftRes = await fetch(`${DIRECTUS_URL}/items/mm_physical_inventory_draft_batches/${draftBatchId}?fields=*,lot_id.*,product_id.*,product_id.unit_of_measurement.*`, { headers, cache: "no-store" });
+            if (!draftRes.ok) {
+                return NextResponse.json({ success: false, error: "Selected draft batch was not found. Refresh the batch list and try again." }, { status: 404 });
             }
-            const filterDraftUrl = `${DIRECTUS_URL}/items/mm_physical_inventory_draft_batches?filter[draft_batch_id][_eq]=${finalInventoryLotId}&limit=1&fields=*,lot_id.*,product_id.*,product_id.unit_of_measurement.*`;
-            const filterDraftRes = await fetch(filterDraftUrl, { headers, cache: "no-store" });
-            if (filterDraftRes.ok) {
-                const filterDraftJson = await filterDraftRes.json();
-                if (filterDraftJson.data && filterDraftJson.data.length > 0) {
-                    const cand = filterDraftJson.data[0];
-                    if (cand && extractId(cand.lot_id, "lot_id") === finalLotId && extractId(cand.product_id, "product_id") === productId) {
-                        return cand;
-                    }
-                }
+            draftBatch = (await draftRes.json()).data;
+            if (String(draftBatch?.status || "DRAFT").toUpperCase() !== "DRAFT") {
+                return NextResponse.json({ success: false, error: "Selected draft batch has already been converted. Refresh the batch list and select its inventory batch." }, { status: 409 });
             }
-            return null;
-        };
-
-        const tryMasterLookup = async (): Promise<Record<string, unknown> | null> => {
-            const batchRes = await fetch(`${DIRECTUS_URL}/items/mm_inventory_lots/${finalInventoryLotId}?fields=*,lot_id.*,product_id.*,product_id.unit_of_measurement.*`, { headers, cache: "no-store" });
-            if (batchRes.ok) {
-                const cand = (await batchRes.json()).data;
-                if (cand && extractId(cand.lot_id, "lot_id") === finalLotId && extractId(cand.product_id, "product_id") === productId) {
-                    return cand;
-                }
-            }
-            const filterUrl = `${DIRECTUS_URL}/items/mm_inventory_lots?filter[inventory_lot_id][_eq]=${finalInventoryLotId}&limit=1&fields=*,lot_id.*,product_id.*,product_id.unit_of_measurement.*`;
-            const filterRes = await fetch(filterUrl, { headers, cache: "no-store" });
-            if (filterRes.ok) {
-                const filterJson = await filterRes.json();
-                if (filterJson.data && filterJson.data.length > 0) {
-                    const cand = filterJson.data[0];
-                    if (cand && extractId(cand.lot_id, "lot_id") === finalLotId && extractId(cand.product_id, "product_id") === productId) {
-                        return cand;
-                    }
-                }
-            }
-            return null;
-        };
-
-        if (isDraftReq) {
-            batch = await tryDraftLookup();
-            if (!batch) batch = await tryMasterLookup();
+            batch = draftBatch;
         } else {
-            batch = await tryMasterLookup();
-            if (!batch) batch = await tryDraftLookup();
+            const masterRes = await fetch(`${DIRECTUS_URL}/items/mm_inventory_lots/${inventoryLotId}?fields=*,lot_id.*,product_id.*,product_id.unit_of_measurement.*`, { headers, cache: "no-store" });
+            if (!masterRes.ok) {
+                return NextResponse.json({ success: false, error: "Selected inventory batch was not found. Refresh the batch list and try again." }, { status: 404 });
+            }
+            batch = (await masterRes.json()).data;
         }
 
         if (!batch) {
@@ -233,19 +144,6 @@ export async function POST(request: NextRequest, context: RouteParams) {
         }
         if (batchBranchId !== piBranchId) {
             return NextResponse.json({ success: false, error: "Batch branch does not match the Physical Inventory branch." }, { status: 400 });
-        }
-
-        // 2.5 Check if this inventory batch is ALREADY added to this Physical Inventory sheet
-        const dupBatchUrl = `${DIRECTUS_URL}/items/mm_physical_inventory_details?filter[physical_inventory_id][_eq]=${sheetId}&filter[inventory_lot_id][_eq]=${finalInventoryLotId}&limit=1`;
-        const dupBatchRes = await fetch(dupBatchUrl, { headers, cache: "no-store" });
-        if (dupBatchRes.ok) {
-            const dupBatchJson = await dupBatchRes.json();
-            if (dupBatchJson.data && dupBatchJson.data.length > 0) {
-                return NextResponse.json({
-                    success: false,
-                    error: `Batch #${batch.batch_no || finalInventoryLotId} has already been added to this physical inventory sheet.`
-                }, { status: 400 });
-            }
         }
 
         // 3. Load & Validate Lot from mm_lots
@@ -283,6 +181,67 @@ export async function POST(request: NextRequest, context: RouteParams) {
         }
         if (mfgDate && expDate && new Date(mfgDate) > new Date(expDate)) {
             return NextResponse.json({ success: false, error: "Manufacturing date cannot be after expiration date." }, { status: 400 });
+        }
+
+        // Draft IDs belong to mm_physical_inventory_draft_batches and cannot be stored in
+        // mm_physical_inventory_details.inventory_lot_id. Materialize the master first.
+        if (draftBatch && draftBatchId > 0) {
+            const batchNo = String(draftBatch.batch_no || "").trim();
+            if (!batchNo) {
+                return NextResponse.json({ success: false, error: "Draft batch number is required." }, { status: 400 });
+            }
+
+            const existingUrl = `${DIRECTUS_URL}/items/mm_inventory_lots?filter[batch_no][_eq]=${encodeURIComponent(batchNo)}&limit=-1&fields=inventory_lot_id,lot_id,branch_id,product_id`;
+            const existingRes = await fetch(existingUrl, { headers, cache: "no-store" });
+            if (!existingRes.ok) {
+                return NextResponse.json({ success: false, error: "Unable to verify whether this batch already exists. Please retry." }, { status: 502 });
+            }
+            const existingBatches = (await existingRes.json()).data || [];
+            const matchingBatch = existingBatches.find((candidate: Record<string, unknown>) =>
+                extractId(candidate.lot_id, "lot_id") === finalLotId
+                && extractId(candidate.branch_id, "branch_id") === piBranchId
+                && extractId(candidate.product_id, "product_id") === productId
+            );
+
+            if (existingBatches.length > 0 && !matchingBatch) {
+                return NextResponse.json({ success: false, error: `Batch number '${batchNo}' already exists for a different lot, branch, or product.` }, { status: 409 });
+            }
+
+            if (matchingBatch) {
+                finalInventoryLotId = extractId(matchingBatch.inventory_lot_id || matchingBatch.id);
+            } else {
+                const authUserId = getJwtSubFromReq(request);
+                const createMasterRes = await fetch(`${DIRECTUS_URL}/items/mm_inventory_lots`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({
+                        lot_id: finalLotId,
+                        branch_id: piBranchId,
+                        product_id: productId,
+                        batch_no: batchNo,
+                        manufacturing_date: mfgDate,
+                        expiry_date: expDate,
+                        unit_cost: Number(draftBatch.unit_cost || 0),
+                        qa_status: draftBatch.qa_status || "GOOD",
+                        status: "INACTIVE",
+                        source_type: "PHYSICAL_INVENTORY_DRAFT",
+                        source_reference: sheet.pi_no || `PI-#${sheetId}`,
+                        created_by: authUserId || draftBatch.created_by || null,
+                    }),
+                });
+
+                if (!createMasterRes.ok) {
+                    const errTxt = await createMasterRes.text();
+                    return NextResponse.json({ success: false, error: `Failed to create inventory batch '${batchNo}': ${errTxt}` }, { status: 502 });
+                }
+
+                const createdMaster = (await createMasterRes.json()).data;
+                finalInventoryLotId = extractId(createdMaster.inventory_lot_id || createdMaster.id);
+            }
+
+            if (finalInventoryLotId <= 0) {
+                return NextResponse.json({ success: false, error: "The selected draft batch could not be linked to an inventory lot. Refresh the batch list and try again." }, { status: 502 });
+            }
         }
 
         // 6. Check Duplicate Batch + Condition combination in this PI
@@ -329,20 +288,29 @@ export async function POST(request: NextRequest, context: RouteParams) {
 
         if (!res.ok) {
             const errText = await res.text();
+            if (errText.includes("INVALID_FOREIGN_KEY") && errText.includes("inventory_lot_id")) {
+                return NextResponse.json({ success: false, error: "Selected batch could not be resolved to an inventory lot. Refresh the batch list and try again." }, { status: 409 });
+            }
             throw new Error(`Directus failed to insert detail row: ${errText}`);
         }
 
         const createdDetail = (await res.json()).data;
 
-        // Ensure draft batch is linked to this physical_inventory_id in mm_physical_inventory_draft_batches
-        try {
-            await fetch(`${DIRECTUS_URL}/items/mm_physical_inventory_draft_batches/${finalInventoryLotId}`, {
-                method: "PATCH",
-                headers,
-                body: JSON.stringify({ physical_inventory_id: sheetId }),
-            });
-        } catch {
-            // Ignore if draft batch record not in draft table
+        // Mark the source draft as converted only after the detail row successfully references
+        // its real mm_inventory_lots record.
+        if (draftBatchId > 0) {
+            try {
+                const markDraftRes = await fetch(`${DIRECTUS_URL}/items/mm_physical_inventory_draft_batches/${draftBatchId}`, {
+                    method: "PATCH",
+                    headers,
+                    body: JSON.stringify({ status: "CONVERTED", physical_inventory_id: sheetId }),
+                });
+                if (!markDraftRes.ok) {
+                    console.error(`Failed to mark draft batch ${draftBatchId} as converted: ${await markDraftRes.text()}`);
+                }
+            } catch (error) {
+                console.error(`Failed to mark draft batch ${draftBatchId} as converted:`, error);
+            }
         }
 
         // Recalculate totals on header
