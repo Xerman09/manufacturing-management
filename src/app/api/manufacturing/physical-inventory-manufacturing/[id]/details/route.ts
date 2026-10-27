@@ -119,6 +119,10 @@ export async function POST(request: NextRequest, context: RouteParams) {
             if (String(draftBatch?.status || "DRAFT").toUpperCase() !== "DRAFT") {
                 return NextResponse.json({ success: false, error: "Selected draft batch has already been converted. Refresh the batch list and select its inventory batch." }, { status: 409 });
             }
+            const draftSheetId = extractId(draftBatch?.physical_inventory_id, "physical_inventory_id");
+            if (draftSheetId > 0 && draftSheetId !== sheetId) {
+                return NextResponse.json({ success: false, error: "Selected draft batch belongs to a different Physical Inventory sheet." }, { status: 409 });
+            }
             batch = draftBatch;
         } else {
             const masterRes = await fetch(`${DIRECTUS_URL}/items/mm_inventory_lots/${inventoryLotId}?fields=*,lot_id.*,product_id.*,product_id.unit_of_measurement.*`, { headers, cache: "no-store" });

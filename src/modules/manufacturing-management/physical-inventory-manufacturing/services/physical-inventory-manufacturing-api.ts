@@ -63,7 +63,7 @@ export async function createPhysicalInventoryHeader(payload: {
 
 export async function updatePhysicalInventoryHeader(
     id: number,
-    payload: { starting_date?: string; cutoff_date?: string; remarks?: string; stock_type?: "OPENING" | "REGULAR"; product_type_id?: number | null; price_type_id?: number | null }
+    payload: { branch_id?: number; starting_date?: string; cutoff_date?: string; remarks?: string; stock_type?: "OPENING" | "REGULAR"; product_type_id?: number | null; price_type_id?: number | null }
 ): Promise<MmPhysicalInventorySheet> {
     const res = await fetch(`${API_BASE}/${id}`, {
         method: "PATCH",
@@ -201,8 +201,8 @@ export async function createMmLot(payload: {
     return json.data;
 }
 
-export async function fetchBatchesByLotAndProduct(lotId: number, productId: number): Promise<MmInventoryBatchOption[]> {
-    const res = await fetch(`${API_BASE}/batches?lot_id=${lotId}&product_id=${productId}`, { cache: "no-store" });
+export async function fetchBatchesByLotAndProduct(lotId: number, productId: number, physicalInventoryId: number): Promise<MmInventoryBatchOption[]> {
+    const res = await fetch(`${API_BASE}/batches?lot_id=${lotId}&product_id=${productId}&physical_inventory_id=${physicalInventoryId}`, { cache: "no-store" });
     const json = await res.json();
     if (!res.ok || !json.success) {
         throw new Error(json.error || "Failed to fetch batches");
@@ -211,7 +211,7 @@ export async function fetchBatchesByLotAndProduct(lotId: number, productId: numb
 }
 
 export async function createMmDraftBatch(payload: {
-    physical_inventory_id?: number;
+    physical_inventory_id: number;
     lot_id: number;
     branch_id: number;
     product_id: number;
@@ -219,7 +219,6 @@ export async function createMmDraftBatch(payload: {
     manufacturing_date?: string;
     expiry_date?: string;
     unit_cost?: number;
-    source_reference?: string;
 }): Promise<MmInventoryBatchOption> {
     const res = await fetch(`${API_BASE}/batches/draft`, {
         method: "POST",

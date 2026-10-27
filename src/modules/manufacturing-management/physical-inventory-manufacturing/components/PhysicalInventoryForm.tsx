@@ -14,7 +14,9 @@ import {
 import SearchableSelect from "./SearchableSelect";
 import { formatMoney } from "./PhysicalInventoryList";
 import { formatQty } from "../utils/number-format";
-import { ArrowLeft, Plus, Save, Send, Trash2, RotateCcw, AlertTriangle, Layers, LayoutGrid, List, Tag, Loader2, GitCompare, CheckCircle2, Printer } from "lucide-react";
+import { normalizeProductTypeId } from "../utils/product-scope";
+import { matchesPhysicalInventoryDetail } from "../utils/physical-inventory-search";
+import { ArrowLeft, Plus, Save, Send, Trash2, RotateCcw, AlertTriangle, Layers, LayoutGrid, List, Tag, Loader2, GitCompare, CheckCircle2, Printer, Search, X } from "lucide-react";
 
 interface Props {
     sheet?: MmPhysicalInventorySheet | null;
@@ -50,6 +52,16 @@ interface Props {
     onPrintCountSheet?: (sheet: MmPhysicalInventorySheet, filterLot?: number | string | null) => void;
 }
 
+const extractBranchId = (value: unknown): number => {
+    if (value && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        const id = Number(record.branch_id ?? record.id ?? 0);
+        return Number.isInteger(id) && id > 0 ? id : 0;
+    }
+    const id = Number(value);
+    return Number.isInteger(id) && id > 0 ? id : 0;
+};
+
 export default function PhysicalInventoryForm({
     sheet,
     branches,
@@ -75,20 +87,7 @@ export default function PhysicalInventoryForm({
 
     const [remarksMap, setRemarksMap] = useState<Record<number, string>>({});
 
-    const [branchId, setBranchId] = useState<number>(() => {
-        if (!sheet?.branch_id) return 0;
-        return typeof sheet.branch_id === "object" ? sheet.branch_id.id || 0 : sheet.branch_id;
-    });
-
-    const extractPtId = (val: unknown): number => {
-        if (!val) return 0;
-        if (typeof val === "object" && val !== null) {
-            const obj = val as Record<string, unknown>;
-            return Number(obj.id ?? obj.product_type_id ?? 0);
-        }
-        const num = Number(val);
-        return !isNaN(num) && num > 0 ? num : 0;
-    };
+    const [branchId, setBranchId] = useState<number>(() => extractBranchId(sheet?.branch_id));
 
     const extractPriceTypeId = (val: unknown): number => {
         if (!val) return 0;
@@ -100,7 +99,7 @@ export default function PhysicalInventoryForm({
         return !isNaN(num) && num > 0 ? num : 0;
     };
 
-    const [productTypeId, setProductTypeId] = useState<number>(() => extractPtId(sheet?.product_type_id));
+    const [productTypeId, setProductTypeId] = useState<number>(() => normalizeProductTypeId(sheet?.product_type_id));
     const [priceTypeId, setPriceTypeId] = useState<number>(() => extractPriceTypeId(sheet?.price_type_id));
 
     const handleProductTypeChange = (newPtId: number) => {
@@ -181,6 +180,7 @@ export default function PhysicalInventoryForm({
     const [remarks, setRemarks] = useState<string>(sheet?.remarks || "");
     const [countsMap, setCountsMap] = useState<Record<number, string>>({});
     const [viewMode, setViewMode] = useState<"GROUPED" | "FLAT">("GROUPED");
+    const [lineItemSearch, setLineItemSearch] = useState("");
     const [saving, setSaving] = useState(false);
     const [savingDraft, setSavingDraft] = useState(false);
     const [draftSavedToast, setDraftSavedToast] = useState(false);
@@ -188,10 +188,10 @@ export default function PhysicalInventoryForm({
 
     useEffect(() => {
         if (sheet) {
-            const bId = typeof sheet.branch_id === "object" ? sheet.branch_id?.id : sheet.branch_id;
+            const bId = extractBranchId(sheet.branch_id);
             if (bId) setBranchId(bId);
             if (sheet.stock_type) setStockType(sheet.stock_type);
-            const ptId = extractPtId(sheet.product_type_id);
+            const ptId = normalizeProductTypeId(sheet.product_type_id);
             setProductTypeId(ptId);
             const prId = extractPriceTypeId(sheet.price_type_id);
             if (prId > 0) {
@@ -244,6 +244,14 @@ export default function PhysicalInventoryForm({
     };
 
     const details = useMemo(() => sheet?.details || [], [sheet?.details]);
+    const hasUnsavedScopeChanges = Boolean(
+        sheet
+        && !isNew
+        && (
+            branchId !== extractBranchId(sheet.branch_id)
+            || productTypeId !== normalizeProductTypeId(sheet.product_type_id)
+        )
+    );
 
     // Unsaved Changes / Dirty State Tracking
     const isHeaderRemarksDirty = useMemo(() => {
@@ -365,6 +373,37 @@ export default function PhysicalInventoryForm({
         }
         return Array.from(map.values());
     }, [details]);
+
+    const normalizedLineItemSearch = lineItemSearch.trim();
+    const matchingDetails = useMemo(
+        () => details.filter((detail) => matchesPhysicalInventoryDetail(detail, normalizedLineItemSearch)),
+        [details, normalizedLineItemSearch]
+    );
+    const matchingDetailSet = useMemo(() => new Set(matchingDetails), [matchingDetails]);
+    const visibleGroupedByLot = useMemo(
+        () => groupedByLot
+            .map((group) => ({ ...group, matchingItems: group.items.filter((detail) => matchingDetailSet.has(detail)) }))
+            .filter((group) => group.matchingItems.length > 0),
+        [groupedByLot, matchingDetailSet]
+    );
+    const detailDomIds = useMemo(
+        () => new Map(details.map((detail, index) => [
+            detail,
+            `physical-inventory-detail-${detail.physical_inventory_detail_id || detail.id || index}`,
+        ])),
+        [details]
+    );
+    const firstMatchDomId = matchingDetails.length > 0 ? detailDomIds.get(matchingDetails[0]) || null : null;
+
+    useEffect(() => {
+        if (!normalizedLineItemSearch || !firstMatchDomId) return;
+
+        const frameId = window.requestAnimationFrame(() => {
+            document.getElementById(firstMatchDomId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+
+        return () => window.cancelAnimationFrame(frameId);
+    }, [normalizedLineItemSearch, firstMatchDomId, viewMode]);
 
     const getLotName = (l: unknown) => {
         if (typeof l === "object" && l !== null) {
@@ -785,6 +824,13 @@ export default function PhysicalInventoryForm({
                 )}
             </form>
 
+            {hasUnsavedScopeChanges && (
+                <div role="status" className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <span>Save the updated branch or product type filter before adding count lines.</span>
+                </div>
+            )}
+
             {/* Line Items Section */}
             {!isNew && (
                 <div className="space-y-4">
@@ -845,6 +891,34 @@ export default function PhysicalInventoryForm({
                                 <p className="text-xs text-muted-foreground">Products, lots, batches, and counted quantities</p>
                             </div>
                             <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto justify-end">
+                                <div className="relative w-full sm:w-72">
+                                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                                    <input
+                                        type="text"
+                                        value={lineItemSearch}
+                                        onChange={(event) => setLineItemSearch(event.target.value)}
+                                        placeholder="Search product, code, lot, or batch..."
+                                        aria-label="Search physical inventory line items"
+                                        autoComplete="off"
+                                        className="h-9 w-full rounded-lg border border-input bg-background pl-9 pr-9 text-xs focus:outline-hidden focus:ring-2 focus:ring-primary/20"
+                                    />
+                                    {lineItemSearch && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setLineItemSearch("")}
+                                            aria-label="Clear line item search"
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                        >
+                                            <X className="h-3.5 w-3.5" />
+                                        </button>
+                                    )}
+                                </div>
+                                {normalizedLineItemSearch && (
+                                    <span role="status" aria-live="polite" className="whitespace-nowrap text-xs text-muted-foreground">
+                                        {matchingDetails.length} {matchingDetails.length === 1 ? "match" : "matches"} · lot totals include all items
+                                    </span>
+                                )}
+
                                 {/* View Mode Switcher */}
                                 <div className="inline-flex items-center p-0.5 bg-muted rounded-lg border text-xs font-medium">
                                     <button
@@ -876,7 +950,9 @@ export default function PhysicalInventoryForm({
                                         <button
                                             type="button"
                                             onClick={() => onOpenAddDetailModal()}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-primary-foreground bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-xs"
+                                            disabled={hasUnsavedScopeChanges}
+                                            title={hasUnsavedScopeChanges ? "Save the updated branch or product type filter first." : undefined}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-primary-foreground bg-primary rounded-lg hover:bg-primary/90 transition-colors shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                                         >
                                             <Plus className="h-3.5 w-3.5" />
                                             Add Storage Lot
@@ -906,10 +982,22 @@ export default function PhysicalInventoryForm({
                                     </span>
                                 )}
                             </div>
+                        ) : normalizedLineItemSearch && matchingDetails.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center gap-2 rounded-xl border bg-card p-10 text-center text-muted-foreground">
+                                <Search className="h-7 w-7 text-muted-foreground/50" />
+                                <p className="text-sm font-medium text-foreground">No line items match “{lineItemSearch}”.</p>
+                                <button
+                                    type="button"
+                                    onClick={() => setLineItemSearch("")}
+                                    className="text-xs font-semibold text-primary hover:underline"
+                                >
+                                    Clear search
+                                </button>
+                            </div>
                         ) : viewMode === "GROUPED" ? (
                             /* GROUPED BY LOT VIEW */
                             <div className="space-y-4">
-                                {groupedByLot.map((group) => {
+                                {visibleGroupedByLot.map((group) => {
                                     let lotSysUom = 0;
                                     let lotPhysUom = 0;
                                     let lotVarUom = 0;
@@ -1001,7 +1089,9 @@ export default function PhysicalInventoryForm({
                                                                 </span>
                                                             )}
                                                             <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-primary/15 text-primary">
-                                                                {group.items.length} {group.items.length === 1 ? "item" : "items"}
+                                                                {normalizedLineItemSearch
+                                                                    ? `${group.matchingItems.length} matching ${group.matchingItems.length === 1 ? "item" : "items"} · ${group.items.length} total`
+                                                                    : `${group.items.length} ${group.items.length === 1 ? "item" : "items"}`}
                                                             </span>
                                                         </div>
                                                         <p className="text-[11px] text-muted-foreground mt-0.5">Manufacturing Storage Lot</p>
@@ -1052,8 +1142,9 @@ export default function PhysicalInventoryForm({
                                                                 const lId = typeof group.lotObj === "object" && group.lotObj !== null ? (group.lotObj as { lot_id?: number }).lot_id || 0 : Number(group.lotObj || 0);
                                                                 onOpenAddDetailModal(lId > 0 ? lId : undefined);
                                                             }}
-                                                            className="flex items-center gap-1.5 px-3 py-1 bg-primary text-primary-foreground font-semibold rounded-md hover:bg-primary/90 transition-colors shadow-xs ml-1"
-                                                            title={`Add a new batch or product count to ${group.lotName}`}
+                                                            disabled={hasUnsavedScopeChanges}
+                                                            title={hasUnsavedScopeChanges ? "Save the updated branch or product type filter first." : `Add a new batch or product count to ${group.lotName}`}
+                                                            className="flex items-center gap-1.5 px-3 py-1 bg-primary text-primary-foreground font-semibold rounded-md hover:bg-primary/90 transition-colors shadow-xs ml-1 disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
                                                             <Plus className="h-3.5 w-3.5" />
                                                             Add Line Item
@@ -1084,7 +1175,7 @@ export default function PhysicalInventoryForm({
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-border">
-                                                        {group.items.map((d, index) => {
+                                                        {group.matchingItems.map((d, index) => {
                                                             const dId = d.physical_inventory_detail_id || d.id || index;
                                                             const sys = d.system_count || 0;
                                                             const origPhys = d.physical_count;
@@ -1104,7 +1195,15 @@ export default function PhysicalInventoryForm({
                                                                         : "text-muted-foreground";
 
                                                             return (
-                                                                <tr key={dId} className="hover:bg-muted/30 transition-colors">
+                                                                <tr
+                                                                    key={dId}
+                                                                    id={detailDomIds.get(d)}
+                                                                    aria-current={detailDomIds.get(d) === firstMatchDomId && normalizedLineItemSearch ? "location" : undefined}
+                                                                    className={`transition-colors ${detailDomIds.get(d) === firstMatchDomId && normalizedLineItemSearch
+                                                                        ? "bg-amber-100 outline outline-2 outline-amber-500 dark:bg-amber-950/60"
+                                                                        : "hover:bg-muted/30"
+                                                                        }`}
+                                                                >
                                                                     <td className="px-3 py-2.5 font-mono font-semibold">{getProductCode(d.product_id)}</td>
                                                                     <td className="px-3 py-2.5 font-medium max-w-xs truncate">{getProductName(d.product_id)}</td>
                                                                     <td className="px-3 py-2.5 font-mono text-primary font-semibold">{d.batch_no || "N/A"}</td>
@@ -1255,7 +1354,7 @@ export default function PhysicalInventoryForm({
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border">
-                                            {details.map((d, index) => {
+                                            {matchingDetails.map((d, index) => {
                                                 const dId = d.physical_inventory_detail_id || d.id || index;
                                                 const sys = d.system_count || 0;
                                                 const origPhys = d.physical_count;
@@ -1275,7 +1374,15 @@ export default function PhysicalInventoryForm({
                                                             : "text-muted-foreground";
 
                                                 return (
-                                                    <tr key={dId} className="hover:bg-muted/30 transition-colors">
+                                                    <tr
+                                                        key={dId}
+                                                        id={detailDomIds.get(d)}
+                                                        aria-current={detailDomIds.get(d) === firstMatchDomId && normalizedLineItemSearch ? "location" : undefined}
+                                                        className={`transition-colors ${detailDomIds.get(d) === firstMatchDomId && normalizedLineItemSearch
+                                                            ? "bg-amber-100 outline outline-2 outline-amber-500 dark:bg-amber-950/60"
+                                                            : "hover:bg-muted/30"
+                                                            }`}
+                                                    >
                                                         <td className="px-3 py-2.5 font-medium">{getLotName(d.lot_id)}</td>
                                                         <td className="px-3 py-2.5 font-mono font-semibold">{getProductCode(d.product_id)}</td>
                                                         <td className="px-3 py-2.5 font-medium max-w-xs truncate">{getProductName(d.product_id)}</td>
