@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
+import { normalizeProductTypeId } from "@/modules/manufacturing-management/physical-inventory-manufacturing/utils/product-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ export async function GET() {
     try {
         const [branchesRes, productsRes, unitsRes, productTypesRes, priceTypesRes] = await Promise.all([
             fetch(`${DIRECTUS_URL}/items/branches?limit=-1&sort=branch_name`, { headers, cache: "no-store" }).catch(() => null),
-            fetch(`${DIRECTUS_URL}/items/products?limit=-1&sort=product_name&fields=product_id,product_code,product_name,product_type,product_type.*,product_shelf_life,cost_per_unit,unit_of_measurement.*,unit_of_measurement_count,isActive`, { headers, cache: "no-store" }).catch(() => null),
+            fetch(`${DIRECTUS_URL}/items/products?limit=-1&sort=product_name&fields=product_id,product_code,product_name,product_type,product_shelf_life,cost_per_unit,unit_of_measurement.*,unit_of_measurement_count,isActive`, { headers, cache: "no-store" }).catch(() => null),
             fetch(`${DIRECTUS_URL}/items/units?limit=-1`, { headers, cache: "no-store" }).catch(() => null),
             fetch(`${DIRECTUS_URL}/items/product_type?limit=-1&sort=id`, { headers, cache: "no-store" }).catch(() => null),
             fetch(`${DIRECTUS_URL}/items/price_types?limit=-1&sort=price_type_name`, { headers, cache: "no-store" }).catch(() => null),
@@ -35,7 +36,10 @@ export async function GET() {
         let products: Array<unknown> = [];
         if (productsRes && productsRes.ok) {
             const json = await productsRes.json();
-            products = json.data || [];
+            products = (json.data || []).map((product: Record<string, unknown>) => ({
+                ...product,
+                product_type_id: normalizeProductTypeId(product.product_type) || null,
+            }));
         }
 
         let units: Array<{ unit_id: number; unitId: number; unit_name: string; unitName: string; unit_shortcut: string; unitShortcut: string }> = [];

@@ -45,6 +45,7 @@ import CommitConfirmationModal from "./components/CommitConfirmationModal";
 import CancelModal from "./components/CancelModal";
 import PrintableManufacturingCountSheet from "./components/PrintableManufacturingCountSheet";
 import { CheckCircle2, AlertTriangle, X } from "lucide-react";
+import { normalizeProductTypeId } from "./utils/product-scope";
 
 export default function PhysicalInventoryManufacturingModule() {
     const [mounted, setMounted] = useState(false);
@@ -218,6 +219,12 @@ export default function PhysicalInventoryManufacturingModule() {
                 // Update Header
                 const updated = await updatePhysicalInventoryHeader(activeSheet.physical_inventory_id, payload);
                 setActiveSheet(updated);
+                const currentBranchId = typeof activeSheet.branch_id === "object"
+                    ? Number((activeSheet.branch_id as { branch_id?: number; id?: number }).branch_id || activeSheet.branch_id.id || 0)
+                    : Number(activeSheet.branch_id || 0);
+                if (currentBranchId !== payload.branch_id) {
+                    setLots(await fetchLotsByBranch(payload.branch_id));
+                }
                 showToast(`Physical Inventory sheet ${updated.pi_no} updated.`);
             }
             await loadSheets();
@@ -487,16 +494,16 @@ export default function PhysicalInventoryManufacturingModule() {
 
     const getBranchIdNum = () => {
         if (!activeSheet?.branch_id) return 0;
-        return typeof activeSheet.branch_id === "object" ? activeSheet.branch_id.id || 0 : activeSheet.branch_id;
+        if (typeof activeSheet.branch_id === "object") {
+            const branch = activeSheet.branch_id as { id?: number; branch_id?: number };
+            return Number(branch.branch_id || branch.id || 0);
+        }
+        return Number(activeSheet.branch_id) || 0;
     };
 
     const getSelectedProductTypeId = (): number | null => {
-        if (!activeSheet?.product_type_id) return null;
-        if (typeof activeSheet.product_type_id === "object" && activeSheet.product_type_id !== null) {
-            return Number(activeSheet.product_type_id.id || 0) || null;
-        }
-        const num = Number(activeSheet.product_type_id);
-        return !isNaN(num) && num > 0 ? num : null;
+        const productTypeId = normalizeProductTypeId(activeSheet?.product_type_id);
+        return productTypeId > 0 ? productTypeId : null;
     };
 
     const renderToast = () => {
@@ -587,6 +594,7 @@ export default function PhysicalInventoryManufacturingModule() {
             <PhysicalInventoryDetailModal
                 isOpen={isDetailModalOpen}
                 branchId={getBranchIdNum()}
+                physicalInventoryId={activeSheet?.physical_inventory_id || 0}
                 stockType={activeSheet?.stock_type || "OPENING"}
                 selectedProductTypeId={getSelectedProductTypeId()}
                 productTypes={productTypes}
@@ -630,11 +638,13 @@ export default function PhysicalInventoryManufacturingModule() {
             <CreateBatchModal
                 isOpen={isBatchModalOpen}
                 branchId={getBranchIdNum()}
+                physicalInventoryId={activeSheet?.physical_inventory_id || 0}
+                selectedProductTypeId={getSelectedProductTypeId()}
+                productTypes={productTypes}
                 lotId={batchTargetLotId}
                 productId={batchTargetProductId}
                 lots={lots}
                 products={products}
-                piNo={activeSheet?.pi_no}
                 onClose={() => setIsBatchModalOpen(false)}
                 onBatchCreated={handleBatchCreated}
             />

@@ -16,10 +16,12 @@ import {
 import SearchableSelect from "./SearchableSelect";
 import { X, Plus, AlertTriangle, Layers } from "lucide-react";
 import { formatQty } from "../utils/number-format";
+import { matchesProductTypeScope, normalizeProductTypeId } from "../utils/product-scope";
 
 interface Props {
     isOpen: boolean;
     branchId: number;
+    physicalInventoryId: number;
     stockType: StockType;
     selectedProductTypeId?: number | null;
     productTypes?: ProductType[];
@@ -57,6 +59,7 @@ const getBatchKey = (batch: MmInventoryBatchOption): string => {
 export default function PhysicalInventoryDetailModal({
     isOpen,
     branchId,
+    physicalInventoryId,
     selectedProductTypeId,
     productTypes = [],
     editingDetail,
@@ -215,26 +218,10 @@ export default function PhysicalInventoryDetailModal({
         return "";
     };
 
-    const getProductTypeId = (prod?: Product | null): number => {
-        if (!prod) return 0;
-        if (prod.product_type_id) return Number(prod.product_type_id);
-        if (prod.product_type) {
-            if (typeof prod.product_type === "object" && prod.product_type !== null) {
-                return Number(prod.product_type.id || 0);
-            }
-            if (typeof prod.product_type === "number") return prod.product_type;
-        }
-        return 0;
-    };
-
-    const getProductTypeName = (prod?: Product | null): string => {
-        if (!prod || !prod.product_type) return "";
-        if (typeof prod.product_type === "object") {
-            const pt = prod.product_type as { name?: string; type_name?: string };
-            return (pt.name || pt.type_name || "").toLowerCase();
-        }
-        return String(prod.product_type).toLowerCase();
-    };
+    const productTypeScopeId = normalizeProductTypeId(selectedProductTypeId);
+    const productTypeScopeName = productTypes.find((pt) => normalizeProductTypeId(pt) === productTypeScopeId)?.name
+        || productTypes.find((pt) => normalizeProductTypeId(pt) === productTypeScopeId)?.type_name
+        || "";
 
     const filteredLots = React.useMemo(() => {
         // 1. Strict filter by Branch ID
@@ -244,18 +231,11 @@ export default function PhysicalInventoryDetailModal({
         });
 
         // 2. Filter by Product Scope (selectedProductTypeId) if specified
-        const targetPtId = Number(selectedProductTypeId || 0);
+        const targetPtId = productTypeScopeId;
         if (targetPtId > 0 && products && products.length > 0) {
             const scopeProducts = products.filter((p) => {
-                const pPtId = getProductTypeId(p);
-                if (pPtId > 0) return pPtId === targetPtId;
-                const selectedPTObj = productTypes.find((pt) => pt.id === targetPtId);
-                const targetName = selectedPTObj ? (selectedPTObj.name || selectedPTObj.type_name || "").toLowerCase() : "";
-                if (targetName) {
-                    const pPtName = getProductTypeName(p);
-                    if (pPtName && (pPtName.includes(targetName) || targetName.includes(pPtName))) return true;
-                }
-                return false;
+                const productType = normalizeProductTypeId(p.product_type_id) > 0 ? p.product_type_id : p.product_type;
+                return matchesProductTypeScope(targetPtId, productType, productTypeScopeName);
             });
 
             if (scopeProducts.length > 0) {
@@ -274,29 +254,17 @@ export default function PhysicalInventoryDetailModal({
         }
 
         return list;
-    }, [lots, branchId, selectedProductTypeId, products, productTypes]);
+    }, [lots, branchId, productTypeScopeId, productTypeScopeName, products]);
 
     const filteredProducts = React.useMemo(() => {
         let list = products;
 
         // 1. Filter by Product Type if selected on sheet header
-        const targetPtId = Number(selectedProductTypeId || 0);
+        const targetPtId = productTypeScopeId;
         if (targetPtId > 0) {
-            const selectedPTObj = productTypes.find((pt) => pt.id === targetPtId);
-            const targetName = selectedPTObj ? (selectedPTObj.name || selectedPTObj.type_name || "").toLowerCase() : "";
-
             list = list.filter((p) => {
-                const pPtId = getProductTypeId(p);
-                if (pPtId > 0) {
-                    return pPtId === targetPtId;
-                }
-                if (targetName) {
-                    const pPtName = getProductTypeName(p);
-                    if (pPtName && (pPtName.includes(targetName) || targetName.includes(pPtName))) {
-                        return true;
-                    }
-                }
-                return false;
+                const productType = normalizeProductTypeId(p.product_type_id) > 0 ? p.product_type_id : p.product_type;
+                return matchesProductTypeScope(targetPtId, productType, productTypeScopeName);
             });
         }
 
@@ -320,22 +288,46 @@ export default function PhysicalInventoryDetailModal({
         }
 
         return list;
-    }, [selectedProductTypeId, productTypes, selectedLotId, lots, products]);
+    }, [productTypeScopeId, productTypeScopeName, selectedLotId, lots, products]);
+
+    const selectedProductIsEligible = selectedProductId > 0
+        && filteredProducts.some((product) => product.product_id === selectedProductId);
+
+    useEffect(() => {
+        if (!isOpen || isEdit || selectedProductId <= 0 || products.length === 0 || selectedProductIsEligible) return;
+
+        setSelectedProductId(0);
+        setSelectedBatchKey("");
+        setBatches([]);
+        setError(null);
+    }, [isOpen, isEdit, selectedProductId, products.length, selectedProductIsEligible]);
 
     // 3. Load batches when Lot & Product are selected
     useEffect(() => {
-        if (selectedLotId && selectedProductId) {
+        if (selectedLotId && selectedProductId && physicalInventoryId > 0) {
+            let active = true;
             setLoadingBatches(true);
             setError(null);
 
-            fetchBatchesByLotAndProduct(selectedLotId, selectedProductId)
-                .then((data) => setBatches(data))
-                .catch((err) => setError(err.message))
-                .finally(() => setLoadingBatches(false));
+            fetchBatchesByLotAndProduct(selectedLotId, selectedProductId, physicalInventoryId)
+                .then((data) => {
+                    if (active) setBatches(data);
+                })
+                .catch((err) => {
+                    if (active) setError(err.message);
+                })
+                .finally(() => {
+                    if (active) setLoadingBatches(false);
+                });
+
+            return () => {
+                active = false;
+            };
         } else {
             setBatches([]);
+            setLoadingBatches(false);
         }
-    }, [selectedLotId, selectedProductId]);
+    }, [selectedLotId, selectedProductId, physicalInventoryId]);
 
     // Filter out batches that are ALREADY added to this Physical Inventory sheet
     const availableBatches = React.useMemo(() => {
@@ -526,7 +518,7 @@ export default function PhysicalInventoryDetailModal({
                                 <label className="text-xs font-semibold text-muted-foreground">Product *</label>
                                 {selectedLotId > 0 && (
                                     <span className="text-[11px] font-semibold text-primary">
-                                        Filtered by UOM: {getLotUnitShortcut(lots.find((l) => l.lot_id === selectedLotId)) || "Lot UOM"}
+                                        Filtered by {productTypeScopeName ? `${productTypeScopeName} · ` : ""}UOM: {getLotUnitShortcut(lots.find((l) => l.lot_id === selectedLotId)) || "Lot UOM"}
                                     </span>
                                 )}
                             </div>
@@ -557,10 +549,18 @@ export default function PhysicalInventoryDetailModal({
                                 disabled={isEdit || !selectedLotId || filteredProducts.length === 0}
                                 required
                             />
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                                Catalog products can be counted in this lot even when no batch is assigned to it yet.
+                            </p>
+                            {selectedLotId > 0 && filteredProducts.length === 0 && (
+                                <p className="mt-1 text-[11px] text-amber-600">
+                                    No catalog products match this lot&apos;s UOM and audit scope. Register the product in the product master first, or check its UOM and product type.
+                                </p>
+                            )}
                         </div>
 
                         {/* Batch Selection */}
-                        {selectedLotId > 0 && selectedProductId > 0 && (
+                        {selectedLotId > 0 && selectedProductIsEligible && (
                             <div>
                                 <div className="flex items-center justify-between mb-1">
                                     <label className="text-xs font-semibold text-muted-foreground">Inventory Batch # *</label>
@@ -591,7 +591,7 @@ export default function PhysicalInventoryDetailModal({
                                     required
                                 />
                                 {batches.length === 0 && !loadingBatches && (
-                                    <p className="text-[11px] text-amber-600 mt-1">No batches found for this product & lot. Click &quot;Create New Batch&quot;.</p>
+                                    <p className="text-[11px] text-amber-600 mt-1">This product has no batch assigned to this lot yet. Click &quot;Create New Batch&quot; to record the found stock for this audit.</p>
                                 )}
                             </div>
                         )}

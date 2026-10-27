@@ -24,6 +24,8 @@ export interface PriceType {
 
 export interface ProductType {
     id: number;
+    product_type_id?: number;
+    type_id?: number;
     name?: string;
     type_name?: string;
     default_purchase_price_type_id?: number | null;
@@ -33,7 +35,7 @@ export interface Product {
     product_id: number;
     product_code: string;
     product_name: string;
-    product_type?: number | string | ProductType | { id?: number; name?: string; type_name?: string } | null;
+    product_type?: number | string | ProductType | { id?: number; product_type_id?: number; type_id?: number; name?: string; type_name?: string } | null;
     product_type_id?: number | null;
     product_shelf_life?: number;
     cost_per_unit?: number;

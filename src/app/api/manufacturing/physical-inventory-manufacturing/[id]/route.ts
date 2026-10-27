@@ -104,7 +104,7 @@ function areDatesEqual(d1: unknown, d2: unknown): boolean {
 
 /**
  * PATCH /api/manufacturing/physical-inventory-manufacturing/[id]
- * Update draft Physical Inventory header metadata (remarks, dates, product_type_id, price_type_id, offset_pairings)
+ * Update draft Physical Inventory header metadata (branch, remarks, dates, product_type_id, price_type_id, offset_pairings)
  */
 export async function PATCH(request: NextRequest, context: RouteParams) {
     try {
@@ -125,9 +125,10 @@ export async function PATCH(request: NextRequest, context: RouteParams) {
         const isCancelled = parseBooleanFlag(sheet.isCancelled);
 
         const body = await request.json();
-        const { starting_date, cutoff_date, remarks, stock_type, product_type_id, price_type_id, offset_pairings } = body;
+        const { branch_id, starting_date, cutoff_date, remarks, stock_type, product_type_id, price_type_id, offset_pairings } = body;
 
         const hasStructuralChange =
+            (branch_id !== undefined && extractId(branch_id, "branch_id") !== extractId(sheet.branch_id, "branch_id")) ||
             (starting_date !== undefined && !areDatesEqual(starting_date, sheet.starting_date)) ||
             (cutoff_date !== undefined && !areDatesEqual(cutoff_date, sheet.cutoff_date)) ||
             (price_type_id !== undefined && extractId(price_type_id, "price_type_id") !== extractId(sheet.price_type_id, "price_type_id")) ||
@@ -147,11 +148,14 @@ export async function PATCH(request: NextRequest, context: RouteParams) {
         if (hasDetails && hasStructuralChange) {
             return NextResponse.json({
                 success: false,
-                error: "Critical header controls (Starting Date, Cutoff Date, Price Type Basis, Product Type Filter, Stock Count Type) cannot be modified once line items have been logged in an active audit sheet."
+                error: "Critical header controls (Branch, Starting Date, Cutoff Date, Price Type Basis, Product Type Filter, Stock Count Type) cannot be modified once line items have been logged in an active audit sheet."
             }, { status: 400 });
         }
 
         const updatePayload: Record<string, unknown> = {};
+        if (branch_id !== undefined) {
+            updatePayload.branch_id = extractId(branch_id, "branch_id");
+        }
         if (starting_date) updatePayload.starting_date = starting_date;
         if (cutoff_date) updatePayload.cutoff_date = cutoff_date;
         if (stock_type && (stock_type === "OPENING" || stock_type === "REGULAR")) {
