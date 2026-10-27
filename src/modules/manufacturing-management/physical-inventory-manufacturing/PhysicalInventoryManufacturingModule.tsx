@@ -12,7 +12,7 @@ import {
     PriceType,
     Unit,
     MmLot,
-    MmInventoryLot,
+    MmInventoryBatchOption,
     StockType,
 } from "./types";
 import {
@@ -20,7 +20,6 @@ import {
     fetchPhysicalInventorySheet,
     createPhysicalInventoryHeader,
     updatePhysicalInventoryHeader,
-    populatePhysicalInventorySheet,
     addPhysicalInventoryDetail,
     updatePhysicalInventoryDetail,
     removePhysicalInventoryDetail,
@@ -75,7 +74,7 @@ export default function PhysicalInventoryManufacturingModule() {
     const [batchTargetProductId, setBatchTargetProductId] = useState(0);
 
     const [lastCreatedLot, setLastCreatedLot] = useState<MmLot | null>(null);
-    const [lastCreatedBatch, setLastCreatedBatch] = useState<MmInventoryLot | null>(null);
+    const [lastCreatedBatch, setLastCreatedBatch] = useState<MmInventoryBatchOption | null>(null);
 
     const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
     const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
@@ -215,18 +214,6 @@ export default function PhysicalInventoryManufacturingModule() {
                 showToast(`Physical Inventory sheet ${created.pi_no} created.`);
                 const lList = await fetchLotsByBranch(payload.branch_id);
                 setLots(lList);
-                // Auto-populate system stock items from movements API upon header creation
-                try {
-                    const ptId = payload.product_type_id || null;
-                    const popRes = await populatePhysicalInventorySheet(created.physical_inventory_id, ptId);
-                    if (popRes.count && popRes.count > 0) {
-                        showToast(popRes.message || `Auto-populated ${popRes.count} stock items from movements.`);
-                        const refreshed = await fetchPhysicalInventorySheet(created.physical_inventory_id);
-                        setActiveSheet(refreshed);
-                    }
-                } catch (popErr) {
-                    console.warn("Auto-populate on create header notice:", popErr);
-                }
             } else {
                 // Update Header
                 const updated = await updatePhysicalInventoryHeader(activeSheet.physical_inventory_id, payload);
@@ -243,28 +230,10 @@ export default function PhysicalInventoryManufacturingModule() {
         }
     };
 
-    const handlePopulateSheet = async (overridePtId?: number | null) => {
-        if (!activeSheet || !activeSheet.physical_inventory_id) return;
-        try {
-            setLoading(true);
-            const headerPtId = typeof activeSheet.product_type_id === "object" ? activeSheet.product_type_id?.id : activeSheet.product_type_id;
-            const ptId = overridePtId && overridePtId > 0 ? overridePtId : headerPtId || null;
-            const res = await populatePhysicalInventorySheet(activeSheet.physical_inventory_id, ptId);
-            showToast(res.message || "System stock items populated from movements log.");
-            const refreshed = await fetchPhysicalInventorySheet(activeSheet.physical_inventory_id);
-            setActiveSheet(refreshed);
-            await loadSheets();
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : "Failed to populate system stock";
-            showToast(msg, "error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
     // Detail handlers
     const handleSaveDetail = async (payload: {
-        inventory_lot_id: number;
+        inventory_lot_id?: number;
+        draft_batch_id?: number;
         lot_id: number;
         product_id: number;
         physical_count?: number | null;
@@ -511,7 +480,7 @@ export default function PhysicalInventoryManufacturingModule() {
         showToast(`Lot '${newLot.lot_name}' created successfully.`);
     };
 
-    const handleBatchCreated = (newBatch: MmInventoryLot) => {
+    const handleBatchCreated = (newBatch: MmInventoryBatchOption) => {
         setLastCreatedBatch(newBatch);
         showToast(`Batch #${newBatch.batch_no} created successfully.`);
     };
@@ -598,7 +567,6 @@ export default function PhysicalInventoryManufacturingModule() {
                         loadSheets();
                     }}
                     onSaveHeader={handleSaveHeader}
-                    onPopulateSheet={handlePopulateSheet}
                     onOpenAddDetailModal={(lotId) => {
                         setEditingDetail(null);
                         setPreselectedLotId(lotId);

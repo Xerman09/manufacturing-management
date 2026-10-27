@@ -75,9 +75,8 @@ export async function POST(request: NextRequest) {
                     success: true,
                     data: {
                         ...createdDraft,
-                        inventory_lot_id: draftId,
-                        id: draftId,
                         draft_batch_id: draftId,
+                        batch_kind: "DRAFT",
                         is_draft: true,
                     },
                 },
@@ -123,7 +122,8 @@ export async function POST(request: NextRequest) {
                     ...createdFallback,
                     inventory_lot_id: bId,
                     id: bId,
-                    is_draft: true,
+                    batch_kind: "MASTER",
+                    is_draft: false,
                 },
             },
             { status: 201 }

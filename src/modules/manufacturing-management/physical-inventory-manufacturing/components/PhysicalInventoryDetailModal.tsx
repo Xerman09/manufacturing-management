@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import {
     MmLot,
-    MmInventoryLot,
+    MmInventoryBatchOption,
     Product,
     ProductType,
     MmPhysicalInventoryDetail,
@@ -15,6 +15,7 @@ import {
 } from "../services/physical-inventory-manufacturing-api";
 import SearchableSelect from "./SearchableSelect";
 import { X, Plus, AlertTriangle, Layers } from "lucide-react";
+import { formatQty } from "../utils/number-format";
 
 interface Props {
     isOpen: boolean;
@@ -25,16 +26,15 @@ interface Props {
     editingDetail?: MmPhysicalInventoryDetail | null;
     products: Product[];
     lastCreatedLot?: MmLot | null;
-    lastCreatedBatch?: MmInventoryLot | null;
+    lastCreatedBatch?: MmInventoryBatchOption | null;
     preselectedLotId?: number;
     existingDetails?: MmPhysicalInventoryDetail[];
     onClose: () => void;
     onSaveDetail: (payload: {
-        inventory_lot_id: number;
+        inventory_lot_id?: number;
+        draft_batch_id?: number;
         lot_id: number;
         product_id: number;
-        is_draft?: boolean;
-        draft_batch_id?: number;
         physical_count?: number | null;
         inventory_condition: string;
         remarks?: string;
@@ -47,6 +47,12 @@ interface Props {
     onOpenCreateLotModal: () => void;
     onOpenCreateBatchModal: (lotId: number, productId: number) => void;
 }
+
+const getBatchKey = (batch: MmInventoryBatchOption): string => {
+    if (batch.batch_kind === "DRAFT" && batch.draft_batch_id) return `draft:${batch.draft_batch_id}`;
+    const inventoryLotId = Number(batch.inventory_lot_id || batch.id || 0);
+    return inventoryLotId > 0 ? `master:${inventoryLotId}` : "";
+};
 
 export default function PhysicalInventoryDetailModal({
     isOpen,
@@ -69,8 +75,8 @@ export default function PhysicalInventoryDetailModal({
     const [lots, setLots] = useState<MmLot[]>([]);
     const [selectedLotId, setSelectedLotId] = useState<number>(0);
     const [selectedProductId, setSelectedProductId] = useState<number>(0);
-    const [batches, setBatches] = useState<MmInventoryLot[]>([]);
-    const [selectedBatchId, setSelectedBatchId] = useState<number>(0);
+    const [batches, setBatches] = useState<MmInventoryBatchOption[]>([]);
+    const [selectedBatchKey, setSelectedBatchKey] = useState<string>("");
 
     const [loadingLots, setLoadingLots] = useState(false);
     const [loadingBatches, setLoadingBatches] = useState(false);
@@ -149,14 +155,14 @@ export default function PhysicalInventoryDetailModal({
     // Handle new batch created dynamically
     useEffect(() => {
         if (lastCreatedBatch && isOpen) {
-            const bId = Number(lastCreatedBatch.inventory_lot_id || (lastCreatedBatch as { id?: number }).id || 0);
-            if (bId > 0) {
+            const batchKey = getBatchKey(lastCreatedBatch);
+            if (batchKey) {
                 setBatches((prev) => {
-                    const exists = prev.some((b) => Number(b.inventory_lot_id || (b as { id?: number }).id) === bId);
+                    const exists = prev.some((batch) => getBatchKey(batch) === batchKey);
                     if (exists) return prev;
-                    return [{ ...lastCreatedBatch, inventory_lot_id: bId }, ...prev];
+                    return [lastCreatedBatch, ...prev];
                 });
-                setSelectedBatchId(bId);
+                setSelectedBatchKey(batchKey);
             }
         }
     }, [lastCreatedBatch, isOpen]);
@@ -171,7 +177,7 @@ export default function PhysicalInventoryDetailModal({
                 const bId = typeof editingDetail.inventory_lot_id === "object" ? editingDetail.inventory_lot_id.inventory_lot_id : editingDetail.inventory_lot_id;
                 if (lId) setSelectedLotId(lId);
                 setSelectedProductId(pId || 0);
-                setSelectedBatchId(bId || 0);
+                setSelectedBatchKey(bId ? `master:${bId}` : "");
             } else if (!editingDetail) {
                 if (preselectedLotId && preselectedLotId > 0) {
                     setSelectedLotId(preselectedLotId);
@@ -179,7 +185,7 @@ export default function PhysicalInventoryDetailModal({
                     setSelectedLotId(0);
                 }
                 setSelectedProductId(0);
-                setSelectedBatchId(0);
+                setSelectedBatchKey("");
             }
         }
     }, [isOpen, editingDetail, preselectedLotId]);
@@ -333,11 +339,7 @@ export default function PhysicalInventoryDetailModal({
 
     // Filter out batches that are ALREADY added to this Physical Inventory sheet
     const availableBatches = React.useMemo(() => {
-        const normalizedBatches = batches.map((b) => ({
-            ...b,
-            inventory_lot_id: Number(b.inventory_lot_id || (b as { id?: number }).id || 0),
-        }));
-        if (!existingDetails || existingDetails.length === 0) return normalizedBatches;
+        if (!existingDetails || existingDetails.length === 0) return batches;
         const addedBatchIds = new Set(
             existingDetails.map((d) => {
                 if (typeof d.inventory_lot_id === "object" && d.inventory_lot_id !== null) {
@@ -346,14 +348,19 @@ export default function PhysicalInventoryDetailModal({
                 return Number(d.inventory_lot_id || 0);
             })
         );
-        return normalizedBatches.filter((b) => {
+        const addedBatchNumbers = new Set(existingDetails.map((detail) => String(detail.batch_no || "").trim().toUpperCase()).filter(Boolean));
+        return batches.filter((batch) => {
+            if (batch.batch_kind === "DRAFT") {
+                return !addedBatchNumbers.has(String(batch.batch_no || "").trim().toUpperCase());
+            }
+            const batchId = Number(batch.inventory_lot_id || batch.id || 0);
             if (editingDetail) {
                 const editBId = typeof editingDetail.inventory_lot_id === "object"
                     ? Number((editingDetail.inventory_lot_id as { inventory_lot_id?: number; id?: number })?.inventory_lot_id || (editingDetail.inventory_lot_id as { id?: number })?.id || 0)
                     : Number(editingDetail.inventory_lot_id || 0);
-                if (editBId === b.inventory_lot_id) return true;
+                if (editBId === batchId) return true;
             }
-            return !addedBatchIds.has(b.inventory_lot_id);
+            return !addedBatchIds.has(batchId);
         });
     }, [batches, existingDetails, editingDetail]);
 
@@ -371,31 +378,26 @@ export default function PhysicalInventoryDetailModal({
             setError("Please select a product.");
             return;
         }
-        if (!selectedBatchId) {
+        if (!selectedBatchKey) {
             setError("Please select or create an inventory batch.");
             return;
         }
 
-        if (selectedBatchId > 0 && existingDetails) {
-            const alreadyAdded = existingDetails.some((d) => {
-                if (editingDetail) {
-                    const eId = editingDetail.physical_inventory_detail_id || editingDetail.id;
-                    const dId = d.physical_inventory_detail_id || d.id;
-                    if (eId && dId && eId === dId) return false;
-                }
-                const bId = typeof d.inventory_lot_id === "object" ? d.inventory_lot_id?.inventory_lot_id : d.inventory_lot_id;
-                return Number(bId) === Number(selectedBatchId);
-            });
-
-            if (alreadyAdded) {
-                setError("This inventory batch has already been added to this physical inventory sheet.");
-                return;
-            }
+        const selectedBatch = availableBatches.find((batch) => getBatchKey(batch) === selectedBatchKey)
+            || (lastCreatedBatch && getBatchKey(lastCreatedBatch) === selectedBatchKey ? lastCreatedBatch : null);
+        if (!selectedBatch) {
+            setError("The selected batch is no longer available. Refresh the batch list and try again.");
+            return;
         }
-        const selectedBatch = batches.find((b) => Number(b.inventory_lot_id || (b as { id?: number }).id) === selectedBatchId) || (lastCreatedBatch && Number(lastCreatedBatch.inventory_lot_id || (lastCreatedBatch as { id?: number }).id) === selectedBatchId ? lastCreatedBatch : null);
+        const isDraftBatch = selectedBatch.batch_kind === "DRAFT";
+        const inventoryLotId = isDraftBatch ? undefined : Number(selectedBatch.inventory_lot_id || selectedBatch.id || 0);
+        const draftBatchId = isDraftBatch ? Number(selectedBatch.draft_batch_id || 0) : undefined;
+        if ((!isDraftBatch && (!inventoryLotId || inventoryLotId <= 0)) || (isDraftBatch && (!draftBatchId || draftBatchId <= 0))) {
+            setError("The selected batch has an invalid inventory reference. Refresh the batch list and try again.");
+            return;
+        }
         const selectedLot = lots.find((l) => Number(l.lot_id || (l as { id?: number }).id) === selectedLotId) || (lastCreatedLot && Number(lastCreatedLot.lot_id || (lastCreatedLot as { id?: number }).id) === selectedLotId ? lastCreatedLot : null);
 
-        const isDraftBatch = selectedBatchId < 0 || Boolean(selectedBatch?.status === "DRAFT" || (selectedBatch as { is_draft?: boolean })?.is_draft || (selectedBatch as { draft_batch_id?: number })?.draft_batch_id);
         const isDraftLot = selectedLotId < 0 || Boolean(selectedLot?.isActive === 0);
 
         const countVal = physicalCount.trim() === "" ? null : Number(physicalCount);
@@ -407,10 +409,10 @@ export default function PhysicalInventoryDetailModal({
         try {
             setSubmitting(true);
             await onSaveDetail({
-                inventory_lot_id: selectedBatchId,
+                ...(inventoryLotId ? { inventory_lot_id: inventoryLotId } : {}),
+                ...(draftBatchId ? { draft_batch_id: draftBatchId } : {}),
                 lot_id: selectedLotId,
                 product_id: selectedProductId,
-                is_draft: isDraftBatch,
                 physical_count: countVal,
                 inventory_condition: inventoryCondition || "GOOD",
                 remarks: remarks.trim(),
@@ -496,14 +498,14 @@ export default function PhysicalInventoryDetailModal({
                                     return {
                                         value: l.lot_id,
                                         label: l.lot_name,
-                                        sublabel: `UOM: ${uName || "N/A"} | Cap: ${l.max_batch_capacity}`,
+                                        sublabel: `UOM: ${uName || "N/A"} | Cap: ${formatQty(l.max_batch_capacity)}`,
                                     };
                                 })}
                                 value={selectedLotId}
                                 onChange={(val) => {
                                     setSelectedLotId(Number(val));
                                     setSelectedProductId(0);
-                                    setSelectedBatchId(0);
+                                    setSelectedBatchKey("");
                                 }}
                                 placeholder={
                                     loadingLots
@@ -542,7 +544,7 @@ export default function PhysicalInventoryDetailModal({
                                 value={selectedProductId}
                                 onChange={(val) => {
                                     setSelectedProductId(Number(val));
-                                    setSelectedBatchId(0);
+                                    setSelectedBatchKey("");
                                 }}
                                 placeholder={
                                     !selectedLotId
@@ -573,16 +575,16 @@ export default function PhysicalInventoryDetailModal({
                                 </div>
                                 <SearchableSelect
                                     options={availableBatches.map((b) => {
-                                        const bId = Number(b.inventory_lot_id || (b as { id?: number }).id || 0);
+                                        const batchKey = getBatchKey(b);
                                         const exp = b.expiry_date || b.expiration_date;
                                         return {
-                                            value: bId,
+                                            value: batchKey,
                                             label: `Batch #${b.batch_no}`,
                                             sublabel: `Cost: ₱${b.unit_cost}${exp ? ` | Exp: ${exp}` : ""}`,
                                         };
                                     })}
-                                    value={selectedBatchId}
-                                    onChange={(val) => setSelectedBatchId(Number(val))}
+                                    value={selectedBatchKey}
+                                    onChange={(val) => setSelectedBatchKey(String(val))}
                                     placeholder="Select Existing Batch..."
                                     searchPlaceholder="Search batches..."
                                     disabled={isEdit || loadingBatches}
