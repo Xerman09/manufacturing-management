@@ -121,6 +121,9 @@ export async function GET(req: NextRequest) {
                 total_zero_quantity_lines: 0,
                 total_mixed_uom_orders: 0,
                 total_exceptions_count: 0,
+                delivered_orders_count: 0,
+                dispatched_orders_count: 0,
+                overall_delivery_rate: 0,
             };
 
             return NextResponse.json<TrackingApiResponse>({
@@ -671,12 +674,26 @@ export async function GET(req: NextRequest) {
         let totalZeroQty = 0;
         let totalMixedUom = 0;
         let totalExceptionsCount = 0;
+        let deliveredOrdersCount = 0;
+        let dispatchedOrdersCount = 0;
+        let deliveredOrDispatchedQty = 0;
 
         for (const item of filteredItems) {
             grandOrderedQty += item.total_ordered_quantity;
             grandAllocQty += item.total_allocated_quantity;
             grandPickedQty += item.total_physical_picked_quantity;
             grandAppliedQty += item.total_planned_applied_quantity;
+
+            const isDelivered = !item.is_cancelled && ["Delivered", "Completed"].includes(item.order_status);
+            const isDispatched = !item.is_cancelled && ["Dispatched", "En Route", "For Shipping", "For Loading"].includes(item.order_status);
+
+            if (isDelivered) {
+                deliveredOrdersCount++;
+                deliveredOrDispatchedQty += item.total_ordered_quantity;
+            } else if (isDispatched) {
+                dispatchedOrdersCount++;
+                deliveredOrDispatchedQty += item.total_ordered_quantity;
+            }
 
             if (item.stage === "Awaiting Allocation") stageAwaitingAllocation++;
             else if (item.stage === "Ready for Picking") stageReadyForPicking++;
@@ -734,6 +751,9 @@ export async function GET(req: NextRequest) {
             total_zero_quantity_lines: totalZeroQty,
             total_mixed_uom_orders: totalMixedUom,
             total_exceptions_count: totalExceptionsCount,
+            delivered_orders_count: deliveredOrdersCount,
+            dispatched_orders_count: dispatchedOrdersCount,
+            overall_delivery_rate: grandOrderedQty > 0 ? (deliveredOrDispatchedQty / grandOrderedQty) * 100 : 0,
         };
 
         // 9. Pagination

@@ -139,6 +139,9 @@ export interface TrackingMetrics {
     total_zero_quantity_lines: number;
     total_mixed_uom_orders: number;
     total_exceptions_count: number;
+    delivered_orders_count: number;
+    dispatched_orders_count: number;
+    overall_delivery_rate: number;
 }
 
 export interface BranchOption {
