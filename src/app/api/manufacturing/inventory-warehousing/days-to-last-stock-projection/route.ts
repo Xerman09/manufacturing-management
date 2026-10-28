@@ -1,3 +1,4 @@
+import { calculateProjection } from "@/modules/manufacturing-management/inventory-warehousing/days-to-last-stock-projection/utils/projection";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import {
@@ -6,6 +7,8 @@ import {
     ProjectionStatus,
 } from "@/modules/manufacturing-management/inventory-warehousing/days-to-last-stock-projection/types";
 import { DIRECTUS_URL, headers as directusHeaders } from "@/app/api/manufacturing/directus-api";
+
+import { loadConsumption } from "./_consumption";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,24 +54,6 @@ interface SpringBatchOnhandRow {
     onhand_quantity?: number | string;
     unitId?: number;
     unit_id?: number;
-}
-
-interface WipRawMovement {
-    branch_id?: number | null;
-    branch?: number | null;
-    product_id?: number | null;
-    product?: number | null;
-    quantity_out?: number | string | null;
-    transaction_date?: string | null;
-    transaction_type?: string | null;
-    source_module?: string | null;
-}
-
-interface DirectusJobOrderMaterialRaw {
-    jo_material_id: number;
-    job_order_id: number | { job_order_id: number; branch_id: number; created_at?: string; scheduled_start_date?: string };
-    product_id: number | { product_id: number };
-    actual_consumed_quantity: number | string | null;
 }
 
 export async function GET(request: Request) {
@@ -143,25 +128,9 @@ export async function GET(request: Request) {
                   .catch(() => [] as SpringBatchOnhandRow[])
             : Promise.resolve([] as SpringBatchOnhandRow[]);
 
-        // 4. Query Verified Outflow Movements from Canonical View `v_mm_inventory_movements` via Spring Boot
-        const movementsPromise = springBaseUrl
-            ? fetch(`${springBaseUrl}/api/mm-inventory-movements/all`, {
-                  headers: springHeaders,
-                  cache: "no-store",
-              })
-                  .then(async (res) => {
-                      if (!res.ok) return [];
-                      const json = await res.json();
-                      return Array.isArray(json) ? (json as WipRawMovement[]) : json?.data || [];
-                  })
-                  .catch(() => [] as WipRawMovement[])
-            : Promise.resolve([] as WipRawMovement[]);
-
-        // 5. Query Directus manufacturing_job_order_materials as Dual Consumption Source
-        const joMaterialsPromise = fetch(
-            `${DIRECTUS_URL}/items/manufacturing_job_order_materials?filter[actual_consumed_quantity][_gt]=0&limit=-1&fields=jo_material_id,job_order_id.job_order_id,job_order_id.branch_id,job_order_id.created_at,product_id,actual_consumed_quantity&_t=${timestamp}`,
-            { headers: directusHeaders, cache: "no-store" }
-        ).then(async (res) => (res.ok ? ((await res.json()).data as DirectusJobOrderMaterialRaw[]) : [])).catch(() => []);
+        const assessmentEnd = new Date().toISOString();
+        const assessmentStart = isAllTime ? null : new Date(Date.parse(assessmentEnd) - windowMonths * 30 * 86400000).toISOString();
+        const movementsPromise = loadConsumption(springBaseUrl, springHeaders, assessmentStart, assessmentEnd);
 
         // 6. Directus fallback for onhand & lots if Spring Boot has zero rows
         const directusLotsPromise = fetch(
@@ -175,7 +144,6 @@ export async function GET(request: Request) {
             rawProducts,
             springOnhand,
             springMovements,
-            directusJobOrderMaterials,
             directusLots,
         ] = await Promise.all([
             branchesPromise,
@@ -183,7 +151,6 @@ export async function GET(request: Request) {
             productsPromise,
             onhandPromise,
             movementsPromise,
-            joMaterialsPromise,
             directusLotsPromise,
         ]);
 
@@ -245,95 +212,19 @@ export async function GET(request: Request) {
             }
         }
 
-        // 8. Aggregate Verified Consumption from Dual Sources (`v_mm_inventory_movements` + `manufacturing_job_order_materials`)
-        const now = new Date();
-        const cutoffDate = new Date();
-        cutoffDate.setDate(now.getDate() - windowMonths * 30);
-
-        const consumptionMap = new Map<
-            string,
-            { totalConsumed: number; txCount: number; earliestDate: string | null; latestDate: string | null }
-        >();
-
-        // Source A: Spring Boot v_mm_inventory_movements
-        for (const mv of springMovements) {
-            const srcModule = String(mv.source_module || "").toUpperCase();
-            const txType = String(mv.transaction_type || "").toUpperCase();
-            const isProductionConsumption =
-                srcModule === "MM_JOB_ORDER" ||
-                txType === "JOB_ORDER_CONSUMPTION" ||
-                txType === "MATERIAL_CONSUMPTION";
-
-            if (!isProductionConsumption) continue;
-
-            const bId = Number(mv.branch_id || mv.branch || 0);
-            const pId = Number(mv.product_id || mv.product || 0);
-            if (!bId || !pId) continue;
-
-            const txDateStr = mv.transaction_date;
-            if (!isAllTime && txDateStr) {
-                const txDate = new Date(txDateStr);
-                if (txDate < cutoffDate) continue; // Outside assessed window
-            }
-
-            const qtyOut = Number(mv.quantity_out) || 0;
-            if (qtyOut <= 0) continue;
-
-            const key = `${bId}:${pId}`;
-            const curr = consumptionMap.get(key) || {
-                totalConsumed: 0,
-                txCount: 0,
-                earliestDate: null,
-                latestDate: null,
-            };
-
-            curr.totalConsumed += qtyOut;
-            curr.txCount += 1;
-            if (txDateStr) {
-                if (!curr.earliestDate || txDateStr < curr.earliestDate) curr.earliestDate = txDateStr;
-                if (!curr.latestDate || txDateStr > curr.latestDate) curr.latestDate = txDateStr;
-            }
-            consumptionMap.set(key, curr);
-        }
-
-        // Source B: Directus manufacturing_job_order_materials
-        for (const jom of directusJobOrderMaterials) {
-            const joObj = typeof jom.job_order_id === "object" ? jom.job_order_id : null;
-            const pId = typeof jom.product_id === "object" ? Number(jom.product_id.product_id) : Number(jom.product_id);
-            const bId = joObj ? Number(joObj.branch_id) : 1; // Default to main branch if not joined
-            if (!pId || !bId) continue;
-
-            const txDateStr = joObj?.created_at || joObj?.scheduled_start_date || null;
-            if (!isAllTime && txDateStr) {
-                const txDate = new Date(txDateStr);
-                if (txDate < cutoffDate) continue;
-            }
-
-            const qtyOut = Number(jom.actual_consumed_quantity) || 0;
-            if (qtyOut <= 0) continue;
-
-            const key = `${bId}:${pId}`;
-            const curr = consumptionMap.get(key) || {
-                totalConsumed: 0,
-                txCount: 0,
-                earliestDate: null,
-                latestDate: null,
-            };
-
-            // Avoid double counting if already populated by movement key
-            if (springMovements.length === 0) {
-                curr.totalConsumed += qtyOut;
-                curr.txCount += 1;
-            } else if (curr.totalConsumed === 0) {
-                curr.totalConsumed = qtyOut;
-                curr.txCount = 1;
-            }
-
-            if (txDateStr) {
-                if (!curr.earliestDate || txDateStr < curr.earliestDate) curr.earliestDate = txDateStr;
-                if (!curr.latestDate || txDateStr > curr.latestDate) curr.latestDate = txDateStr;
-            }
-            consumptionMap.set(key, curr);
+        const consumptionMap = new Map<string, { totalConsumed: number; txCount: number; earliestDate: string | null; latestDate: string | null }>();
+        for (const movement of springMovements) {
+            const product = rawProducts.find(product => Number(product.product_id) === movement.product_id);
+            if (!product || branchParam && Number(branchParam) !== movement.branch_id) continue;
+            const unit = typeof product?.unit_of_measurement === "object" ? product.unit_of_measurement?.unit_id : product?.unit_of_measurement;
+            if (!unit || movement.unit_id !== Number(unit)) throw new Error("Verified consumption UOM cannot be reconciled with the product inventory UOM.");
+            const key = `${movement.branch_id}:${movement.product_id}`;
+            const current = consumptionMap.get(key) ?? { totalConsumed: 0, txCount: 0, earliestDate: null, latestDate: null };
+            current.totalConsumed += movement.quantity_out;
+            current.txCount++;
+            current.earliestDate = !current.earliestDate || movement.transaction_date < current.earliestDate ? movement.transaction_date : current.earliestDate;
+            current.latestDate = !current.latestDate || movement.transaction_date > current.latestDate ? movement.transaction_date : current.latestDate;
+            consumptionMap.set(key, current);
         }
 
         // 9. Iterate across all REAL catalog products
@@ -381,20 +272,7 @@ export async function GET(request: Request) {
                     latestDate: null,
                 };
 
-                // Step 1: MAvg = total consumption ÷ months assessed
-                const mAvg = consumption.totalConsumed > 0 && assessedMonths > 0
-                    ? consumption.totalConsumed / assessedMonths
-                    : 0;
-
-                // Step 2: DAvg = MAvg ÷ working days per month
-                const dAvg = mAvg > 0 && workingDaysPerMonth > 0
-                    ? mAvg / workingDaysPerMonth
-                    : 0;
-
-                // Step 3: Days to last = available stock ÷ DAvg
-                const daysToLast = dAvg > 0
-                    ? Number((stock.available / dAvg).toFixed(1))
-                    : null;
+                const { mAvg, dAvg, daysToLast } = calculateProjection(consumption.totalConsumed, assessedMonths, workingDaysPerMonth, stock.available);
 
                 const hasSufficientHistory = consumption.txCount >= 1;
                 let status: ProjectionStatus = "ESTIMATED_SUPPLY";
@@ -412,6 +290,8 @@ export async function GET(request: Request) {
                 }
 
                 items.push({
+                    assessment_start: assessmentStart,
+                    assessment_end: assessmentEnd,
                     product_id: pId,
                     product_code: displayCode,
                     product_name: displayName,
@@ -427,13 +307,13 @@ export async function GET(request: Request) {
                     total_on_hand_stock: Number(stock.total.toFixed(4)),
                     quarantined_stock: Number((stock.total - stock.available).toFixed(4)),
                     active_batches_count: stock.batchCount,
-                    total_consumed_quantity: Number(consumption.totalConsumed.toFixed(4)),
+                    total_consumed_quantity: consumption.totalConsumed,
                     assessed_months: assessedMonths,
                     assessed_calendar_days: assessedMonths * 30,
                     actual_working_days_covered: actualWorkingDays,
                     working_days_per_month: workingDaysPerMonth,
-                    m_avg: Number(mAvg.toFixed(2)),
-                    d_avg: Number(dAvg.toFixed(2)),
+                    m_avg: mAvg,
+                    d_avg: dAvg,
                     days_to_last: daysToLast,
                     status,
                     has_sufficient_history: hasSufficientHistory,

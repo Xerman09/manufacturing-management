@@ -1,3 +1,4 @@
+import { formatProjectionQuantity, formatSupplyDays, longRangeCaveat } from "../utils/projection";
 import React, { useState } from "react";
 import { AlertCircle, HelpCircle, FileText, ChevronLeft, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -91,7 +92,7 @@ export default function StockProjectionTable({
             return (
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground italic">
                     <HelpCircle className="h-3.5 w-3.5" />
-                    <span>N/A</span>
+                    <span>{formatSupplyDays(null)}</span>
                 </div>
             );
         }
@@ -112,7 +113,7 @@ export default function StockProjectionTable({
         return (
             <div className="space-y-1 min-w-[120px]">
                 <div className="flex items-baseline justify-between text-xs">
-                    <span className={`font-mono ${textColor}`}>{days} working days</span>
+                    <span className={`font-mono ${textColor}`}>{formatSupplyDays(days)}</span>
                     <span className="text-[10px] text-muted-foreground">
                         {days <= 3 ? "Runout imminent" : days > 30 ? "> 1 mo." : ""}
                     </span>
@@ -184,7 +185,7 @@ export default function StockProjectionTable({
                                 {/* Available Stock */}
                                 <td className="py-3 px-3 text-right font-mono font-medium">
                                     <span className="text-foreground">
-                                        {item.available_stock.toLocaleString()}
+                                        {formatProjectionQuantity(item.available_stock)}
                                     </span>
                                     <span className="text-[10px] text-muted-foreground ml-1">
                                         {item.unit_shortcut}
@@ -193,13 +194,13 @@ export default function StockProjectionTable({
 
                                 {/* Verified Consumed */}
                                 <td className="py-3 px-3 text-right font-mono text-muted-foreground">
-                                    {item.total_consumed_quantity.toLocaleString()}{" "}
+                                    {formatProjectionQuantity(item.total_consumed_quantity)}{" "}
                                     <span className="text-[10px]">{item.unit_shortcut}</span>
                                 </td>
 
                                 {/* MAvg */}
                                 <td className="py-3 px-3 text-right font-mono text-foreground font-medium">
-                                    {item.m_avg.toLocaleString()}{" "}
+                                    {formatProjectionQuantity(item.m_avg)}{" "}
                                     <span className="text-[10px] text-muted-foreground">
                                         {item.unit_shortcut}
                                     </span>
@@ -207,7 +208,7 @@ export default function StockProjectionTable({
 
                                 {/* DAvg */}
                                 <td className="py-3 px-3 text-right font-mono text-foreground font-medium">
-                                    {item.d_avg.toLocaleString()}{" "}
+                                    {formatProjectionQuantity(item.d_avg)}{" "}
                                     <span className="text-[10px] text-muted-foreground">
                                         {item.unit_shortcut}
                                     </span>
@@ -216,6 +217,7 @@ export default function StockProjectionTable({
                                 {/* Days to Last Progress */}
                                 <td className="py-3 px-4">
                                     {renderDaysToLastBar(item.days_to_last, item.status)}
+                                    {item.days_to_last !== null && item.days_to_last > 12 * item.working_days_per_month && <p className="mt-1 text-xs text-muted-foreground">{longRangeCaveat}</p>}
                                 </td>
 
                                 {/* Status Badge */}
