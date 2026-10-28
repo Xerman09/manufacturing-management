@@ -34,6 +34,7 @@ export interface StageDuration {
 }
 
 export interface CustomerOrderLeadTimeItem {
+    assessment: import("../utils/assessment").OrderAssessment;
     orderId: number;
     orderNo: string;
     poNo: string;

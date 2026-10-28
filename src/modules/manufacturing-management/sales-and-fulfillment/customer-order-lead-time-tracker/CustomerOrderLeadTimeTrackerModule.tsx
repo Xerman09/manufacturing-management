@@ -44,6 +44,7 @@ export default function CustomerOrderLeadTimeTrackerModule() {
 
         // Modal
         isTimelineModalOpen,
+        timelineTarget,
         selectedOrderForTimeline,
         openTimelineModal,
         closeTimelineModal,
@@ -97,9 +98,11 @@ export default function CustomerOrderLeadTimeTrackerModule() {
 
             {/* Milestone Timeline Drawer / Modal */}
             <MilestoneTimelineModal
+                key={`${selectedOrderForTimeline?.orderId ?? "closed"}-${timelineTarget ?? "overview"}`}
                 isOpen={isTimelineModalOpen}
                 onClose={closeTimelineModal}
                 order={selectedOrderForTimeline}
+                targetPair={timelineTarget}
             />
         </motion.div>
     );
