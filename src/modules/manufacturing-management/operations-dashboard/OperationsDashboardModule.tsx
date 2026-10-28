@@ -41,16 +41,18 @@ export default function OperationsDashboardModule() {
 
     if (error && !data) {
         return (
-            <div className="p-8 text-center bg-card border border-rose-500/30 rounded-xl space-y-3">
+            <div role="alert" className="p-8 text-center bg-card border border-rose-500/30 rounded-xl space-y-3">
                 <p className="text-sm font-bold text-rose-500">Failed to load operations dashboard</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
                 <button
                     type="button"
                     onClick={refresh}
+                    disabled={isRefreshing}
                     className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-semibold"
                 >
                     Try Again
                 </button>
+                {selectedBranchId !== "all" && <button type="button" disabled={isRefreshing} onClick={() => setSelectedBranchId("all")} className="ml-3 px-4 py-2 rounded-lg border text-xs font-semibold">Reset branch filter</button>}
             </div>
         );
     }
