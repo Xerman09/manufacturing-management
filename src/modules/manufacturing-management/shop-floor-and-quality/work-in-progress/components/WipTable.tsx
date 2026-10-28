@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useMemo } from "react";
+import { motion } from "framer-motion";
 import {
     AlertTriangle,
     ArrowUpDown,
@@ -49,22 +49,29 @@ export default function WipTable({ items, loading = false, onViewDetail }: WipTa
         }
     };
 
-    const sortedItems = [...items].sort((a, b) => {
-        let valA: string | number = a[sortField];
-        let valB: string | number = b[sortField];
+    const sortedItems = useMemo(() => {
+        return [...items].sort((a, b) => {
+            let valA: string | number = a[sortField];
+            let valB: string | number = b[sortField];
 
-        if (typeof valA === "string") {
-            const cmp = valA.localeCompare(String(valB));
-            return sortAsc ? cmp : -cmp;
-        }
+            if (typeof valA === "string") {
+                const cmp = valA.localeCompare(String(valB));
+                return sortAsc ? cmp : -cmp;
+            }
 
-        valA = Number(valA) || 0;
-        valB = Number(valB) || 0;
-        return sortAsc ? valA - valB : valB - valA;
-    });
+            valA = Number(valA) || 0;
+            valB = Number(valB) || 0;
+            return sortAsc ? valA - valB : valB - valA;
+        });
+    }, [items, sortField, sortAsc]);
 
-    const totalPages = Math.max(1, Math.ceil(sortedItems.length / pageSize));
-    const paginatedItems = sortedItems.slice((page - 1) * pageSize, page * pageSize);
+    const totalPages = useMemo(() => {
+        return Math.max(1, Math.ceil(sortedItems.length / pageSize));
+    }, [sortedItems.length, pageSize]);
+
+    const paginatedItems = useMemo(() => {
+        return sortedItems.slice((page - 1) * pageSize, page * pageSize);
+    }, [sortedItems, page, pageSize]);
 
     const getStatusBadge = (status: WipMaterialStatus, hasDiscrepancy: boolean) => {
         if (status === "EXCEPTION_OVER_CONSUMED" || hasDiscrepancy) {
@@ -155,7 +162,7 @@ export default function WipTable({ items, loading = false, onViewDetail }: WipTa
     return (
         <div className="rounded-xl border bg-card shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+                <table className="w-full text-left text-xs border-separate border-spacing-0">
                     <thead className="bg-muted/60 text-[11px] font-semibold text-muted-foreground border-b uppercase tracking-wider">
                         <tr>
                             <th className="py-3 px-3 cursor-pointer hover:text-foreground" onClick={() => handleSort("jobOrderNo")}>
@@ -217,20 +224,22 @@ export default function WipTable({ items, loading = false, onViewDetail }: WipTa
                             <th className="py-3 px-3 text-center">Action</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-border">
-                        <AnimatePresence mode="popLayout">
-                            {paginatedItems.map((item, idx) => {
-                                const isNegative = item.remainingWipQuantity < 0;
-                                return (
-                                    <motion.tr
-                                        key={item.id}
-                                        initial={{ opacity: 0, y: 8 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ duration: 0.2, delay: idx * 0.02 }}
-                                        className={`hover:bg-muted/40 transition-colors ${
-                                            isNegative ? "bg-rose-500/5 dark:bg-rose-950/20" : ""
-                                        }`}
-                                    >
+                    <motion.tbody
+                        key={`${sortField}-${sortAsc}-${page}`}
+                        initial={{ opacity: 0.35 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.22, ease: "easeOut" }}
+                        className="divide-y divide-border"
+                    >
+                        {paginatedItems.map((item) => {
+                            const isNegative = item.remainingWipQuantity < 0;
+                            return (
+                                <tr
+                                    key={item.id}
+                                    className={`hover:bg-muted/40 transition-colors border-b border-border/50 ${
+                                        isNegative ? "bg-rose-500/5 dark:bg-rose-950/20" : ""
+                                    }`}
+                                >
                                         {/* Job Order */}
                                         <td className="py-2.5 px-3">
                                             <div className="font-semibold text-foreground">{item.jobOrderNo || "-"}</div>
@@ -325,11 +334,10 @@ export default function WipTable({ items, loading = false, onViewDetail }: WipTa
                                                 <span>Audit</span>
                                             </Button>
                                         </td>
-                                    </motion.tr>
-                                );
-                            })}
-                        </AnimatePresence>
-                    </tbody>
+                                </tr>
+                            );
+                        })}
+                    </motion.tbody>
                 </table>
             </div>
 
