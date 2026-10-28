@@ -1,6 +1,8 @@
 import { NextResponse, NextRequest } from "next/server";
 import { extractId, parseBooleanFlag, resolveBatchPrices, recalculateHeaderTotals, roundQty, roundMoney } from "../helper";
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
+import { canEditOffsetPairings, prepareOffsetPairingsForSave, OffsetPairingError, readOffsetPairings, sameOffsetPairings, writeOffsetPairings } from "@/modules/manufacturing-management/physical-inventory-offsetting/utils/offset-pairings";
+import type { OffsettingPairing } from "@/modules/manufacturing-management/physical-inventory-offsetting/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,26 +31,13 @@ export async function GET(_request: NextRequest, context: RouteParams) {
 
         const headerData = (await headerRes.json()).data;
 
-        // Extract offset_pairings if stored in remarks
-        let offsetPairings = [];
-        if (headerData?.remarks && typeof headerData.remarks === "string" && headerData.remarks.includes("__OFFSET_DATA__:")) {
-            try {
-                const parts = headerData.remarks.split("__OFFSET_DATA__:");
-                if (parts.length > 1) {
-                    offsetPairings = JSON.parse(parts[1].trim());
-                }
-            } catch {
-                offsetPairings = [];
-            }
-        }
+        const offsetPairings = readOffsetPairings(headerData?.remarks);
 
         // Fetch details
         const detailsUrl = `${DIRECTUS_URL}/items/mm_physical_inventory_details?filter[physical_inventory_id][_eq]=${sheetId}&limit=-1&fields=*,inventory_lot_id.*,lot_id.*,lot_id.unit_id.*,product_id.*,product_id.product_type.*,product_id.unit_of_measurement.*,unit_id.*`;
         const detailsRes = await fetch(detailsUrl, { headers, cache: "no-store" });
-        let detailsData = [];
-        if (detailsRes.ok) {
-            detailsData = (await detailsRes.json()).data || [];
-        }
+        if (!detailsRes.ok) throw new Error("Failed to load the audit detail records. Reload before editing pairings.");
+        const detailsData = (await detailsRes.json()).data || [];
 
         return NextResponse.json({
             success: true,
@@ -60,7 +49,7 @@ export async function GET(_request: NextRequest, context: RouteParams) {
         });
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : "Internal Server Error";
-        return NextResponse.json({ success: false, error: msg }, { status: 500 });
+        return NextResponse.json({ success: false, error: msg }, { status: error instanceof OffsetPairingError ? error.status : 500 });
     }
 }
 
@@ -126,6 +115,16 @@ export async function PATCH(request: NextRequest, context: RouteParams) {
 
         const body = await request.json();
         const { branch_id, starting_date, cutoff_date, remarks, stock_type, product_type_id, price_type_id, offset_pairings } = body;
+        let savedPairings = readOffsetPairings(sheet.remarks);
+        if (offset_pairings !== undefined) {
+            if (!canEditOffsetPairings(sheet)) {
+                throw new OffsetPairingError("Offset pairings cannot be changed on a finalized or cancelled audit record.", 409);
+            }
+            if (!Array.isArray(offset_pairings)) throw new OffsetPairingError("Offset pairings must be an array.");
+            const pairDetailsRes = await fetch(`${DIRECTUS_URL}/items/mm_physical_inventory_details?filter[physical_inventory_id][_eq]=${sheetId}&limit=-1&fields=*,product_id.*,product_id.unit_of_measurement.*,unit_id.*`, { headers, cache: "no-store" });
+            if (!pairDetailsRes.ok) throw new OffsetPairingError("Failed to validate linked audit detail records. Retry saving.", 502);
+            savedPairings = prepareOffsetPairingsForSave(offset_pairings, (await pairDetailsRes.json()).data || []);
+        }
 
         const hasStructuralChange =
             (branch_id !== undefined && extractId(branch_id, "branch_id") !== extractId(sheet.branch_id, "branch_id")) ||
@@ -170,23 +169,8 @@ export async function PATCH(request: NextRequest, context: RouteParams) {
             updatePayload.price_type_id = newPriceTypeId;
         }
 
-        // Process remarks and embedded offset_pairings
-        let baseRemarks = remarks !== undefined ? (remarks ? String(remarks).trim() : "") : (sheet.remarks ? String(sheet.remarks) : "");
-        if (baseRemarks.includes("__OFFSET_DATA__:")) {
-            baseRemarks = baseRemarks.split("__OFFSET_DATA__:")[0].trim();
-        }
-
-        if (Array.isArray(offset_pairings)) {
-            updatePayload.remarks = offset_pairings.length > 0
-                ? (baseRemarks ? `${baseRemarks}\n__OFFSET_DATA__:${JSON.stringify(offset_pairings)}` : `__OFFSET_DATA__:${JSON.stringify(offset_pairings)}`)
-                : (baseRemarks || null);
-        } else if (remarks !== undefined) {
-            if (sheet.remarks && typeof sheet.remarks === "string" && sheet.remarks.includes("__OFFSET_DATA__:")) {
-                const offsetPart = sheet.remarks.substring(sheet.remarks.indexOf("__OFFSET_DATA__:"));
-                updatePayload.remarks = baseRemarks ? `${baseRemarks}\n${offsetPart}` : offsetPart;
-            } else {
-                updatePayload.remarks = baseRemarks || null;
-            }
+        if (offset_pairings !== undefined || remarks !== undefined) {
+            updatePayload.remarks = writeOffsetPairings(remarks !== undefined ? remarks : sheet.remarks, savedPairings);
         }
 
         const updateUrl = `${DIRECTUS_URL}/items/mm_physical_inventory/${sheetId}`;
@@ -238,17 +222,12 @@ export async function PATCH(request: NextRequest, context: RouteParams) {
             }
         }
 
-        const updatedData = (await res.json()).data;
-        let parsedOffsetPairings = Array.isArray(offset_pairings) ? offset_pairings : [];
-        if (!Array.isArray(offset_pairings) && updatedData?.remarks && typeof updatedData.remarks === "string" && updatedData.remarks.includes("__OFFSET_DATA__:")) {
-            try {
-                const parts = updatedData.remarks.split("__OFFSET_DATA__:");
-                if (parts.length > 1) {
-                    parsedOffsetPairings = JSON.parse(parts[1].trim());
-                }
-            } catch {
-                parsedOffsetPairings = [];
-            }
+        const verifyRes = await fetch(`${updateUrl}?fields=*`, { headers, cache: "no-store" });
+        if (!verifyRes.ok) throw new OffsetPairingError("The save could not be verified. Your changes remain in the editor; retry saving or reload the record.", 502);
+        const updatedData = (await verifyRes.json()).data;
+        const parsedOffsetPairings: OffsettingPairing[] = readOffsetPairings(updatedData?.remarks);
+        if (!sameOffsetPairings(savedPairings, parsedOffsetPairings)) {
+            throw new OffsetPairingError("The stored offset pairs do not match the requested save. Your changes remain in the editor; retry saving.", 502);
         }
 
         return NextResponse.json({
@@ -260,6 +239,6 @@ export async function PATCH(request: NextRequest, context: RouteParams) {
         });
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : "Internal Server Error";
-        return NextResponse.json({ success: false, error: msg }, { status: 500 });
+        return NextResponse.json({ success: false, error: msg }, { status: error instanceof OffsetPairingError ? error.status : 500 });
     }
 }
