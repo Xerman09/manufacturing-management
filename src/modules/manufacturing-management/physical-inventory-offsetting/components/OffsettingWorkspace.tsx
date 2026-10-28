@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
     ArrowLeft,
     Sparkles,
@@ -22,10 +22,13 @@ import {
     Scale,
     Layers,
     AlertCircle,
-    ClipboardList
+    ClipboardList,
+    Pencil
 } from "lucide-react";
 import { toast } from "sonner";
 import OffsettingPrintModal from "./OffsettingPrintModal";
+import OffsetPairEditor from "./OffsetPairEditor";
+import { canEditOffsetPairings, normalizeOffsetPairings, sameOffsetPairings } from "../utils/offset-pairings";
 import {
     OffsettingSheetQueueItem,
     OffsettingPairing,
@@ -38,8 +41,8 @@ import {
 interface OffsettingWorkspaceProps {
     sheet: OffsettingSheetQueueItem;
     onBack: () => void;
-    onSavePairings: (pairings: OffsettingPairing[]) => Promise<void>;
-    onCommitSheet: (pairings: OffsettingPairing[], auditNotes?: string) => Promise<void>;
+    onSavePairings: (pairings: OffsettingPairing[]) => Promise<OffsettingPairing[]>;
+    onCommitSheet: (auditNotes?: string) => Promise<void>;
 }
 
 const REASON_CODES = [
@@ -85,6 +88,13 @@ export default function OffsettingWorkspace({
     const lineItems = useMemo(() => sheet.details || [], [sheet.details]);
 
     const [activePairings, setActivePairings] = useState<OffsettingPairing[]>(sheet.offset_pairings || []);
+    const [savedPairings, setSavedPairings] = useState<OffsettingPairing[]>(sheet.offset_pairings || []);
+    const [editingPair, setEditingPair] = useState<OffsettingPairing | null>(null);
+    const [editTrigger, setEditTrigger] = useState<HTMLElement | null>(null);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [retryAction, setRetryAction] = useState<"save" | "commit">("save");
+    const canEdit = canEditOffsetPairings(sheet);
+    const hasUnsavedChanges = !sameOffsetPairings(activePairings, savedPairings);
 
     // Checkbox multi-select state arrays (supports number IDs and normalized string keys)
     const [selectedShortageProductIds, setSelectedShortageProductIds] = useState<(number | string)[]>([]);
@@ -101,6 +111,24 @@ export default function OffsettingWorkspace({
     const [saving, setSaving] = useState(false);
     const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
     const [showLineItems, setShowLineItems] = useState(true);
+
+    useEffect(() => {
+        if (!hasUnsavedChanges) return;
+        const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+        const beforeLink = (event: MouseEvent) => {
+            const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+            if (link && link.getAttribute("href") !== "#" && !window.confirm("Discard unsaved offset pair changes?")) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        };
+        window.addEventListener("beforeunload", beforeUnload);
+        document.addEventListener("click", beforeLink, true);
+        return () => {
+            window.removeEventListener("beforeunload", beforeUnload);
+            document.removeEventListener("click", beforeLink, true);
+        };
+    }, [hasUnsavedChanges]);
 
     // View Mode & Accordion Expansion states
     const [groupingViewMode, setGroupingViewMode] = useState<"PRODUCT_GROUPED" | "LOT_GRANULAR">("PRODUCT_GROUPED");
@@ -750,6 +778,7 @@ export default function OffsettingWorkspace({
     };
 
     const handleRemoveGroupPairings = useCallback((groupId: string) => {
+        if (!canEdit || saving) return;
         setActivePairings(prev => {
             return prev.filter(p => {
                 const gId = p.group_link_id || `${p.shortage_product_id}-${p.surplus_product_id}-${p.reason_code}`;
@@ -757,7 +786,7 @@ export default function OffsettingWorkspace({
             });
         });
         toast.success("Offset pair group removed.");
-    }, []);
+    }, [canEdit, saving]);
 
     // Group active pairings for consolidated table view
     const groupedActivePairings = useMemo(() => {
@@ -812,6 +841,8 @@ export default function OffsettingWorkspace({
             const pSurpIds = new Set(grp.pairs.map(p => p.surplus_detail_id));
             grp.shortageLotsCount = sIds.size;
             grp.surplusLotsCount = pSurpIds.size;
+            if (new Set(grp.pairs.map(pair => pair.reason_code)).size > 1) grp.reasonCode = "Mixed reasons — view lot pairs";
+            if (new Set(grp.pairs.map(pair => pair.notes || "")).size > 1) grp.notes = "Multiple auditor notes — view lot pairs";
         }
 
         return Array.from(map.values());
@@ -819,8 +850,9 @@ export default function OffsettingWorkspace({
 
     // Pairing handler supporting Multi-Checkbox Selection (One-to-Many, Many-to-One, Many-to-Many)
     const handleAddPairing = useCallback(() => {
+        if (!canEdit || saving) return;
         const pcsToAllocate = parseFloat(linkQty);
-        if (isNaN(pcsToAllocate) || pcsToAllocate <= 0) {
+        if (!Number.isFinite(pcsToAllocate) || pcsToAllocate <= 0) {
             toast.error("Please enter a valid positive number of pieces to offset.");
             return;
         }
@@ -885,8 +917,7 @@ export default function OffsettingWorkspace({
 
         let remPiecesToAllocate = pcsToAllocate;
         const generatedPairs: OffsettingPairing[] = [];
-        let matchCount = 0;
-        const groupLinkId = `OFF-GRP-${Date.now().toString().slice(-6)}`;
+        const groupLinkId = `OFF-GRP-${crypto.randomUUID()}`;
 
         const sItems = checkedShortageItems.map(i => ({ ...i, remPcs: i.shortagePieces }));
         const pSurpItems = checkedSurplusItems.map(i => ({ ...i, remPcs: i.surplusPieces }));
@@ -913,7 +944,7 @@ export default function OffsettingWorkspace({
                 const netFinancialImpact = pairPieces * unitCostVarPerPiece;
 
                 const pair: OffsettingPairing = {
-                    id: `OFF-${Date.now().toString().slice(-5)}-${matchCount + 1}`,
+                    id: `OFF-${crypto.randomUUID()}`,
                     group_link_id: groupLinkId,
                     shortage_detail_id: sItem.detailId,
                     shortage_product_id: getProdId(sItem.product_id),
@@ -951,7 +982,6 @@ export default function OffsettingWorkspace({
                 sItem.remPcs -= pairPieces;
                 surpItem.remPcs -= pairPieces;
                 remPiecesToAllocate -= pairPieces;
-                matchCount++;
             }
         }
 
@@ -977,6 +1007,8 @@ export default function OffsettingWorkspace({
             toast.success(`Linked offset pair (${pcsToAllocate.toLocaleString()} pcs total)!`);
         }
     }, [
+        canEdit,
+        saving,
         linkQty,
         groupingViewMode,
         groupedShortageProducts,
@@ -994,14 +1026,16 @@ export default function OffsettingWorkspace({
     ]);
 
     const handleRemovePairing = useCallback((pairId: string) => {
+        if (!canEdit || saving) return;
         setActivePairings(prev => prev.filter(p => p.id !== pairId));
         toast.info("Offset pairing removed.");
-    }, []);
+    }, [canEdit, saving]);
 
     // 1-Click Auto Match Same Product (Piece-Based)
     const handleAutoMatchSameProduct = useCallback(() => {
+        if (!canEdit || saving) return;
         const generatedPairs: OffsettingPairing[] = [];
-        let matchCount = 0;
+        const autoGroupIds = new Map<number, string>();
 
         const sItems = shortageItems.map(i => ({ ...i, remPcs: i.shortagePieces }));
         const pSurpItems = surplusItems.map(i => ({ ...i, remPcs: i.surplusPieces }));
@@ -1036,9 +1070,10 @@ export default function OffsettingWorkspace({
                     const unitCostVarPerPiece = surplusCostPerPiece - shortageCostPerPiece;
                     const netFinancialImpact = pairPieces * unitCostVarPerPiece;
 
-                    const autoGroupId = `OFF-GRP-AUTO-${Date.now().toString().slice(-5)}`;
+                    const autoGroupId = autoGroupIds.get(sProdId) || `OFF-GRP-AUTO-${crypto.randomUUID()}`;
+                    autoGroupIds.set(sProdId, autoGroupId);
                     const pair: OffsettingPairing = {
-                        id: `OFF-AUTO-${Date.now().toString().slice(-5)}-${matchCount + 1}`,
+                        id: `OFF-AUTO-${crypto.randomUUID()}`,
                         group_link_id: autoGroupId,
                         shortage_detail_id: sItem.detailId,
                         shortage_product_id: sProdId,
@@ -1075,7 +1110,6 @@ export default function OffsettingWorkspace({
                     generatedPairs.push(pair);
                     sItem.remPcs -= pairPieces;
                     surpItem.remPcs -= pairPieces;
-                    matchCount++;
                 }
             }
         }
@@ -1087,28 +1121,41 @@ export default function OffsettingWorkspace({
 
         setActivePairings(prev => [...prev, ...generatedPairs]);
         toast.success(`Auto-matched ${generatedPairs.length} lot offset pairs across identical products!`);
-    }, [shortageItems, surplusItems]);
+    }, [shortageItems, surplusItems, canEdit, saving]);
 
     const handleSaveDraft = async () => {
+        if (!canEdit || saving) return;
         try {
             setSaving(true);
-            await onSavePairings(activePairings);
-            toast.success(isCommitted ? "Audit pairings saved successfully." : "Offsetting draft saved successfully.");
-        } catch {
-            toast.error("Failed to save offsetting draft.");
+            setSaveError(null);
+            const saved = await onSavePairings(normalizeOffsetPairings(activePairings, lineItems));
+            setSavedPairings(saved);
+            setActivePairings(saved);
+            toast.success("Offset pairs saved and verified.");
+        } catch (error) {
+            setRetryAction("save");
+            setSaveError(error instanceof Error ? error.message : "Failed to save offset pairs. Your changes have been retained.");
         } finally {
             setSaving(false);
         }
     };
 
     const handleApproveAndCommit = async () => {
+        if (!canEdit || saving || sheet.status !== "PENDING_REVIEW") return;
+        let pairsSaved = false;
         try {
             setSaving(true);
-            await onCommitSheet(activePairings, auditSignoffNotes);
+            setSaveError(null);
+            const saved = await onSavePairings(normalizeOffsetPairings(activePairings, lineItems));
+            setSavedPairings(saved);
+            setActivePairings(saved);
+            pairsSaved = true;
+            await onCommitSheet(auditSignoffNotes);
             toast.success("Offsetting audit approved and stock adjustments committed!");
             onBack();
-        } catch {
-            toast.error("Failed to commit offsetting audit.");
+        } catch (error) {
+            setRetryAction(pairsSaved ? "commit" : "save");
+            setSaveError(`${pairsSaved ? "Offset pairs were saved, but commitment failed. " : ""}${error instanceof Error ? error.message : "The audit could not be committed."}`);
         } finally {
             setSaving(false);
         }
@@ -1121,7 +1168,9 @@ export default function OffsettingWorkspace({
                 <div className="flex items-center gap-3">
                     <button
                         type="button"
-                        onClick={onBack}
+                        onClick={() => { if (!saving && (!hasUnsavedChanges || window.confirm("Discard unsaved offset pair changes?"))) onBack(); }}
+                        disabled={saving}
+                        aria-label="Back to offsetting queue"
                         className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors"
                     >
                         <ArrowLeft className="h-5 w-5" />
@@ -1157,6 +1206,7 @@ export default function OffsettingWorkspace({
                     <button
                         type="button"
                         onClick={handleAutoMatchSameProduct}
+                        disabled={!canEdit || saving}
                         className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-xs"
                     >
                         <Sparkles className="h-3.5 w-3.5" />
@@ -1166,14 +1216,14 @@ export default function OffsettingWorkspace({
                     <button
                         type="button"
                         onClick={handleSaveDraft}
-                        disabled={saving}
+                        disabled={!canEdit || saving || !hasUnsavedChanges}
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-foreground bg-background border border-input rounded-lg hover:bg-accent transition-colors shadow-xs"
                     >
                         <Save className="h-3.5 w-3.5" />
-                        {isCommitted ? "Save Audit Pairings" : "Save Draft"}
+                        {saving ? "Saving…" : "Save audit record"}
                     </button>
 
-                    {!isCommitted && (
+                    {canEdit && sheet.status === "PENDING_REVIEW" && (
                         <button
                             type="button"
                             onClick={handleApproveAndCommit}
@@ -1186,6 +1236,18 @@ export default function OffsettingWorkspace({
                     )}
                 </div>
             </div>
+
+            <p role="status" aria-live="polite" className={`text-sm ${hasUnsavedChanges ? "font-semibold text-amber-700" : "text-muted-foreground"}`}>
+                {!canEdit ? "This audit record is read-only. Offset pairs cannot be changed." : saving ? "Saving and verifying offset pairs…" : hasUnsavedChanges ? "Unsaved changes — Save audit record to persist pair edits and unlinks." : "Offset pairs match the saved audit record."}
+            </p>
+            {saveError && (
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                    <span>{saveError}</span>
+                    <button type="button" disabled={!canEdit || saving} onClick={retryAction === "commit" ? handleApproveAndCommit : handleSaveDraft} className="rounded-md border border-rose-300 px-3 py-2 font-semibold focus-visible:outline-2">
+                        {retryAction === "commit" ? "Retry commit" : "Retry saving"}
+                    </button>
+                </div>
+            )}
 
             {/* KPI Summary Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1246,7 +1308,7 @@ export default function OffsettingWorkspace({
             </div>
 
             {/* Interactive Lot Linker Builder */}
-            <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-xs">
+            <fieldset disabled={!canEdit || saving} className={`min-w-0 rounded-xl border border-border bg-card p-5 space-y-4 shadow-xs ${!canEdit || saving ? "pointer-events-none opacity-60" : ""}`}>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-3">
                     <div>
                         <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
@@ -1819,7 +1881,7 @@ export default function OffsettingWorkspace({
                 {/* Action inputs bar */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 pt-3 border-t bg-muted/20 p-3 rounded-lg">
                     <div className="flex-1 space-y-1">
-                        <label className="text-[11px] font-semibold text-muted-foreground flex items-center justify-between">
+                        <label htmlFor="offset-link-quantity" className="text-[11px] font-semibold text-muted-foreground flex items-center justify-between">
                             <span>Offset Qty (pcs)</span>
                             {selectedShortageTotalPieces > 0 && selectedSurplusTotalPieces > 0 && (
                                 <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold">
@@ -1828,6 +1890,7 @@ export default function OffsettingWorkspace({
                             )}
                         </label>
                         <input
+                            id="offset-link-quantity"
                             type="number"
                             step="any"
                             min="0"
@@ -1839,8 +1902,9 @@ export default function OffsettingWorkspace({
                     </div>
 
                     <div className="flex-1 space-y-1">
-                        <label className="text-[11px] font-semibold text-muted-foreground">Reason Code (required for cross-product)</label>
+                        <label htmlFor="offset-link-reason" className="text-[11px] font-semibold text-muted-foreground">Reason Code (required for cross-product)</label>
                         <select
+                            id="offset-link-reason"
                             value={linkReason}
                             onChange={e => setLinkReason(e.target.value)}
                             className="w-full h-9 rounded-md border border-input bg-background px-2 text-xs focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
@@ -1855,8 +1919,9 @@ export default function OffsettingWorkspace({
                     </div>
 
                     <div className="flex-1 space-y-1">
-                        <label className="text-[11px] font-semibold text-muted-foreground">Auditor Note (required for cross-product)</label>
+                        <label htmlFor="offset-link-note" className="text-[11px] font-semibold text-muted-foreground">Auditor Note (required for cross-product)</label>
                         <input
+                            id="offset-link-note"
                             type="text"
                             value={linkNotes}
                             onChange={e => setLinkNotes(e.target.value)}
@@ -1875,7 +1940,7 @@ export default function OffsettingWorkspace({
                         Link Offset Pair
                     </button>
                 </div>
-            </div>
+            </fieldset>
 
             {/* Active Offsetting Pairings Table */}
             <div className="space-y-3">
@@ -1985,15 +2050,18 @@ export default function OffsettingWorkspace({
                                                             onClick={() => toggleGroupRow(group.groupId)}
                                                             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 transition-colors"
                                                             title="Toggle lot breakdown"
+                                                            aria-expanded={isExpanded}
                                                         >
                                                             {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                                                            <span>{isExpanded ? "Hide" : `Lots (${group.pairs.length})`}</span>
+                                                            <span>{isExpanded ? "Hide" : `${canEdit ? "Edit pairs" : "Lots"} (${group.pairs.length})`}</span>
                                                         </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => handleRemoveGroupPairings(group.groupId)}
+                                                            disabled={!canEdit || saving}
+                                                            aria-label={`Unlink pair group ${group.groupId}`}
                                                             className="rounded-md p-1.5 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-600 transition-colors"
-                                                            title="Delete pair group"
+                                                            title="Unlink pair group"
                                                         >
                                                             <Trash2 className="h-4 w-4" />
                                                         </button>
@@ -2017,6 +2085,7 @@ export default function OffsettingWorkspace({
                                                                         <th className="py-1">Surplus Lot / Batch</th>
                                                                         <th className="py-1 text-right">Offset Pieces & Deduction</th>
                                                                         <th className="py-1 text-right">Net Impact</th>
+                                                                        <th className="py-1">Reason & Auditor Note</th>
                                                                         <th className="py-1 text-center">Action</th>
                                                                     </tr>
                                                                 </thead>
@@ -2044,9 +2113,16 @@ export default function OffsettingWorkspace({
                                                                                     {formatCurrency(pair.net_financial_impact)}
                                                                                 </td>
                                                                                 <td className="py-1.5 text-center">
+                                                                                    <p className="text-xs">{pair.reason_code || "No reason"}</p>
+                                                                                    <p className="text-xs text-muted-foreground">{pair.notes || "No note"}</p>
+                                                                                </td>
+                                                                                <td className="py-1.5 text-center">
+                                                                                    {canEdit && <button type="button" disabled={saving} aria-label={`Edit pair ${pair.id}`} onClick={event => { setEditTrigger(event.currentTarget); setEditingPair(pair); }} className="rounded px-2 py-1 text-indigo-700 focus-visible:outline-2"><Pencil className="mr-1 inline h-3 w-3" />Edit</button>}
                                                                                     <button
                                                                                         type="button"
                                                                                         onClick={() => handleRemovePairing(pair.id)}
+                                                                                        disabled={!canEdit || saving}
+                                                                                        aria-label={`Unlink pair ${pair.id}`}
                                                                                         className="rounded p-1 text-muted-foreground hover:text-rose-600"
                                                                                         title="Remove single lot pair"
                                                                                     >
@@ -2126,9 +2202,12 @@ export default function OffsettingWorkspace({
                                                 {pair.notes && <div className="text-[10px] text-muted-foreground italic mt-0.5">{pair.notes}</div>}
                                             </td>
                                             <td className="px-4 py-3 text-center">
+                                                {canEdit && <button type="button" disabled={saving} aria-label={`Edit pair ${pair.id}`} onClick={event => { setEditTrigger(event.currentTarget); setEditingPair(pair); }} className="rounded px-2 py-1 text-indigo-700 focus-visible:outline-2"><Pencil className="mr-1 inline h-3 w-3" />Edit</button>}
                                                 <button
                                                     type="button"
                                                     onClick={() => handleRemovePairing(pair.id)}
+                                                    disabled={!canEdit || saving}
+                                                    aria-label={`Unlink pair ${pair.id}`}
                                                     className="rounded-md p-1.5 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-600 transition-colors"
                                                     title="Unlink pair"
                                                 >
@@ -2246,8 +2325,10 @@ export default function OffsettingWorkspace({
 
             {/* Auditor Sign-off Remarks */}
             <div className="rounded-xl border border-border bg-card p-4 space-y-2 shadow-xs">
-                <label className="text-xs font-bold text-foreground uppercase tracking-wider">Auditor Sign-off Remarks</label>
+                <label htmlFor="offset-signoff-notes" className="text-xs font-bold text-foreground uppercase tracking-wider">Auditor Sign-off Remarks</label>
                 <textarea
+                    id="offset-signoff-notes"
+                    disabled={!canEdit || saving}
                     rows={2}
                     value={auditSignoffNotes}
                     onChange={e => setAuditSignoffNotes(e.target.value)}
@@ -2255,6 +2336,8 @@ export default function OffsettingWorkspace({
                     className="w-full rounded-lg border border-input bg-background p-3 text-xs focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
                 />
             </div>
+
+            {editingPair && canEdit && !saving && <OffsetPairEditor key={editingPair.id} pair={editingPair} pairings={activePairings} details={lineItems} reasons={REASON_CODES} trigger={editTrigger} onApply={setActivePairings} onClose={() => setEditingPair(null)} />}
 
             <OffsettingPrintModal
                 isOpen={isPrintModalOpen}

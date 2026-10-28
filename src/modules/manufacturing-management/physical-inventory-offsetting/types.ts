@@ -141,6 +141,7 @@ export interface OffsettingSheetQueueItem {
     total_offset_qty: number;
     net_financial_offset_impact: number;
     isCommitted: number | boolean;
+    isCancelled?: number | boolean;
     committed_at?: string | null;
     committed_by?: string | number | null;
     details?: OffsettingLineDetail[];
