@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Printer, Download, X, MapPin, Package, Calendar } from "lucide-react";
 import { MmPhysicalInventorySheet, MmPhysicalInventoryDetail } from "../types";
 import { downloadManufacturingCountSheetPDF } from "../utils/exportManufacturingCountSheetPDF";
+import { formatQty } from "../utils/number-format";
 
 interface PrintableManufacturingCountSheetProps {
     sheet: MmPhysicalInventorySheet;
@@ -20,13 +21,6 @@ function formatDate(dateStr?: string | null): string {
         return `${parts[0]} ${parts[1].slice(0, 5)}`;
     }
     return str;
-}
-
-function formatQty(val: number | string | null | undefined): string {
-    const num = Number(val || 0);
-    if (!Number.isFinite(num)) return "0";
-    if (Number.isInteger(num)) return num.toLocaleString("en-US");
-    return parseFloat(num.toFixed(4)).toString();
 }
 
 interface GroupedBatch {
@@ -143,6 +137,7 @@ export default function PrintableManufacturingCountSheet({ sheet, targetLot, onC
         return result;
     }, [details]);
 
+    const countGroups = groupedLots.flatMap((lotGroup) => lotGroup.batches.map((batchGroup) => ({ ...batchGroup, lotName: lotGroup.lotName })));
     let seqCounter = 1;
 
     const modalContent = (
@@ -189,7 +184,21 @@ export default function PrintableManufacturingCountSheet({ sheet, targetLot, onC
                     .print\:hidden {
                         display: none !important;
                     }
-                    tr, table, .page-break-avoid {
+                    thead {
+                        display: table-header-group !important;
+                    }
+                    tfoot {
+                        display: table-footer-group !important;
+                    }
+                    table {
+                        break-inside: auto !important;
+                        page-break-inside: auto !important;
+                    }
+                    #printable-count-groups > section {
+                        break-inside: auto !important;
+                        page-break-inside: auto !important;
+                    }
+                    tr, .page-break-avoid {
                         break-inside: avoid !important;
                         page-break-inside: avoid !important;
                     }
@@ -301,100 +310,79 @@ export default function PrintableManufacturingCountSheet({ sheet, targetLot, onC
                         No line items registered in this count sheet.
                     </div>
                 ) : (
-                    groupedLots.map((lotGroup, lotIdx) => (
-                        <div key={lotIdx} className="mb-4 border border-gray-300 rounded-lg overflow-hidden page-break-avoid">
-                            {/* Lot Section Header Banner */}
-                            <div className="bg-black text-white px-3 py-1.5 flex items-center justify-between border-b border-gray-800">
-                                <div className="flex items-center gap-1.5 font-bold uppercase tracking-wide text-xs">
-                                    <MapPin className="h-3.5 w-3.5 text-gray-300 shrink-0" />
-                                    <span>STORAGE LOCATION / LOT: {lotGroup.lotName}</span>
-                                </div>
-                                <span className="text-[9px] text-gray-300 font-mono">
-                                    {lotGroup.batches.reduce((acc, b) => acc + b.items.length, 0)} SKU(s)
-                                </span>
-                            </div>
+                    <div id="printable-count-groups" className="grid grid-cols-2 items-start gap-x-3 gap-y-2">
+                        {countGroups.map((batchGroup) => (
+                            <section key={`${batchGroup.lotName}-${batchGroup.batchNo}`} className="border border-gray-300 rounded-lg">
+                                <table className="w-full table-fixed border-collapse text-[9px]">
+                                    <colgroup>
+                                        <col className="w-[64%]" />
+                                        <col className="w-[36%]" />
+                                    </colgroup>
+                                    <thead>
+                                        <tr>
+                                            <th colSpan={2} className="px-2 py-1 border-b border-gray-300 bg-gray-50 text-left text-gray-800 font-semibold leading-tight">
+                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 uppercase">
+                                                    <span className="inline-flex items-center gap-1">
+                                                        <MapPin className="h-3 w-3 text-gray-500 shrink-0" />
+                                                        STORAGE LOT: {batchGroup.lotName}
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1">
+                                                        <Package className="h-3 w-3 text-gray-500 shrink-0" />
+                                                        BATCH: <span className="font-mono normal-case">{batchGroup.batchNo}</span>
+                                                    </span>
+                                                </div>
+                                                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[8px] text-gray-600 font-mono font-normal normal-case">
+                                                    <span><Calendar className="inline h-2.5 w-2.5 text-gray-400" /> MFG: {batchGroup.mfgDate}</span>
+                                                    <span><Calendar className="inline h-2.5 w-2.5 text-gray-400" /> EXP: {batchGroup.expDate}</span>
+                                                    <span>{batchGroup.items.length} SKU(s)</span>
+                                                </div>
+                                            </th>
+                                        </tr>
+                                        <tr className="border-b border-gray-300 text-[7px] text-gray-600 uppercase">
+                                            <th className="px-2 py-0.5 text-left">Product / UOM / System Qty</th>
+                                            <th className="px-1 py-0.5 text-center">
+                                                {showPhysicalCount ? "Recorded Count" : "Physical Count"}
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {batchGroup.items.map((item) => {
+                                            const pObj = typeof item.product_id === "object" && item.product_id !== null ? item.product_id : null;
+                                            const pName = pObj?.product_name || (item as unknown as { product_name?: string }).product_name || "Product";
+                                            const pCode = pObj?.product_code || (item as unknown as { product_code?: string }).product_code || "";
+                                            const uObj = typeof item.unit_id === "object" && item.unit_id !== null ? item.unit_id : null;
+                                            const uom = uObj?.unit_shortcut || uObj?.unit_name || (item as unknown as { uom?: string }).uom || "PCS";
+                                            const currentSeq = seqCounter++;
 
-                            {/* Batches inside Lot */}
-                            {lotGroup.batches.map((batchGroup, batchIdx) => (
-                                <div key={batchIdx} className="border-b last:border-b-0 border-gray-300 page-break-avoid">
-                                    {/* Batch Sub-Header Bar */}
-                                    <div className="bg-gray-100 text-gray-800 px-3 py-1 flex items-center justify-between border-b border-gray-300 text-[10px] font-semibold">
-                                        <div className="flex items-center gap-1.5">
-                                            <Package className="h-3 w-3 text-gray-600 shrink-0" />
-                                            <span>BATCH NO: <strong className="font-mono text-black">{batchGroup.batchNo}</strong></span>
-                                        </div>
-                                        <div className="flex items-center gap-3 text-[9px] text-gray-600 font-mono">
-                                            <div className="flex items-center gap-1">
-                                                <Calendar className="h-3 w-3 text-gray-400" />
-                                                <span>MFG: {batchGroup.mfgDate}</span>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <Calendar className="h-3 w-3 text-gray-400" />
-                                                <span>EXP: {batchGroup.expDate}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Product SKUs Table */}
-                                    <table className="w-full border-collapse text-[10px]">
-                                        <thead>
-                                            <tr className="bg-gray-50 text-gray-700 font-bold uppercase border-b border-gray-300 text-[8px]">
-                                                <th className="py-1 px-2 text-center w-8 border-r border-gray-300">#</th>
-                                                <th className="py-1 px-2 text-left border-r border-gray-300">SKU Code & Product Description</th>
-                                                <th className="py-1 px-2 text-center w-16 border-r border-gray-300">UOM</th>
-                                                <th className="py-1 px-2 text-right w-24 border-r border-gray-300">System Qty</th>
-                                                <th className="py-1 px-2 text-center w-52 bg-gray-100/80">
-                                                    {showPhysicalCount ? "Recorded Physical Count" : "Physical Count (Pen Entry)"}
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {batchGroup.items.map((item) => {
-                                                const pObj = typeof item.product_id === "object" && item.product_id !== null ? item.product_id : null;
-                                                const pName = pObj?.product_name || (item as unknown as { product_name?: string }).product_name || "Product";
-                                                const pCode = pObj?.product_code || (item as unknown as { product_code?: string }).product_code || "";
-
-                                                const uObj = typeof item.unit_id === "object" && item.unit_id !== null ? item.unit_id : null;
-                                                const uom = uObj?.unit_shortcut || uObj?.unit_name || (item as unknown as { uom?: string }).uom || "PCS";
-
-                                                const currentSeq = seqCounter++;
-
-                                                return (
-                                                    <tr key={item.physical_inventory_detail_id || item.id || currentSeq} className="border-b last:border-b-0 border-gray-200 hover:bg-gray-50/50 transition-colors">
-                                                        <td className="py-1 px-2 text-center font-mono border-r border-gray-200">{currentSeq}</td>
-                                                        <td className="py-1 px-2 border-r border-gray-200">
-                                                            <div className="font-bold text-black">{pName}</div>
-                                                            {pCode && <div className="text-[8px] text-gray-600 font-mono">CODE: {pCode}</div>}
-                                                        </td>
-                                                        <td className="py-1 px-2 text-center uppercase font-mono border-r border-gray-200">{uom}</td>
-                                                        <td className="py-1 px-2 text-right font-mono font-bold text-black border-r border-gray-200">
-                                                            {formatQty(item.system_count)}
-                                                        </td>
-                                                        <td className={`py-1 px-2 ${showPhysicalCount ? "text-right" : "text-center bg-gray-50/40"}`}>
-                                                            {showPhysicalCount ? (
-                                                                item.physical_count !== null && item.physical_count !== undefined ? (
-                                                                    <span className="font-mono font-bold text-black pr-2">
-                                                                        {formatQty(item.physical_count)}
-                                                                    </span>
-                                                                ) : (
-                                                                    <span className="text-gray-400 italic font-mono text-[9px] block text-center">—</span>
-                                                                )
+                                            return (
+                                                <tr key={item.physical_inventory_detail_id || item.id || currentSeq} className="border-b last:border-b-0 border-gray-200">
+                                                    <td className="px-2 py-1 align-top">
+                                                        <div className="font-bold text-black leading-tight">{currentSeq}. {pName}</div>
+                                                        <div className="mt-0.5 text-[7px] text-gray-600 font-mono leading-tight">
+                                                            {pCode ? `CODE: ${pCode} | ` : ""}{uom.toUpperCase()} | SYS: {formatQty(item.system_count)}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-1 py-1 align-middle text-center">
+                                                        {showPhysicalCount ? (
+                                                            item.physical_count !== null && item.physical_count !== undefined ? (
+                                                                <span className="font-mono font-bold text-black break-all">{formatQty(item.physical_count)}</span>
                                                             ) : (
-                                                                /* Blank Dotted Line for Pen Entry */
-                                                                <div className="h-5 border-b border-dashed border-gray-400 font-mono"></div>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ))}
-                        </div>
-                    ))
-                )}
+                                                                <span className="text-gray-400 italic font-mono">-</span>
+                                                            )
+                                                        ) : (
+                                                            <div className="h-5 border-b border-dashed border-gray-500" />
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </section>
+                        ))}
+                    </div>
 
+                )}
                 {/* Compact Sign-Off Authorization Block */}
                 <div className="grid grid-cols-3 gap-4 pt-4 border-t-2 border-black page-break-avoid">
                     <div className="space-y-6">

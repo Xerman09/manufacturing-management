@@ -105,7 +105,12 @@ function mapComponentEntries(
             },
             quantity_required: item.quantity_required,
             wastage_factor_percentage: item.wastage_factor_percentage ?? 0,
-            unit_of_measurement: asText(unitOfMeasurement?.unit_shortcut) || "pcs"
+            uom_id: relationId(product?.unit_of_measurement, "unit_id") || null,
+            uom_name: asText(unitOfMeasurement?.unit_name) || null,
+            uom_shortcut: asText(unitOfMeasurement?.unit_shortcut) || null,
+            unit_of_measurement: asText(unitOfMeasurement?.unit_name)
+                || asText(unitOfMeasurement?.unit_shortcut)
+                || null
         });
     });
 
@@ -245,12 +250,12 @@ export async function loadSubassemblyBOMComponents(productIds: number[]) {
         try {
             productRows = await fetchDirectusRows(
                 "products",
-                `${productFilter}&fields=product_id,product_name,product_code,unit_of_measurement.unit_shortcut,unit_of_measurement.unit_name,product_category.category_name,product_type,net_weight,product_weight,weight,weight_unit_id.*`
+                `${productFilter}&fields=product_id,product_name,product_code,unit_of_measurement.unit_id,unit_of_measurement.unit_shortcut,unit_of_measurement.unit_name,product_category.category_name,product_type,net_weight,product_weight,weight,weight_unit_id.*`
             );
         } catch {
             productRows = await fetchDirectusRows(
                 "products",
-                `${productFilter}&fields=product_id,product_name,product_code,unit_of_measurement.unit_shortcut,product_category.category_name,product_type`
+                `${productFilter}&fields=product_id,product_name,product_code,unit_of_measurement.unit_id,unit_of_measurement.unit_shortcut,product_category.category_name,product_type`
             );
         }
         productRows.forEach((product) => productsById.set(relationId(product.product_id, "product_id"), product));

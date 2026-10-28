@@ -12,8 +12,12 @@ export interface ProductIdInfo {
     product_id: number;
     product_name: string;
     product_code: string;
-    uom?: string;
+    uom?: string | null;
     uom_id?: number | null;
+    uom_name?: string | null;
+    uom_shortcut?: string | null;
+    unit_name?: string | null;
+    unit_shortcut?: string | null;
     uom_count?: number;
     brand?: string;
     category?: string;
@@ -26,6 +30,7 @@ export interface LinkedJobOrder {
     status: string;
     allocatedQuantity: number;
     producedQuantity: number;
+    qaAcceptedQuantity: number;
     isTerminated: boolean;
 }
 
@@ -89,18 +94,38 @@ export interface SalesOrder {
     branch_id?: number | null;
 }
 
+export interface NetRequirementSalesOrderSource {
+    order_id: number;
+    order_no: string;
+    detail_id: number;
+    customer_name?: string | null;
+    ordered_quantity: number;
+}
+
+export interface NetRequirementParentDemandSource {
+    parent_product_id: number;
+    parent_product_name: string;
+    quantity_required: number;
+    parent_shortfall: number;
+    derived_demand: number;
+    sales_order_lines: NetRequirementSalesOrderSource[];
+}
+
 export interface NetRequirementItem {
     product_id: number;
     product_name: string;
     product_code: string;
-    uom_name?: string;
-    uom_shortcut?: string;
-    unit_of_measurement?: string;
+    uom_id?: number | null;
+    uom_name?: string | null;
+    uom_shortcut?: string | null;
+    unit_of_measurement?: string | null;
     gross_demand: number;
     on_hand: number;
     safety_stock: number;
     net_shortfall: number;
     is_sub_assembly?: boolean;
+    contributing_sales_order_lines?: NetRequirementSalesOrderSource[];
+    derived_parent_demands?: NetRequirementParentDemandSource[];
 }
 
 // -------------------------------------------------------------
@@ -174,8 +199,10 @@ export interface JobOrder {
     jo_id?: string;
     product_name?: string;
     product_code?: string;
-    uom?: string;
-    unit_of_measurement?: string;
+    uom?: string | null;
+    uom_name?: string | null;
+    uom_shortcut?: string | null;
+    unit_of_measurement?: string | null;
     version_name?: string;
     branch_name?: string;
     creator_name?: string;
@@ -247,10 +274,11 @@ export interface JobOrderMaterial {
     product_id: number;
     product_name?: string;
     product_code?: string;
-    uom_id?: number;
-    uom_name?: string;
-    unit_shortcut?: string;
-    unit_of_measurement?: string;
+    uom_id?: number | null;
+    uom_name?: string | null;
+    uom_shortcut?: string | null;
+    unit_shortcut?: string | null;
+    unit_of_measurement?: string | null;
     allocated_quantity: number;
     reserved_quantity?: number;
     actual_consumed_quantity: number;

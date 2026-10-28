@@ -18,6 +18,7 @@ import {
     ChevronDown,
     ChevronUp,
     Printer,
+    Search,
     Scale,
     Layers,
     AlertCircle,
@@ -43,6 +44,7 @@ interface OffsettingWorkspaceProps {
 
 const REASON_CODES = [
     "Lot Number Mix-up / Mislabeling",
+    "Product Substitution / Swap",
     "Production Batch Pick Swap",
     "Wrong SKU Tagging",
     "Barcoding Error",
@@ -69,6 +71,10 @@ function normalizeProductName(name?: string): string {
         .trim();
 }
 
+function matchesQuickSearch(value: string | undefined, query: string): boolean {
+    return Boolean(value?.toLowerCase().includes(query));
+}
+
 export default function OffsettingWorkspace({
     sheet,
     onBack,
@@ -85,9 +91,11 @@ export default function OffsettingWorkspace({
     const [selectedSurplusProductIds, setSelectedSurplusProductIds] = useState<(number | string)[]>([]);
     const [selectedShortageDetailIds, setSelectedShortageDetailIds] = useState<number[]>([]);
     const [selectedSurplusDetailIds, setSelectedSurplusDetailIds] = useState<number[]>([]);
+    const [shortageSearch, setShortageSearch] = useState("");
+    const [surplusSearch, setSurplusSearch] = useState("");
 
     const [linkQty, setLinkQty] = useState<string>("");
-    const [linkReason, setLinkReason] = useState<string>(REASON_CODES[0]);
+    const [linkReason, setLinkReason] = useState<string>("");
     const [linkNotes, setLinkNotes] = useState<string>("");
     const [auditSignoffNotes, setAuditSignoffNotes] = useState<string>("");
     const [saving, setSaving] = useState(false);
@@ -111,7 +119,8 @@ export default function OffsettingWorkspace({
 
     // Multi-select toggle helper functions
     const toggleShortageProduct = (pId: number | string, childDetailIds: number[]) => {
-        const isProductSelected = selectedShortageProductIds.includes(pId);
+        const isProductSelected = selectedShortageProductIds.includes(pId)
+            || childDetailIds.length > 0 && childDetailIds.every(id => selectedShortageDetailIds.includes(id));
         if (isProductSelected) {
             setSelectedShortageProductIds(prev => prev.filter(id => id !== pId));
             setSelectedShortageDetailIds(prev => prev.filter(id => !childDetailIds.includes(id)));
@@ -122,7 +131,8 @@ export default function OffsettingWorkspace({
     };
 
     const toggleSurplusProduct = (pId: number | string, childDetailIds: number[]) => {
-        const isProductSelected = selectedSurplusProductIds.includes(pId);
+        const isProductSelected = selectedSurplusProductIds.includes(pId)
+            || childDetailIds.length > 0 && childDetailIds.every(id => selectedSurplusDetailIds.includes(id));
         if (isProductSelected) {
             setSelectedSurplusProductIds(prev => prev.filter(id => id !== pId));
             setSelectedSurplusDetailIds(prev => prev.filter(id => !childDetailIds.includes(id)));
@@ -130,18 +140,6 @@ export default function OffsettingWorkspace({
             setSelectedSurplusProductIds(prev => [...prev, pId]);
             setSelectedSurplusDetailIds(prev => Array.from(new Set([...prev, ...childDetailIds])));
         }
-    };
-
-    const toggleShortageDetail = (detailId: number) => {
-        setSelectedShortageDetailIds(prev =>
-            prev.includes(detailId) ? prev.filter(id => id !== detailId) : [...prev, detailId]
-        );
-    };
-
-    const toggleSurplusDetail = (detailId: number) => {
-        setSelectedSurplusDetailIds(prev =>
-            prev.includes(detailId) ? prev.filter(id => id !== detailId) : [...prev, detailId]
-        );
     };
 
     // Calculate allocated offset quantity per detail line item from active pairings in BASE PIECES
@@ -374,6 +372,115 @@ export default function OffsettingWorkspace({
         }
         return Array.from(map.values());
     }, [surplusItems]);
+
+    const shortageSearchQuery = shortageSearch.trim().toLowerCase();
+    const surplusSearchQuery = surplusSearch.trim().toLowerCase();
+
+    const filteredShortageProducts = useMemo(() => groupedShortageProducts.flatMap(group => {
+        const productMatches = matchesQuickSearch(group.productName, shortageSearchQuery)
+            || matchesQuickSearch(group.productCode, shortageSearchQuery)
+            || group.items.some(item => matchesQuickSearch(item.resolvedName, shortageSearchQuery)
+                || matchesQuickSearch(item.resolvedCode, shortageSearchQuery));
+
+        if (!shortageSearchQuery || productMatches) {
+            return [{ ...group, visibleItems: group.items, searchExpanded: false }];
+        }
+
+        const matchingItems = group.items.filter(item => matchesQuickSearch(item.resolvedLotName, shortageSearchQuery)
+            || matchesQuickSearch(item.resolvedBatchNo, shortageSearchQuery));
+
+        return matchingItems.length > 0
+            ? [{ ...group, visibleItems: matchingItems, searchExpanded: true }]
+            : [];
+    }), [groupedShortageProducts, shortageSearchQuery]);
+
+    const filteredSurplusProducts = useMemo(() => groupedSurplusProducts.flatMap(group => {
+        const productMatches = matchesQuickSearch(group.productName, surplusSearchQuery)
+            || matchesQuickSearch(group.productCode, surplusSearchQuery)
+            || group.items.some(item => matchesQuickSearch(item.resolvedName, surplusSearchQuery)
+                || matchesQuickSearch(item.resolvedCode, surplusSearchQuery));
+
+        if (!surplusSearchQuery || productMatches) {
+            return [{ ...group, visibleItems: group.items, searchExpanded: false }];
+        }
+
+        const matchingItems = group.items.filter(item => matchesQuickSearch(item.resolvedLotName, surplusSearchQuery)
+            || matchesQuickSearch(item.resolvedBatchNo, surplusSearchQuery));
+
+        return matchingItems.length > 0
+            ? [{ ...group, visibleItems: matchingItems, searchExpanded: true }]
+            : [];
+    }), [groupedSurplusProducts, surplusSearchQuery]);
+
+    const filteredShortageItems = useMemo(() => shortageItems.filter(item => !shortageSearchQuery
+        || matchesQuickSearch(item.resolvedName, shortageSearchQuery)
+        || matchesQuickSearch(item.resolvedCode, shortageSearchQuery)
+        || matchesQuickSearch(item.resolvedLotName, shortageSearchQuery)
+        || matchesQuickSearch(item.resolvedBatchNo, shortageSearchQuery)), [shortageItems, shortageSearchQuery]);
+
+    const filteredSurplusItems = useMemo(() => surplusItems.filter(item => !surplusSearchQuery
+        || matchesQuickSearch(item.resolvedName, surplusSearchQuery)
+        || matchesQuickSearch(item.resolvedCode, surplusSearchQuery)
+        || matchesQuickSearch(item.resolvedLotName, surplusSearchQuery)
+        || matchesQuickSearch(item.resolvedBatchNo, surplusSearchQuery)), [surplusItems, surplusSearchQuery]);
+
+    const visibleShortageDetailIds = useMemo(() => groupingViewMode === "PRODUCT_GROUPED"
+        ? filteredShortageProducts.flatMap(group => group.visibleItems.map(item => item.detailId))
+        : filteredShortageItems.map(item => item.detailId), [groupingViewMode, filteredShortageProducts, filteredShortageItems]);
+
+    const visibleSurplusDetailIds = useMemo(() => groupingViewMode === "PRODUCT_GROUPED"
+        ? filteredSurplusProducts.flatMap(group => group.visibleItems.map(item => item.detailId))
+        : filteredSurplusItems.map(item => item.detailId), [groupingViewMode, filteredSurplusProducts, filteredSurplusItems]);
+
+    const selectedShortageItemIds = useMemo(() => {
+        const selected = new Set(selectedShortageDetailIds);
+        for (const group of groupedShortageProducts) {
+            if (selectedShortageProductIds.includes(group.groupId) || selectedShortageProductIds.includes(group.productId)) {
+                group.items.forEach(item => selected.add(item.detailId));
+            }
+        }
+        return selected;
+    }, [groupedShortageProducts, selectedShortageProductIds, selectedShortageDetailIds]);
+
+    const selectedSurplusItemIds = useMemo(() => {
+        const selected = new Set(selectedSurplusDetailIds);
+        for (const group of groupedSurplusProducts) {
+            if (selectedSurplusProductIds.includes(group.groupId) || selectedSurplusProductIds.includes(group.productId)) {
+                group.items.forEach(item => selected.add(item.detailId));
+            }
+        }
+        return selected;
+    }, [groupedSurplusProducts, selectedSurplusProductIds, selectedSurplusDetailIds]);
+
+    const setShortageVisibleSelection = (detailIds: number[], isSelected: boolean) => {
+        const selected = new Set(selectedShortageItemIds);
+        detailIds.forEach(id => isSelected ? selected.add(id) : selected.delete(id));
+        setSelectedShortageProductIds([]);
+        setSelectedShortageDetailIds(Array.from(selected));
+    };
+
+    const setSurplusVisibleSelection = (detailIds: number[], isSelected: boolean) => {
+        const selected = new Set(selectedSurplusItemIds);
+        detailIds.forEach(id => isSelected ? selected.add(id) : selected.delete(id));
+        setSelectedSurplusProductIds([]);
+        setSelectedSurplusDetailIds(Array.from(selected));
+    };
+
+    const toggleShortageVisibleSelection = (detailIds: number[]) => {
+        setShortageVisibleSelection(detailIds, !detailIds.every(id => selectedShortageItemIds.has(id)));
+    };
+
+    const toggleSurplusVisibleSelection = (detailIds: number[]) => {
+        setSurplusVisibleSelection(detailIds, !detailIds.every(id => selectedSurplusItemIds.has(id)));
+    };
+
+    const toggleShortageDetail = (detailId: number) => {
+        setShortageVisibleSelection([detailId], !selectedShortageItemIds.has(detailId));
+    };
+
+    const toggleSurplusDetail = (detailId: number) => {
+        setSurplusVisibleSelection([detailId], !selectedSurplusItemIds.has(detailId));
+    };
 
     const formattedLineItems = useMemo(() => {
         return lineItems.map((item, idx) => {
@@ -770,24 +877,6 @@ export default function OffsettingWorkspace({
             return;
         }
 
-        // Strict Same-Product Validation (matching product ID or normalized base product name)
-        for (const sItem of checkedShortageItems) {
-            const sProdId = getProdId(sItem.product_id);
-            const sNormName = normalizeProductName(sItem.resolvedName).toLowerCase();
-
-            for (const surpItem of checkedSurplusItems) {
-                const surpProdId = getProdId(surpItem.product_id);
-                const surpNormName = normalizeProductName(surpItem.resolvedName).toLowerCase();
-
-                const isSame = sProdId === surpProdId || (sNormName.length > 0 && sNormName === surpNormName);
-
-                if (!isSame) {
-                    toast.error(`Cross-product offsetting is disabled. Shortage product "${sItem.resolvedName}" cannot be offset against Surplus "${surpItem.resolvedName}". Offsetting is strictly permitted between lots/batches of the SAME product.`);
-                    return;
-                }
-            }
-        }
-
         const maxPossiblePcs = Math.min(selectedShortageTotalPieces, selectedSurplusTotalPieces);
         if (pcsToAllocate > maxPossiblePcs + 0.0001) {
             toast.error(`Offset quantity cannot exceed ${maxPossiblePcs.toLocaleString()} pcs.`);
@@ -853,7 +942,7 @@ export default function OffsettingWorkspace({
                     surplus_unit_cost: surpItem.unitCost,
                     unit_cost_variance: unitCostVarPerPiece,
                     net_financial_impact: netFinancialImpact,
-                    reason_code: linkReason,
+                    reason_code: linkReason || REASON_CODES[0],
                     notes: linkNotes.trim() || undefined,
                     created_at: new Date().toISOString()
                 };
@@ -867,12 +956,23 @@ export default function OffsettingWorkspace({
         }
 
         if (generatedPairs.length > 0) {
+            const hasCrossProductPair = generatedPairs.some(pair => pair.shortage_product_id !== pair.surplus_product_id);
+            if (hasCrossProductPair && !linkReason) {
+                toast.error("Choose a reason code for cross-product audit pairings.");
+                return;
+            }
+            if (hasCrossProductPair && !linkNotes.trim()) {
+                toast.error("Enter an auditor note for cross-product audit pairings.");
+                return;
+            }
+
             setActivePairings(prev => [...prev, ...generatedPairs]);
             setSelectedShortageProductIds([]);
             setSelectedSurplusProductIds([]);
             setSelectedShortageDetailIds([]);
             setSelectedSurplusDetailIds([]);
             setLinkQty("");
+            setLinkReason("");
             setLinkNotes("");
             toast.success(`Linked offset pair (${pcsToAllocate.toLocaleString()} pcs total)!`);
         }
@@ -993,7 +1093,7 @@ export default function OffsettingWorkspace({
         try {
             setSaving(true);
             await onSavePairings(activePairings);
-            toast.success("Offsetting draft saved successfully.");
+            toast.success(isCommitted ? "Audit pairings saved successfully." : "Offsetting draft saved successfully.");
         } catch {
             toast.error("Failed to save offsetting draft.");
         } finally {
@@ -1070,7 +1170,7 @@ export default function OffsettingWorkspace({
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-foreground bg-background border border-input rounded-lg hover:bg-accent transition-colors shadow-xs"
                     >
                         <Save className="h-3.5 w-3.5" />
-                        {isCommitted ? "Save Offset Adjustments" : "Save Draft"}
+                        {isCommitted ? "Save Audit Pairings" : "Save Draft"}
                     </button>
 
                     {!isCommitted && (
@@ -1154,7 +1254,7 @@ export default function OffsettingWorkspace({
                             Auditor Matching Builder
                         </h4>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                            Pair shortage items against surplus items to reconcile inventory balance
+                            Pair shortage items against surplus items for audit reporting and variance justification.
                         </p>
                     </div>
 
@@ -1185,6 +1285,11 @@ export default function OffsettingWorkspace({
                     </div>
                 </div>
 
+                <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <p>Audit pairings and saving them do not change perpetual inventory counts. Stock changes require the separate Approve &amp; Commit Stock Adjustments action.</p>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Shortage Column (Left) */}
                     <div className="space-y-2">
@@ -1192,24 +1297,9 @@ export default function OffsettingWorkspace({
                             <label className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5 cursor-pointer">
                                 <input
                                     type="checkbox"
-                                    checked={
-                                        groupingViewMode === "PRODUCT_GROUPED"
-                                            ? groupedShortageProducts.length > 0 && selectedShortageProductIds.length === groupedShortageProducts.length
-                                            : shortageItems.length > 0 && selectedShortageDetailIds.length === shortageItems.length
-                                    }
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            if (groupingViewMode === "PRODUCT_GROUPED") {
-                                                setSelectedShortageProductIds(groupedShortageProducts.map(g => g.productId));
-                                                setSelectedShortageDetailIds(shortageItems.map(i => i.detailId));
-                                            } else {
-                                                setSelectedShortageDetailIds(shortageItems.map(i => i.detailId));
-                                            }
-                                        } else {
-                                            setSelectedShortageProductIds([]);
-                                            setSelectedShortageDetailIds([]);
-                                        }
-                                    }}
+                                    checked={visibleShortageDetailIds.length > 0 && visibleShortageDetailIds.every(id => selectedShortageItemIds.has(id))}
+                                    disabled={visibleShortageDetailIds.length === 0}
+                                    onChange={(e) => setShortageVisibleSelection(visibleShortageDetailIds, e.target.checked)}
                                     className="h-3.5 w-3.5 rounded border-amber-400 text-amber-600 focus:ring-amber-500 cursor-pointer"
                                 />
                                 <TrendingDown className="h-3.5 w-3.5" />
@@ -1222,23 +1312,39 @@ export default function OffsettingWorkspace({
                             )}
                         </div>
 
+                        <div className="relative">
+                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <input
+                                type="search"
+                                aria-label="Search shortage discrepancies"
+                                placeholder="Search product, code, lot, or batch..."
+                                value={shortageSearch}
+                                onChange={e => setShortageSearch(e.target.value)}
+                                className="w-full h-9 rounded-lg border border-input bg-background pl-9 pr-3 text-xs focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                            />
+                        </div>
+
                         <div className="max-h-72 overflow-y-auto space-y-2 pr-1 border border-border rounded-lg p-2 bg-muted/20">
                             {groupingViewMode === "PRODUCT_GROUPED" ? (
                                 /* PRODUCT GROUPED VIEW FOR SHORTAGES */
-                                groupedShortageProducts.length === 0 ? (
+                                filteredShortageProducts.length === 0 ? (
                                     <div className="p-4 text-center text-xs text-muted-foreground">
-                                        No unallocated shortage products remaining.
+                                        {shortageSearchQuery ? "No shortage items match this search." : "No unallocated shortage products remaining."}
                                     </div>
                                 ) : (
-                                    groupedShortageProducts.map(group => {
-                                        const isExpanded = !!expandedShortageProducts[group.productId];
-                                        const isProductChecked = selectedShortageProductIds.includes(group.productId);
-                                        const hasCheckedChild = group.items.some(i => selectedShortageDetailIds.includes(i.detailId));
+                                    filteredShortageProducts.map(group => {
+                                        const groupDetailIds = group.visibleItems.map(item => item.detailId);
+                                        const isExpanded = group.searchExpanded || !!expandedShortageProducts[group.productId];
+                                        const isProductChecked = groupDetailIds.length > 0 && groupDetailIds.every(id => selectedShortageItemIds.has(id));
+                                        const hasCheckedChild = group.visibleItems.some(i => selectedShortageItemIds.has(i.detailId));
+                                        const toggleGroupSelection = () => shortageSearchQuery
+                                            ? toggleShortageVisibleSelection(groupDetailIds)
+                                            : toggleShortageProduct(group.productId, group.items.map(i => i.detailId));
 
                                         return (
                                             <div
                                                 key={group.productId}
-                                                onClick={() => toggleShortageProduct(group.productId, group.items.map(i => i.detailId))}
+                                                onClick={toggleGroupSelection}
                                                 className={`rounded-lg border transition-all cursor-pointer ${isProductChecked
                                                         ? "border-amber-500 bg-amber-500/15 ring-2 ring-amber-500 shadow-md"
                                                         : hasCheckedChild
@@ -1255,7 +1361,7 @@ export default function OffsettingWorkspace({
                                                                 checked={isProductChecked}
                                                                 onChange={(e) => {
                                                                     e.stopPropagation();
-                                                                    toggleShortageProduct(group.productId, group.items.map(i => i.detailId));
+                                                                    toggleGroupSelection();
                                                                 }}
                                                                 className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500 cursor-pointer mt-0.5 shrink-0"
                                                             />
@@ -1293,14 +1399,20 @@ export default function OffsettingWorkspace({
                                                             <Layers className="h-3 w-3 text-amber-500" />
                                                             Total Product Deficit ({group.items.length} {group.items.length === 1 ? "lot/batch" : "lots/batches"})
                                                         </span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => toggleShortageExpand(group.productId, e)}
-                                                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:underline"
-                                                        >
-                                                            {isExpanded ? "Hide Breakdown" : `Show Lot/Batch Breakdown (${group.items.length})`}
-                                                            {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                                                        </button>
+                                                        {group.searchExpanded ? (
+                                                            <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                                                                Matching Lots/Batches ({group.visibleItems.length})
+                                                            </span>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => toggleShortageExpand(group.productId, e)}
+                                                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:underline"
+                                                            >
+                                                                {isExpanded ? "Hide Breakdown" : `Show Lot/Batch Breakdown (${group.items.length})`}
+                                                                {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -1310,8 +1422,8 @@ export default function OffsettingWorkspace({
                                                         <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground px-1 pb-1">
                                                             Detailed Lots & Batches Breakdown:
                                                         </div>
-                                                        {group.items.map(item => {
-                                                            const isDetailChecked = selectedShortageDetailIds.includes(item.detailId);
+                                                        {group.visibleItems.map(item => {
+                                                            const isDetailChecked = selectedShortageItemIds.has(item.detailId);
                                                             return (
                                                                 <div
                                                                     key={item.detailId}
@@ -1372,13 +1484,13 @@ export default function OffsettingWorkspace({
                                 )
                             ) : (
                                 /* GRANULAR LOT/BATCH FLAT VIEW FOR SHORTAGES */
-                                shortageItems.length === 0 ? (
+                                filteredShortageItems.length === 0 ? (
                                     <div className="p-4 text-center text-xs text-muted-foreground">
-                                        No unallocated shortage lots remaining.
+                                        {shortageSearchQuery ? "No shortage items match this search." : "No unallocated shortage lots remaining."}
                                     </div>
                                 ) : (
-                                    shortageItems.map(item => {
-                                        const isChecked = selectedShortageDetailIds.includes(item.detailId);
+                                    filteredShortageItems.map(item => {
+                                        const isChecked = selectedShortageItemIds.has(item.detailId);
                                         return (
                                             <div
                                                 key={item.detailId}
@@ -1447,24 +1559,9 @@ export default function OffsettingWorkspace({
                             <label className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 cursor-pointer">
                                 <input
                                     type="checkbox"
-                                    checked={
-                                        groupingViewMode === "PRODUCT_GROUPED"
-                                            ? groupedSurplusProducts.length > 0 && selectedSurplusProductIds.length === groupedSurplusProducts.length
-                                            : surplusItems.length > 0 && selectedSurplusDetailIds.length === surplusItems.length
-                                    }
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            if (groupingViewMode === "PRODUCT_GROUPED") {
-                                                setSelectedSurplusProductIds(groupedSurplusProducts.map(g => g.productId));
-                                                setSelectedSurplusDetailIds(surplusItems.map(i => i.detailId));
-                                            } else {
-                                                setSelectedSurplusDetailIds(surplusItems.map(i => i.detailId));
-                                            }
-                                        } else {
-                                            setSelectedSurplusProductIds([]);
-                                            setSelectedSurplusDetailIds([]);
-                                        }
-                                    }}
+                                    checked={visibleSurplusDetailIds.length > 0 && visibleSurplusDetailIds.every(id => selectedSurplusItemIds.has(id))}
+                                    disabled={visibleSurplusDetailIds.length === 0}
+                                    onChange={(e) => setSurplusVisibleSelection(visibleSurplusDetailIds, e.target.checked)}
                                     className="h-3.5 w-3.5 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                                 />
                                 <TrendingUp className="h-3.5 w-3.5" />
@@ -1477,23 +1574,39 @@ export default function OffsettingWorkspace({
                             )}
                         </div>
 
+                        <div className="relative">
+                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <input
+                                type="search"
+                                aria-label="Search surplus discrepancies"
+                                placeholder="Search product, code, lot, or batch..."
+                                value={surplusSearch}
+                                onChange={e => setSurplusSearch(e.target.value)}
+                                className="w-full h-9 rounded-lg border border-input bg-background pl-9 pr-3 text-xs focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
+                            />
+                        </div>
+
                         <div className="max-h-72 overflow-y-auto space-y-2 pr-1 border border-border rounded-lg p-2 bg-muted/20">
                             {groupingViewMode === "PRODUCT_GROUPED" ? (
                                 /* PRODUCT GROUPED VIEW FOR SURPLUSES */
-                                groupedSurplusProducts.length === 0 ? (
+                                filteredSurplusProducts.length === 0 ? (
                                     <div className="p-4 text-center text-xs text-muted-foreground">
-                                        No unallocated surplus products remaining.
+                                        {surplusSearchQuery ? "No surplus items match this search." : "No unallocated surplus products remaining."}
                                     </div>
                                 ) : (
-                                    groupedSurplusProducts.map(group => {
-                                        const isExpanded = !!expandedSurplusProducts[group.productId];
-                                        const isProductChecked = selectedSurplusProductIds.includes(group.productId);
-                                        const hasCheckedChild = group.items.some(i => selectedSurplusDetailIds.includes(i.detailId));
+                                    filteredSurplusProducts.map(group => {
+                                        const groupDetailIds = group.visibleItems.map(item => item.detailId);
+                                        const isExpanded = group.searchExpanded || !!expandedSurplusProducts[group.productId];
+                                        const isProductChecked = groupDetailIds.length > 0 && groupDetailIds.every(id => selectedSurplusItemIds.has(id));
+                                        const hasCheckedChild = group.visibleItems.some(i => selectedSurplusItemIds.has(i.detailId));
+                                        const toggleGroupSelection = () => surplusSearchQuery
+                                            ? toggleSurplusVisibleSelection(groupDetailIds)
+                                            : toggleSurplusProduct(group.productId, group.items.map(i => i.detailId));
 
                                         return (
                                             <div
                                                 key={group.productId}
-                                                onClick={() => toggleSurplusProduct(group.productId, group.items.map(i => i.detailId))}
+                                                onClick={toggleGroupSelection}
                                                 className={`rounded-lg border transition-all cursor-pointer ${isProductChecked
                                                         ? "border-emerald-500 bg-emerald-500/15 ring-2 ring-emerald-500 shadow-md"
                                                         : hasCheckedChild
@@ -1510,7 +1623,7 @@ export default function OffsettingWorkspace({
                                                                 checked={isProductChecked}
                                                                 onChange={(e) => {
                                                                     e.stopPropagation();
-                                                                    toggleSurplusProduct(group.productId, group.items.map(i => i.detailId));
+                                                                    toggleGroupSelection();
                                                                 }}
                                                                 className="h-4 w-4 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 cursor-pointer mt-0.5 shrink-0"
                                                             />
@@ -1548,14 +1661,20 @@ export default function OffsettingWorkspace({
                                                             <Layers className="h-3 w-3 text-emerald-500" />
                                                             Total Product Overage ({group.items.length} {group.items.length === 1 ? "lot/batch" : "lots/batches"})
                                                         </span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => toggleSurplusExpand(group.productId, e)}
-                                                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline"
-                                                        >
-                                                            {isExpanded ? "Hide Breakdown" : `Show Lot/Batch Breakdown (${group.items.length})`}
-                                                            {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                                                        </button>
+                                                        {group.searchExpanded ? (
+                                                            <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                                                                Matching Lots/Batches ({group.visibleItems.length})
+                                                            </span>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => toggleSurplusExpand(group.productId, e)}
+                                                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline"
+                                                            >
+                                                                {isExpanded ? "Hide Breakdown" : `Show Lot/Batch Breakdown (${group.items.length})`}
+                                                                {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -1565,8 +1684,8 @@ export default function OffsettingWorkspace({
                                                         <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground px-1 pb-1">
                                                             Detailed Lots & Batches Breakdown:
                                                         </div>
-                                                        {group.items.map(item => {
-                                                            const isDetailChecked = selectedSurplusDetailIds.includes(item.detailId);
+                                                        {group.visibleItems.map(item => {
+                                                            const isDetailChecked = selectedSurplusItemIds.has(item.detailId);
                                                             return (
                                                                 <div
                                                                     key={item.detailId}
@@ -1627,13 +1746,13 @@ export default function OffsettingWorkspace({
                                 )
                             ) : (
                                 /* GRANULAR LOT/BATCH FLAT VIEW FOR SURPLUSES */
-                                surplusItems.length === 0 ? (
+                                filteredSurplusItems.length === 0 ? (
                                     <div className="p-4 text-center text-xs text-muted-foreground">
-                                        No unallocated surplus lots remaining.
+                                        {surplusSearchQuery ? "No surplus items match this search." : "No unallocated surplus lots remaining."}
                                     </div>
                                 ) : (
-                                    surplusItems.map(item => {
-                                        const isChecked = selectedSurplusDetailIds.includes(item.detailId);
+                                    filteredSurplusItems.map(item => {
+                                        const isChecked = selectedSurplusItemIds.has(item.detailId);
                                         return (
                                             <div
                                                 key={item.detailId}
@@ -1720,12 +1839,13 @@ export default function OffsettingWorkspace({
                     </div>
 
                     <div className="flex-1 space-y-1">
-                        <label className="text-[11px] font-semibold text-muted-foreground">Reason Code</label>
+                        <label className="text-[11px] font-semibold text-muted-foreground">Reason Code (required for cross-product)</label>
                         <select
                             value={linkReason}
                             onChange={e => setLinkReason(e.target.value)}
                             className="w-full h-9 rounded-md border border-input bg-background px-2 text-xs focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
                         >
+                            <option value="">Select a reason code...</option>
                             {REASON_CODES.map(code => (
                                 <option key={code} value={code}>
                                     {code}
@@ -1735,7 +1855,7 @@ export default function OffsettingWorkspace({
                     </div>
 
                     <div className="flex-1 space-y-1">
-                        <label className="text-[11px] font-semibold text-muted-foreground">Auditor Note</label>
+                        <label className="text-[11px] font-semibold text-muted-foreground">Auditor Note (required for cross-product)</label>
                         <input
                             type="text"
                             value={linkNotes}

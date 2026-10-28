@@ -18,6 +18,7 @@ import { Step2BOMReview } from "./buffer-jo/Step2BOMReview";
 import { Step3Scheduling } from "./buffer-jo/Step3Scheduling";
 import { Step4Review } from "./buffer-jo/Step4Review";
 import { addCalendarDaysToDateInput, formatPhtDate, getPhtDateInputValue } from "../../shared/pht-date";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 
 interface CreateBufferJODialogProps {
     isOpen: boolean;
@@ -147,11 +148,11 @@ export function CreateBufferJODialog({
 
     const parentProductOptions = useMemo(() => {
         return parentProducts.map((prod) => {
-            const uomName = prod.unit_of_measurement?.unit_name || "";
+            const uomName = getUnitOfMeasureLabel(prod);
             const unitCount = prod.unit_of_measurement_count !== undefined && prod.unit_of_measurement_count !== null
                 ? Number(prod.unit_of_measurement_count)
                 : 1;
-            const suffix = uomName ? ` ${uomName} (${unitCount})` : "";
+            const suffix = uomName === "UOM unavailable" ? ` ${uomName}` : ` ${uomName} (${unitCount})`;
             return {
                 value: String(prod.product_id),
                 label: `${prod.product_name}${suffix}`
@@ -170,8 +171,8 @@ export function CreateBufferJODialog({
 
     const uomOptions = useMemo(() => {
         return familyProducts.map((prod) => {
-            const uomName = prod.unit_of_measurement?.unit_name || "";
-            const uomShortcut = prod.unit_of_measurement?.unit_shortcut || "PCS";
+            const uomName = prod.unit_of_measurement?.unit_name || getUnitOfMeasureLabel(prod);
+            const uomShortcut = prod.unit_of_measurement?.unit_shortcut || prod.unit_of_measurement?.unit_name || "UOM unavailable";
             return {
                 product_id: String(prod.product_id),
                 uom_id: Number(prod.unit_of_measurement?.unit_id || prod.unit_of_measurement || 0),
@@ -654,7 +655,7 @@ export function CreateBufferJODialog({
     const totalEstimatedHours = boxEstimatedHours;
 
     // Dynamic UOM labels
-    const parentUomLabel = (selectedProdObj?.unit_of_measurement?.unit_name || selectedProdObj?.uom_name || selectedProdObj?.uom_shortcut || "Box").toUpperCase();
+    const parentUomLabel = getUnitOfMeasureLabel(selectedProdObj).toUpperCase();
 
     const containerMetrics = useMemo(() => {
         if (!selectedProdObj) return null;
@@ -711,7 +712,7 @@ export function CreateBufferJODialog({
             name: comp.component_product_id?.product_name || `Product #${compProductId}`,
             code: comp.component_product_id?.product_code || "",
             category: comp.component_product_id?.category_name || "Uncategorized",
-            uom: comp.unit_of_measurement || "pcs",
+            uom: getUnitOfMeasureLabel(comp),
             kilogramsPerUnit: comp.component_product_id?.kilograms_per_inventory_unit ?? null,
             needed,
             demandNeeded: materialPlan.demandRequired,
@@ -789,9 +790,9 @@ export function CreateBufferJODialog({
                 const children = subAssemblyBoms[Number(cId)] || [];
                 return children.length > 0 || comp.component_product_id?.product_type === 388 || comp.component_product_id?.is_finished_good;
             })
-            .map(comp => comp.unit_of_measurement || "Piece")
+            .map(comp => getUnitOfMeasureLabel(comp))
     ));
-    const subAssemblyUomLabel = subAssemblyUomList.length > 0 ? subAssemblyUomList.join(", ") : "Piece";
+    const subAssemblyUomLabel = subAssemblyUomList.length > 0 ? subAssemblyUomList.join(", ") : "UOM unavailable";
 
     const hasShortfalls = components.some((comp) => {
         const compProductId = comp.component_product_id?.product_id;
@@ -823,7 +824,7 @@ export function CreateBufferJODialog({
             ).plannedRequired;
             const available = compProductId ? (inventories[Number(compProductId)]?.main_store_on_hand || 0) : 0;
             const shortfall = Math.max(0, needed - available);
-            const uom = comp.unit_of_measurement || "pcs";
+            const uom = getUnitOfMeasureLabel(comp);
             const children = subAssemblyBoms[Number(compProductId)] || [];
             const isSubAssembly = children.length > 0 || comp.component_product_id?.product_type === 388 || comp.component_product_id?.is_finished_good;
 
@@ -854,7 +855,7 @@ export function CreateBufferJODialog({
                     );
                     const ccAvailable = ccId ? (inventories[Number(ccId)]?.main_store_on_hand || 0) : 0;
                     const ccShortfall = Math.max(0, ccNeeded - ccAvailable);
-                    const ccUom = cc.unit_of_measurement || "pcs";
+                    const ccUom = getUnitOfMeasureLabel(cc);
 
                     if (ccShortfall > 0 && printSelection[`child-${compProductId}-${ccId}`]) {
                         tableRowsHtml += `
@@ -927,7 +928,7 @@ export function CreateBufferJODialog({
                             </div>
                             <div>
                                 <div class="jo-summary-label">Plan Output Quantity</div>
-                                <div class="jo-summary-value">${productionTargetQuantity.toLocaleString()} units</div>
+                                <div class="jo-summary-value">${productionTargetQuantity.toLocaleString()} ${parentUomLabel}</div>
                             </div>
                             <div>
                                 <div class="jo-summary-label">Estimated Days</div>
@@ -1014,146 +1015,6 @@ export function CreateBufferJODialog({
             }
         }
         setCurrentStep((prev) => prev + 1);
-    };
-
-    const printPickingList = (joId: string, productName: string, qty: number) => {
-        const printWindow = window.open("", "_blank");
-        if (!printWindow) return;
-
-        const branchName = branches?.find((b: any) => Number(b.id) === Number(selectedBranchId))?.branch_name || `Branch #${selectedBranchId}`;
-
-        const printRows: string[] = [];
-
-        components.forEach((comp) => {
-            const compProductId = comp.component_product_id?.product_id;
-            const children = subAssemblyBoms[Number(compProductId)] || [];
-            const isSubAssembly = children.length > 0 || comp.component_product_id?.product_type === 388 || comp.component_product_id?.is_finished_good;
-            const name = comp.component_product_id?.product_name || `Component #${compProductId}`;
-            const code = comp.component_product_id?.product_code || "";
-            const uom = comp.unit_of_measurement || "pcs";
-            
-            const needed = calculatePerUnitMaterialRequirement(
-                qty,
-                Number(comp.quantity_required || 0),
-                Number(comp.wastage_factor_percentage || 0)
-            );
-
-            printRows.push(`
-                <tr style="border-bottom: 1px solid #ddd; background: ${isSubAssembly ? '#f9f9f9' : '#fff'};">
-                    <td style="padding: 10px; font-weight: bold;">
-                        ${isSubAssembly ? `<span style="font-size: 8px; background: #e0f2fe; color: #0369a1; padding: 2px 5px; border-radius: 3px; margin-right: 5px; font-family: sans-serif; font-weight: 900;">SUB-ASSEMBLY</span>` : ""}
-                        ${name} <span style="font-size: 10px; color: #666; font-weight: normal;">(${code})</span>
-                    </td>
-                    <td style="padding: 10px; text-align: right; font-weight: bold;">${Number(needed).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${uom}</td>
-                    <td style="padding: 10px; text-align: center; border-left: 1px solid #ddd;">[ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ]</td>
-                    <td style="padding: 10px; font-style: italic; color: #666;"></td>
-                </tr>
-            `);
-
-            if (isSubAssembly) {
-                const children = subAssemblyBoms[Number(compProductId)] || [];
-                children.forEach((child) => {
-                    const childId = child.component_product_id?.product_id;
-                    const childName = child.component_product_id?.product_name || `Child #${childId}`;
-                    const childCode = child.component_product_id?.product_code || "";
-                    const childUom = child.unit_of_measurement || "pcs";
-                    
-                    const childNeeded = calculatePerUnitMaterialRequirement(
-                        needed,
-                        Number(child.quantity_required || 0),
-                        Number(child.wastage_factor_percentage || 0)
-                    );
-
-                    printRows.push(`
-                        <tr style="border-bottom: 1px solid #eee; background: #fff;">
-                            <td style="padding: 10px 10px 10px 30px; color: #555;">
-                                <span style="color: #999; margin-right: 5px;">↳</span>
-                                ${childName} <span style="font-size: 10px; color: #888;">(${childCode})</span>
-                            </td>
-                            <td style="padding: 10px; text-align: right; font-weight: bold; color: #555;">${Number(childNeeded).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${childUom}</td>
-                            <td style="padding: 10px; text-align: center; border-left: 1px solid #ddd;">[ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ]</td>
-                            <td style="padding: 10px; font-style: italic; color: #666;"></td>
-                        </tr>
-                    `);
-                });
-            }
-        });
-
-        const htmlContent = `
-            <html>
-            <head>
-                <title>Material Pick List - ${joId}</title>
-                <style>
-                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; color: #333; }
-                    .header { border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-                    .title { font-size: 24px; font-weight: bold; text-transform: uppercase; }
-                    .meta { display: grid; grid-template-cols: 2fr 1fr; margin-top: 10px; font-size: 14px; }
-                    th { background-color: #f5f5f5; padding: 10px; text-align: left; border-bottom: 2px solid #ddd; }
-                    @media print {
-                        body { padding: 0; }
-                        .no-print { display: none; }
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span class="title">Material Picking List (WMS)</span>
-                        <span style="font-weight: bold; background: #7c3aed; color: #fff; padding: 5px 10px; border-radius: 4px;">${joId}</span>
-                    </div>
-                    <div class="meta">
-                        <div>
-                            <strong>Target Product:</strong> ${productName}<br/>
-                            <strong>Production Qty:</strong> ${qty.toLocaleString()} units<br/>
-                            <strong>Date Created:</strong> ${formatPhtDate(new Date())}<br/>
-                        </div>
-                        <div style="text-align: right;">
-                            <strong>Warehouse Branch:</strong> ${branchName}<br/>
-                            <strong>Status:</strong> Released for Picking
-                        </div>
-                    </div>
-                </div>
-                
-                <table style="width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px;">
-                    <thead>
-                        <tr style="background-color: #f5f5f5;">
-                            <th style="padding: 10px; border-bottom: 2px solid #ddd; text-align: left;">Raw Material / Component</th>
-                            <th style="padding: 10px; border-bottom: 2px solid #ddd; text-align: right;">Needed Quantity</th>
-                            <th style="padding: 10px; border-bottom: 2px solid #ddd; text-align: center; width: 120px;">Picked Check</th>
-                            <th style="padding: 10px; border-bottom: 2px solid #ddd; text-align: left; width: 150px;">Bin / Lot Notes</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${printRows.join("")}
-                    </tbody>
-                </table>
-                
-                <div style="margin-top: 50px; display: flex; justify-content: space-between; font-size: 12px;">
-                    <div>
-                        <strong>Picked By:</strong> ________________________<br/>
-                        Date: ________________________
-                    </div>
-                    <div>
-                        <strong>Verified By (WIP Supervisor):</strong> ________________________<br/>
-                        Date: ________________________
-                    </div>
-                </div>
-
-                <div class="no-print" style="margin-top: 30px; text-align: center;">
-                    <button onclick="window.print();" style="background: #7c3aed; color: #fff; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer;">Print Picklist</button>
-                </div>
-
-                <script>
-                    window.onload = function() {
-                        window.print();
-                    };
-                </script>
-            </body>
-            </html>
-        `;
-
-        printWindow.document.write(htmlContent);
-        printWindow.document.close();
     };
 
     const handleConfirmRelease = async (initialize = false) => {
@@ -1260,11 +1121,6 @@ export function CreateBufferJODialog({
             } else {
                 toast.success(`Buffer Job Order ${joNumber} initialized and ready for material picking.`);
             }
-            printPickingList(
-                joNumber,
-                selectedProduct?.product_name || `Product #${selectedProductId}`,
-                Number(productionTargetQuantity)
-            );
             onOpenChange(false);
             await onSuccess(createdJobOrderNo);
         } catch (err: any) {

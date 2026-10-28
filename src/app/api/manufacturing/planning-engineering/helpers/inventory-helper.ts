@@ -1029,16 +1029,18 @@ export async function getProductInventoryAndSafetyStock(
 
             const uomId = Number(p.unit_of_measurement?.unit_id || p.unit_of_measurement || 0);
             const unitObj = unitsMap.get(uomId) || (typeof p.unit_of_measurement === "object" ? p.unit_of_measurement : null);
-            const uomName = unitObj?.unit_name || unitObj?.unit_shortcut || "Pieces";
-            const uomShortcut = unitObj?.unit_shortcut || unitObj?.unit_name || "PCS";
+            const uomName = unitObj?.unit_name || null;
+            const uomShortcut = unitObj?.unit_shortcut || null;
+            const uomLabel = uomName || uomShortcut || null;
 
             enrichedProducts.push({
                 product_id: pId,
                 product_name: p.product_name,
                 product_code: p.product_code,
+                uom_id: uomId || null,
                 uom_name: uomName,
                 uom_shortcut: uomShortcut,
-                unit_of_measurement: uomName,
+                unit_of_measurement: uomLabel,
                 on_hand: availableOnHand,
                 main_store_on_hand: Math.max(0, mainStoreStockByBranchProduct.get(branchProductKey(bId, pId)) || 0),
                 safety_stock: safetyStock,

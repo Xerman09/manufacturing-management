@@ -122,7 +122,7 @@ export async function GET(req: Request) {
         const action = searchParams.get("action") || "bootstrap";
 
         if (action === "bootstrap") {
-            const [productsRes, branchesRes, unitsRes, densitiesRes] = await Promise.all([
+            const [productsRes, branchesRes, unitsRes, densitiesRes, activeVersionsRes] = await Promise.all([
                 fetch(
                     `${DIRECTUS_URL}/items/products?filter[isActive][_eq]=true&filter[has_bom][_eq]=true&fields=product_id,product_name,product_code,unit_of_measurement,density_factor,product_brand,product_category&limit=-1&sort=product_name`,
                     { headers, cache: "no-store" }
@@ -130,18 +130,27 @@ export async function GET(req: Request) {
                 fetch(`${DIRECTUS_URL}/items/branches?limit=-1&sort=branch_name`, { headers, cache: "no-store" }),
                 fetch(`${DIRECTUS_URL}/items/units?limit=-1&sort=unit_name`, { headers, cache: "no-store" }),
                 fetch(`${DIRECTUS_URL}/items/density_factors?filter[isActive][_neq]=false&limit=-1&sort=name`, { headers, cache: "no-store" }),
+                fetch(`${DIRECTUS_URL}/items/product_manufacturing_version?filter[status][_eq]=Active&fields=product_id&limit=-1`, { headers, cache: "no-store" }),
             ]);
 
             const rawProducts: DirectusProduct[] = productsRes.ok ? (await productsRes.json()).data || [] : [];
             const rawBranches: DirectusBranch[] = branchesRes.ok ? (await branchesRes.json()).data || [] : [];
             const rawUnits: DirectusUnit[] = unitsRes.ok ? (await unitsRes.json()).data || [] : [];
             const rawDensities: DirectusDensity[] = densitiesRes.ok ? (await densitiesRes.json()).data || [] : [];
+            const rawActiveVersions: Array<{ product_id: number }> = activeVersionsRes.ok ? (await activeVersionsRes.json()).data || [] : [];
+
+            // Set of product IDs that have at least one active BOM version
+            const productsWithActiveBom = new Set<number>(
+                rawActiveVersions.map(v => Number(v.product_id)).filter(id => !isNaN(id) && id > 0)
+            );
 
             const unitMap = new Map<number, string>(
                 rawUnits.map(u => [Number(u.unit_id), u.unit_shortcut || u.unit_name])
             );
 
-            const products = rawProducts.map(p => {
+            const products = rawProducts
+                .filter(p => productsWithActiveBom.has(Number(p.product_id)))
+                .map(p => {
                 const uomId = typeof p.unit_of_measurement === "object" && p.unit_of_measurement !== null
                     ? Number(p.unit_of_measurement.unit_id)
                     : Number(p.unit_of_measurement || 0);

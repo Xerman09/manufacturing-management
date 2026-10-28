@@ -102,12 +102,12 @@ export function useCalculator() {
                     setSelectedVersionId(String(primary.versionId));
                 }
 
-                // Default unit: base unit or product's base unit
-                if (uoms.length > 0) {
+                // Default unit: strictly lock to selected FG product's unit of measurement
+                if (selectedProd?.unitId) {
+                    setSelectedUomId(String(selectedProd.unitId));
+                } else if (uoms.length > 0) {
                     const base = uoms.find((u) => u.isBase) || uoms[0];
                     setSelectedUomId(String(base.unitId));
-                } else if (selectedProd?.unitId) {
-                    setSelectedUomId(String(selectedProd.unitId));
                 }
             } catch (err) {
                 console.error("Error loading product versions or units:", err);
@@ -120,16 +120,12 @@ export function useCalculator() {
         [products]
     );
 
-    // When version changes, if current UOM isn't set, default to version's UOM
+    // When version changes, update selectedVersionId
     const handleVersionChange = useCallback(
         (versionId: string) => {
             setSelectedVersionId(versionId);
-            const found = versions.find((v) => String(v.versionId) === versionId);
-            if (found && found.uomId && !selectedUomId) {
-                setSelectedUomId(String(found.uomId));
-            }
         },
-        [versions, selectedUomId]
+        []
     );
 
     // Calculate action

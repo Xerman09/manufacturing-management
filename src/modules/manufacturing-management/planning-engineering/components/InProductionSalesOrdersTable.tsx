@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Activity, Plus, RefreshCw } from "lucide-react";
+import { Activity, Plus } from "lucide-react";
 import {
     Card,
     CardContent,
@@ -19,13 +19,17 @@ import {
 } from "@/components/ui/table";
 import { SalesOrderDemandGroup, SalesOrderDetail } from "../types";
 import { displayJobOrderStatus } from "../../job-order-status";
-import { canCreateReplacementJobOrder, remainingQuantity } from "../utils/demand-groups";
+import { canCreateReplacementJobOrder, linkedJobOrderQuantityTotals, remainingQuantity, SALES_ORDER_QUANTITY_GUIDANCE } from "../utils/demand-groups";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 import { PlanningPaginationControls, type PlanningPaginationState } from "./PlanningPaginationControls";
 import { PlanningTableSearchBar } from "./PlanningTableSearchBar";
+import { PlanningDataStatus } from "./PlanningDataStatus";
 
 interface InProductionSalesOrdersTableProps {
     loadingOrders: boolean;
     error?: string | null;
+    lastUpdatedAt: string | null;
+    hasBranchSelected: boolean;
     salesOrderGroups: SalesOrderDemandGroup[];
     onRetry: () => void;
     onCreateJobOrder: (detailId: number) => void;
@@ -71,8 +75,8 @@ function ProductionTableSkeleton() {
             </div>
             <div className="hidden 2xl:block space-y-3 p-6">
                 {Array.from({ length: 4 }).map((_, index) => (
-                    <div key={index} className="grid grid-cols-8 gap-4 animate-pulse">
-                        {Array.from({ length: 8 }).map((__, cellIndex) => (
+                    <div key={index} className="grid grid-cols-10 gap-4 animate-pulse">
+                        {Array.from({ length: 10 }).map((__, cellIndex) => (
                             <div key={cellIndex} className="h-10 rounded-md bg-muted" />
                         ))}
                     </div>
@@ -85,6 +89,8 @@ function ProductionTableSkeleton() {
 export function InProductionSalesOrdersTable({
     loadingOrders,
     error,
+    lastUpdatedAt,
+    hasBranchSelected,
     salesOrderGroups,
     onRetry,
     onCreateJobOrder,
@@ -128,6 +134,7 @@ export function InProductionSalesOrdersTable({
                     <CardDescription className="text-sm text-muted-foreground">
                         Monitor Sales Orders in production and create replacement Job Orders for eligible terminated runs.
                     </CardDescription>
+                    <p className="mt-2 text-xs text-muted-foreground">{SALES_ORDER_QUANTITY_GUIDANCE}</p>
                 </div>
             </CardHeader>
             <div className="px-6 pb-4">
@@ -144,41 +151,21 @@ export function InProductionSalesOrdersTable({
                 />
             </div>
             <CardContent className="p-0">
-                {loadingOrders ? (
+                {!hasBranchSelected ? (
+                    <div className="px-6 py-12 text-center text-sm text-muted-foreground">Select a target branch to view branch-scoped production orders.</div>
+                ) : loadingOrders && !lastUpdatedAt ? (
                     <ProductionTableSkeleton />
-                ) : error && salesOrderGroups.length === 0 ? (
-                    <div role="alert" className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-                        <p className="text-sm font-bold text-destructive">Unable to load Sales Orders in production</p>
-                        <p className="max-w-xl text-xs text-muted-foreground">{error}</p>
-                        <Button type="button" variant="outline" size="sm" onClick={onRetry} className="gap-2 font-bold">
-                            <RefreshCw className="h-3.5 w-3.5" />
-                            Retry
-                        </Button>
-                    </div>
-                ) : filteredGroups.length === 0 ? (
-                    <>
-                        {error && (
-                            <div role="status" className="flex items-center justify-between gap-3 border-b px-6 py-3 text-xs text-amber-700 dark:text-amber-400">
-                                <span>{error}</span>
-                                <Button type="button" variant="outline" size="sm" onClick={onRetry} className="shrink-0 gap-2 font-bold">
-                                    <RefreshCw className="h-3.5 w-3.5" /> Retry
-                                </Button>
-                            </div>
-                        )}
-                        <div role="status" className="px-6 py-16 text-center text-xs font-semibold text-muted-foreground">
-                            {searchQuery ? "No In Production Sales Orders match your search." : "No Sales Orders are currently In Production."}
-                        </div>
-                    </>
+                ) : error && !lastUpdatedAt ? (
+                    <PlanningDataStatus label="Sales Orders in production" loading={loadingOrders} error={error} lastUpdatedAt={lastUpdatedAt} onRetry={onRetry} />
                 ) : (
                     <>
-                        {error && (
-                            <div role="status" className="flex items-center justify-between gap-3 border-b px-6 py-3 text-xs text-amber-700 dark:text-amber-400">
-                                <span>{error} Showing the last successfully loaded results.</span>
-                                <Button type="button" variant="outline" size="sm" onClick={onRetry} className="shrink-0 gap-2 font-bold">
-                                    <RefreshCw className="h-3.5 w-3.5" /> Retry
-                                </Button>
+                        <PlanningDataStatus label="Sales Orders in production" loading={loadingOrders} error={error || null} lastUpdatedAt={lastUpdatedAt} onRetry={onRetry} />
+                        {filteredGroups.length === 0 ? (
+                            <div role="status" className="px-6 py-16 text-center text-xs font-semibold text-muted-foreground">
+                                {searchQuery ? "No In Production Sales Orders match your search." : "No Sales Orders are currently In Production."}
                             </div>
-                        )}
+                        ) : (
+                            <>
                         <div className="2xl:hidden max-h-[50vh] space-y-3 overflow-y-auto p-3">
                             {visibleGroups.map((group) => (
                                 <article key={group.order.order_id} className="rounded-lg border bg-card p-3 shadow-sm">
@@ -200,15 +187,17 @@ export function InProductionSalesOrdersTable({
                                     <div className="mt-3 space-y-3">
                                         {group.lines.map((line) => (
                                             <section key={line.detail_id} className="space-y-3 border-t pt-3">
-                                                <div>
+                                                <div className="min-w-0 space-y-2">
                                                     <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Product / BOM Version</div>
-                                                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm font-semibold text-foreground">
-                                                        <span className="break-words">{line.product_id?.product_name || "Unknown product"}</span>
-                                                        <span className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                                                            {line.product_id?.uom || "Pieces"}
-                                                        </span>
+                                                    <div className="space-y-1.5">
+                                                        <div className="break-words text-sm font-semibold leading-snug text-foreground">{line.product_id?.product_name || "Unknown product"}</div>
+                                                        <div>
+                                                            <span className="inline-flex max-w-full whitespace-normal break-words rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-snug text-primary">
+                                                                {getUnitOfMeasureLabel(line.product_id)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="break-words text-[11px] font-medium leading-snug text-primary">BOM version: {line.bom_version_name || "No Version"}</div>
                                                     </div>
-                                                    <div className="text-[11px] font-medium text-primary">BOM version: {line.bom_version_name || "No Version"}</div>
                                                 </div>
 
                                                 <div>
@@ -227,8 +216,9 @@ export function InProductionSalesOrdersTable({
                                                                     </div>
                                                                     <div className="mt-1 flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
                                                                         <span>{displayJobOrderStatus(jobOrder.status)}</span>
-                                                                        <span>{jobOrder.allocatedQuantity.toLocaleString()} allocated</span>
-                                                                        <span>{jobOrder.producedQuantity.toLocaleString()} produced</span>
+                                                                        <span>{jobOrder.allocatedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)} allocated</span>
+                                                                        <span>{jobOrder.producedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)} produced</span>
+                                                                        <span>{jobOrder.qaAcceptedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)} QA accepted</span>
                                                                     </div>
                                                                 </div>
                                                             ))}
@@ -239,15 +229,23 @@ export function InProductionSalesOrdersTable({
                                                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                                                     <div className="rounded-md bg-muted/30 p-2">
                                                         <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Ordered</div>
-                                                        <div className="mt-1 text-xs font-bold text-foreground">{Number(line.ordered_quantity || 0).toLocaleString()} {line.product_id?.uom || "pcs"}</div>
+                                                        <div className="mt-1 text-right text-xs font-bold tabular-nums text-foreground">{Number(line.ordered_quantity || 0).toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
                                                     </div>
                                                     <div className="rounded-md bg-muted/30 p-2">
-                                                        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Planned</div>
-                                                        <div className="mt-1 text-xs font-bold text-amber-700">{Number(line.planned_quantity || 0).toLocaleString()}</div>
+                                                        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Active planned</div>
+                                                        <div className="mt-1 text-right text-xs font-bold tabular-nums text-amber-700">{Number(line.planned_quantity || 0).toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
                                                     </div>
                                                     <div className="rounded-md bg-muted/30 p-2">
-                                                        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Remaining</div>
-                                                        <div className="mt-1 text-xs font-bold text-emerald-700">{remainingQuantity(line).toLocaleString()} {line.product_id?.uom || "pcs"}</div>
+                                                        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Produced</div>
+                                                        <div className="mt-1 text-right text-xs font-bold tabular-nums text-foreground">{linkedJobOrderQuantityTotals(line).producedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
+                                                    </div>
+                                                    <div className="rounded-md bg-muted/30 p-2">
+                                                        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">QA accepted</div>
+                                                        <div className="mt-1 text-right text-xs font-bold tabular-nums text-sky-700">{linkedJobOrderQuantityTotals(line).qaAcceptedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
+                                                    </div>
+                                                    <div className="rounded-md bg-muted/30 p-2">
+                                                        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Remaining to plan</div>
+                                                        <div className="mt-1 text-right text-xs font-bold tabular-nums text-emerald-700">{remainingQuantity(line).toLocaleString()} {getUnitOfMeasureLabel(line.product_id)}</div>
                                                     </div>
                                                 </div>
 
@@ -281,8 +279,10 @@ export function InProductionSalesOrdersTable({
                                     <TableHead className="min-w-[180px] font-bold text-xs">Connected JO</TableHead>
                                     <TableHead className="min-w-[130px] font-bold text-xs">Status</TableHead>
                                     <TableHead className="min-w-[110px] text-right font-bold text-xs">Ordered</TableHead>
-                                    <TableHead className="min-w-[110px] text-right font-bold text-xs">Planned</TableHead>
-                                    <TableHead className="min-w-[115px] text-right font-bold text-xs">Remaining</TableHead>
+                                    <TableHead className="min-w-[120px] text-right font-bold text-xs">Active planned</TableHead>
+                                    <TableHead className="min-w-[110px] text-right font-bold text-xs">Produced</TableHead>
+                                    <TableHead className="min-w-[110px] text-right font-bold text-xs">QA accepted</TableHead>
+                                    <TableHead className="min-w-[130px] text-right font-bold text-xs">Remaining to plan</TableHead>
                                     <TableHead className="min-w-[155px] font-bold text-xs">Actions</TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -300,14 +300,18 @@ export function InProductionSalesOrdersTable({
                                         </TableCell>
                                         <TableCell className="min-w-[240px] py-3 text-xs">
                                             <LineStack lines={group.lines} render={(line) => (
-                                                <div>
-                                                    <div className="flex flex-wrap items-center gap-1.5 font-semibold text-foreground">
-                                                        <span>{line.product_id?.product_name || "Unknown product"}</span>
-                                                        <span className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                                                            {line.product_id?.uom || "Pieces"}
-                                                        </span>
+                                                <div className="min-w-0 space-y-2">
+                                                    <div className="break-words font-semibold leading-snug text-foreground">
+                                                        {line.product_id?.product_name || "Unknown product"}
                                                     </div>
-                                                    <div className="text-[10px] font-medium text-primary">Ver: {line.bom_version_name || "No Version"}</div>
+                                                    <div className="space-y-1.5">
+                                                        <div>
+                                                            <span className="inline-flex max-w-full whitespace-normal break-words rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-snug text-primary">
+                                                                {getUnitOfMeasureLabel(line.product_id)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="break-words text-[10px] font-medium leading-snug text-primary">Ver: {line.bom_version_name || "No Version"}</div>
+                                                    </div>
                                                 </div>
                                             )} />
                                         </TableCell>
@@ -326,8 +330,9 @@ export function InProductionSalesOrdersTable({
                                                             </div>
                                                             <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
                                                                 <span>{displayJobOrderStatus(jobOrder.status)}</span>
-                                                                <span>· {jobOrder.allocatedQuantity.toLocaleString()} allocated</span>
-                                                                <span>· {jobOrder.producedQuantity.toLocaleString()} produced</span>
+                                                                <span>· {jobOrder.allocatedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)} allocated</span>
+                                                                <span>· {jobOrder.producedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)} produced</span>
+                                                                <span>· {jobOrder.qaAcceptedQuantity.toLocaleString()} {getUnitOfMeasureLabel(line.product_id)} QA accepted</span>
                                                             </div>
                                                         </div>
                                                     ))}
@@ -341,15 +346,21 @@ export function InProductionSalesOrdersTable({
                                         </TableCell>
                                         <TableCell className="min-w-[110px] py-3 text-right text-xs font-bold">
                                             <LineStack lines={group.lines} render={(line) => (
-                                                <span>{Number(line.ordered_quantity || 0).toLocaleString()} <span className="text-[10px] font-normal lowercase text-muted-foreground">{line.product_id?.uom || "pcs"}</span></span>
+                                                <span className="tabular-nums">{Number(line.ordered_quantity || 0).toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{getUnitOfMeasureLabel(line.product_id)}</span></span>
                                             )} />
                                         </TableCell>
-                                        <TableCell className="min-w-[110px] py-3 text-right text-xs font-semibold text-amber-700">
-                                            <LineStack lines={group.lines} render={(line) => <span>{Number(line.planned_quantity || 0).toLocaleString()}</span>} />
+                                        <TableCell className="min-w-[120px] py-3 text-right text-xs font-semibold text-amber-700">
+                                            <LineStack lines={group.lines} render={(line) => <span className="tabular-nums">{Number(line.planned_quantity || 0).toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{getUnitOfMeasureLabel(line.product_id)}</span></span>} />
                                         </TableCell>
-                                        <TableCell className="min-w-[115px] py-3 text-right text-xs font-bold text-emerald-700">
+                                        <TableCell className="min-w-[110px] py-3 text-right text-xs font-semibold text-foreground">
+                                            <LineStack lines={group.lines} render={(line) => <span className="tabular-nums">{linkedJobOrderQuantityTotals(line).producedQuantity.toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{getUnitOfMeasureLabel(line.product_id)}</span></span>} />
+                                        </TableCell>
+                                        <TableCell className="min-w-[110px] py-3 text-right text-xs font-semibold text-sky-700">
+                                            <LineStack lines={group.lines} render={(line) => <span className="tabular-nums">{linkedJobOrderQuantityTotals(line).qaAcceptedQuantity.toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{getUnitOfMeasureLabel(line.product_id)}</span></span>} />
+                                        </TableCell>
+                                        <TableCell className="min-w-[130px] py-3 text-right text-xs font-bold text-emerald-700">
                                             <LineStack lines={group.lines} render={(line) => (
-                                                <span>{remainingQuantity(line).toLocaleString()} <span className="text-[10px] font-normal lowercase text-muted-foreground">{line.product_id?.uom || "pcs"}</span></span>
+                                                <span className="tabular-nums">{remainingQuantity(line).toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">{getUnitOfMeasureLabel(line.product_id)}</span></span>
                                             )} />
                                         </TableCell>
                                         <TableCell className="min-w-[155px] py-3 text-xs">
@@ -378,6 +389,8 @@ export function InProductionSalesOrdersTable({
                             totalItems={filteredGroups.length}
                             itemLabel="Sales Orders"
                         />
+                            </>
+                        )}
                     </>
                 )}
             </CardContent>

@@ -24,6 +24,8 @@ export interface PriceType {
 
 export interface ProductType {
     id: number;
+    product_type_id?: number;
+    type_id?: number;
     name?: string;
     type_name?: string;
     default_purchase_price_type_id?: number | null;
@@ -33,7 +35,7 @@ export interface Product {
     product_id: number;
     product_code: string;
     product_name: string;
-    product_type?: number | string | ProductType | { id?: number; name?: string; type_name?: string } | null;
+    product_type?: number | string | ProductType | { id?: number; product_type_id?: number; type_id?: number; name?: string; type_name?: string } | null;
     product_type_id?: number | null;
     product_shelf_life?: number;
     cost_per_unit?: number;
@@ -68,6 +70,14 @@ export interface MmInventoryLot {
     source_type?: string | null;
     source_reference?: string | null;
     created_by?: number | string | null;
+}
+
+export interface MmInventoryBatchOption extends Omit<MmInventoryLot, "inventory_lot_id"> {
+    batch_kind: "MASTER" | "DRAFT";
+    inventory_lot_id?: number;
+    draft_batch_id?: number;
+    id?: number;
+    is_draft?: boolean;
 }
 
 export interface MmPhysicalInventoryDetail {

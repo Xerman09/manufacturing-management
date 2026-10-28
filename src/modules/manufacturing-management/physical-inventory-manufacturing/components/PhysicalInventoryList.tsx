@@ -23,6 +23,9 @@ import {
     GitCompare,
     Printer,
 } from "lucide-react";
+import { formatQty } from "../utils/number-format";
+
+export { formatQty };
 
 interface Props {
     sheets: MmPhysicalInventorySheet[];
@@ -38,13 +41,6 @@ interface Props {
     onCommit?: (sheet: MmPhysicalInventorySheet) => void;
     onCancel: (sheet: MmPhysicalInventorySheet) => void;
     onPrint?: (sheet: MmPhysicalInventorySheet) => void;
-}
-
-export function formatQty(val: number | string | null | undefined): string {
-    const num = Number(val || 0);
-    if (!Number.isFinite(num)) return "0";
-    if (Number.isInteger(num)) return num.toLocaleString("en-US");
-    return parseFloat(num.toFixed(6)).toString();
 }
 
 export function formatMoney(val: number | string | null | undefined): string {

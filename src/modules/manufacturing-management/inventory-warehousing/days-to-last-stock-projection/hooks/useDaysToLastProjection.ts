@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import {
     StockProjectionItem,
@@ -30,7 +30,7 @@ const DEFAULT_KPIS: StockProjectionKpis = {
 };
 
 export function useDaysToLastProjection() {
-    const [items, setItems] = useState<StockProjectionItem[]>([]);
+    const [rawItems, setRawItems] = useState<StockProjectionItem[]>([]);
     const [kpis, setKpis] = useState<StockProjectionKpis>(DEFAULT_KPIS);
     const [branches, setBranches] = useState<Array<{ id: number; branch_name: string; branch_code: string }>>([]);
     const [productTypes, setProductTypes] = useState<Array<{ id: number; name: string }>>([]);
@@ -39,12 +39,13 @@ export function useDaysToLastProjection() {
     const [selectedMaterial, setSelectedMaterial] = useState<StockProjectionItem | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
+    // Fetch from backend when server-side parameters change (branch, window months, working days)
     const loadData = useCallback(async (currentFilters: StockProjectionFilters) => {
         setLoading(true);
         try {
             const res = await fetchStockProjections(currentFilters);
             if (res.success) {
-                setItems(res.data);
+                setRawItems(res.data);
                 setKpis(res.kpis);
                 if (res.branches?.length) setBranches(res.branches);
                 if (res.product_types?.length) setProductTypes(res.product_types);
@@ -60,9 +61,58 @@ export function useDaysToLastProjection() {
         }
     }, []);
 
+    const { branch_id, assessment_window_months, working_days_per_month } = filters;
     useEffect(() => {
-        loadData(filters);
-    }, [loadData, filters]);
+        loadData({
+            ...DEFAULT_FILTERS,
+            branch_id,
+            assessment_window_months,
+            working_days_per_month,
+        });
+    }, [loadData, branch_id, assessment_window_months, working_days_per_month]);
+
+    // Apply client-side filters instantly without refetching for fast response
+    const filteredItems = useMemo(() => {
+        return rawItems.filter((item) => {
+            // Status filter
+            if (filters.status !== "ALL" && item.status !== filters.status) {
+                return false;
+            }
+
+            // Product type filter (match by name or ID)
+            if (filters.product_type !== "ALL") {
+                const target = filters.product_type.trim().toLowerCase();
+                const itemTypeName = (item.product_type_name || "").trim().toLowerCase();
+                const itemTypeIdStr = item.product_type_id ? String(item.product_type_id) : "";
+
+                const matchesName =
+                    itemTypeName === target ||
+                    itemTypeName.replace(/s$/, "") === target.replace(/s$/, ""); // handle raw material vs raw materials
+                const matchesId = itemTypeIdStr === target;
+
+                if (!matchesName && !matchesId) {
+                    return false;
+                }
+            }
+
+            // Search filter (Code, Name, Category)
+            if (filters.search.trim()) {
+                const q = filters.search.toLowerCase().trim();
+                const matches =
+                    item.product_name.toLowerCase().includes(q) ||
+                    item.product_code.toLowerCase().includes(q) ||
+                    (item.category_name && item.category_name.toLowerCase().includes(q));
+                if (!matches) return false;
+            }
+
+            // Only show with available stock toggle
+            if (filters.only_with_available_stock && item.available_stock <= 0) {
+                return false;
+            }
+
+            return true;
+        });
+    }, [rawItems, filters.status, filters.product_type, filters.search, filters.only_with_available_stock]);
 
     const handleFilterChange = useCallback(
         <K extends keyof StockProjectionFilters>(
@@ -92,7 +142,7 @@ export function useDaysToLastProjection() {
     }, []);
 
     const handleExport = useCallback(() => {
-        if (items.length === 0) {
+        if (filteredItems.length === 0) {
             toast.warning("No projection data available to export");
             return;
         }
@@ -113,7 +163,7 @@ export function useDaysToLastProjection() {
             "Status",
         ];
 
-        const rows = items.map((i) => [
+        const rows = filteredItems.map((i) => [
             `"${i.product_code}"`,
             `"${i.product_name}"`,
             `"${i.category_name || ""}"`,
@@ -139,10 +189,11 @@ export function useDaysToLastProjection() {
         link.click();
         document.body.removeChild(link);
         toast.success("Stock longevity projection report exported");
-    }, [items]);
+    }, [filteredItems]);
 
     return {
-        items,
+        items: filteredItems,
+        totalEvaluatedCount: rawItems.length,
         kpis,
         branches,
         productTypes,

@@ -1,35 +1,48 @@
 "use client";
 
 import React, { useState } from "react";
-import { Product, MmLot, MmInventoryLot } from "../types";
+import { Product, ProductType, MmLot, MmInventoryBatchOption } from "../types";
 import { createMmDraftBatch } from "../services/physical-inventory-manufacturing-api";
 import { X, AlertTriangle } from "lucide-react";
+import { matchesProductTypeScope, normalizeProductTypeId } from "../utils/product-scope";
 
 interface Props {
     isOpen: boolean;
     branchId: number;
+    physicalInventoryId: number;
+    selectedProductTypeId?: number | null;
+    productTypes?: ProductType[];
     lotId: number;
     productId: number;
     lots: MmLot[];
     products: Product[];
-    piNo?: string;
     onClose: () => void;
-    onBatchCreated: (batch: MmInventoryLot) => void;
+    onBatchCreated: (batch: MmInventoryBatchOption) => void;
 }
 
 export default function CreateBatchModal({
     isOpen,
     branchId,
+    physicalInventoryId,
+    selectedProductTypeId,
+    productTypes = [],
     lotId,
     productId,
     lots,
     products,
-    piNo,
     onClose,
     onBatchCreated,
 }: Props) {
     const targetLot = lots.find((l) => l.lot_id === lotId);
     const targetProduct = products.find((p) => p.product_id === productId);
+    const scopeId = normalizeProductTypeId(selectedProductTypeId);
+    const scopeType = productTypes.find((type) => normalizeProductTypeId(type) === scopeId);
+    const scopeName = scopeType?.name || scopeType?.type_name || "";
+    const targetProductType = targetProduct
+        ? normalizeProductTypeId(targetProduct.product_type_id) > 0 ? targetProduct.product_type_id : targetProduct.product_type
+        : null;
+    const targetProductInScope = scopeId <= 0
+        || Boolean(targetProduct && matchesProductTypeScope(scopeId, targetProductType, scopeName));
 
     const [batchNo, setBatchNo] = useState("");
     const [mfgDate, setMfgDate] = useState("");
@@ -90,6 +103,14 @@ export default function CreateBatchModal({
             setError("Batch number is required.");
             return;
         }
+        if (!physicalInventoryId || physicalInventoryId <= 0) {
+            setError("Save the Physical Inventory sheet before creating a batch.");
+            return;
+        }
+        if (!targetProductInScope) {
+            setError(`This product no longer matches the ${scopeName || "selected product type"} scope. Close this dialog and choose an eligible product.`);
+            return;
+        }
 
         if (shelfLife > 0 && !expDate) {
             setError(`Expiration date is required because product '${targetProduct.product_name}' has a shelf life of ${shelfLife} days.`);
@@ -106,6 +127,7 @@ export default function CreateBatchModal({
         try {
             setSubmitting(true);
             const createdDraft = await createMmDraftBatch({
+                physical_inventory_id: physicalInventoryId,
                 lot_id: lotId,
                 branch_id: branchId,
                 product_id: productId,
@@ -113,7 +135,6 @@ export default function CreateBatchModal({
                 manufacturing_date: mfgDate || undefined,
                 expiry_date: expDate || undefined,
                 unit_cost: costNum,
-                source_reference: piNo || undefined,
             });
             onBatchCreated(createdDraft);
             onClose();
@@ -142,12 +163,23 @@ export default function CreateBatchModal({
                             <span>{error}</span>
                         </div>
                     )}
+                    {!targetProductInScope && (
+                        <div role="alert" className="flex items-center gap-2 p-3 text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-lg dark:bg-rose-950 dark:text-rose-300">
+                            <AlertTriangle className="h-4 w-4 shrink-0" />
+                            <span>This product is outside the current {scopeName || "product type"} scope. Close this dialog and choose an eligible product.</span>
+                        </div>
+                    )}
 
                     <div className="bg-muted/30 p-3 rounded-lg border text-xs space-y-1">
                         <div><span className="font-semibold text-muted-foreground">Target Lot:</span> {targetLot.lot_name}</div>
                         <div><span className="font-semibold text-muted-foreground">Product:</span> [{targetProduct.product_code}] {targetProduct.product_name}</div>
+                        {scopeId > 0 && <div><span className="font-semibold text-muted-foreground">Required Product Type:</span> {scopeName || `Type #${scopeId}`}</div>}
                         <div><span className="font-semibold text-muted-foreground">Shelf Life:</span> {shelfLife > 0 ? `${shelfLife} Days (Expiration Required)` : "Non-expiring item"}</div>
                     </div>
+
+                    <p className="text-xs text-muted-foreground">
+                        This batch is staged for the current physical inventory audit and does not enter active inventory until the sheet is committed.
+                    </p>
 
                     <div>
                         <label className="block text-xs font-semibold text-muted-foreground mb-1">Batch Number *</label>
@@ -197,7 +229,7 @@ export default function CreateBatchModal({
                         </button>
                         <button
                             type="submit"
-                            disabled={submitting}
+                            disabled={submitting || !targetProductInScope}
                             className="px-4 py-2 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 rounded-lg transition-colors shadow-xs"
                         >
                             {submitting ? "Creating Batch..." : "Create Batch"}
