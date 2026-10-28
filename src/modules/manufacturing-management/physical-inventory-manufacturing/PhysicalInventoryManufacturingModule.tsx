@@ -110,15 +110,17 @@ export default function PhysicalInventoryManufacturingModule() {
     }, [activeSheet]);
 
     const handleApplyOffsetting = async (newPairings: MmOffsetPairing[]) => {
-        setOffsetPairings(newPairings);
         if (activeSheet && activeSheet.physical_inventory_id) {
             try {
-                await savePhysicalInventoryOffsetPairings(activeSheet.physical_inventory_id, newPairings);
+                const saved = await savePhysicalInventoryOffsetPairings(activeSheet.physical_inventory_id, newPairings);
+                setOffsetPairings(saved);
+                setActiveSheet(prev => prev ? { ...prev, offset_pairings: saved } : null);
                 showToast(`Applied ${newPairings.length} offset pairing(s) to physical inventory count sheet.`);
             } catch (err) {
                 console.warn("Failed to persist offset pairings to server:", err);
+                throw err;
             }
-        }
+        } else throw new Error("Save the audit record before linking offset pairs.");
     };
 
     // Loading & Toast notification states
@@ -616,6 +618,7 @@ export default function PhysicalInventoryManufacturingModule() {
 
             {/* Manufacturing Offsetting Modal */}
             <ManufacturingOffsettingModal
+                key={`${activeSheet?.physical_inventory_id}-${isOffsettingModalOpen}`}
                 isOpen={isOffsettingModalOpen}
                 onClose={() => setIsOffsettingModalOpen(false)}
                 lineItems={activeSheet?.details || []}

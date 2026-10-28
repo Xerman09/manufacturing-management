@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
 import { getJwtSubFromReq } from "@/lib/directus";
 import { parseBooleanFlag, extractId, roundQty, recalculateHeaderTotals } from "../../helper";
+import { normalizeOffsetPairings, OffsetPairingError, readOffsetPairings, writeOffsetPairings } from "@/modules/manufacturing-management/physical-inventory-offsetting/utils/offset-pairings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,6 +53,8 @@ export async function POST(request: NextRequest, context: RouteParams) {
         if (details.length === 0) {
             return NextResponse.json({ success: false, error: "Cannot commit a Physical Inventory sheet with no detail rows." }, { status: 400 });
         }
+        const storedPairings = readOffsetPairings(sheet.remarks);
+        normalizeOffsetPairings(storedPairings, details);
 
         // 4. Validate all line items & promote batch status
         for (const d of details) {
@@ -144,14 +147,7 @@ export async function POST(request: NextRequest, context: RouteParams) {
         const reqBody = await request.json().catch(() => ({}));
         const reqRemarks = reqBody?.remarks ? String(reqBody.remarks).trim() : null;
 
-        let finalRemarks = sheet.remarks ? String(sheet.remarks) : "";
-        if (reqRemarks) {
-            let offsetPart = "";
-            if (finalRemarks.includes("__OFFSET_DATA__:")) {
-                offsetPart = finalRemarks.substring(finalRemarks.indexOf("__OFFSET_DATA__:"));
-            }
-            finalRemarks = offsetPart ? `${reqRemarks}\n${offsetPart}` : reqRemarks;
-        }
+        const finalRemarks = writeOffsetPairings(reqRemarks || sheet.remarks, storedPairings);
 
         // 8. Execute Commit Update
         const commitPayload: Record<string, unknown> = {
@@ -185,6 +181,6 @@ export async function POST(request: NextRequest, context: RouteParams) {
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : "Internal Server Error";
         console.error("Commit API error:", error);
-        return NextResponse.json({ success: false, error: msg }, { status: 500 });
+        return NextResponse.json({ success: false, error: msg }, { status: error instanceof OffsetPairingError ? error.status : 500 });
     }
 }

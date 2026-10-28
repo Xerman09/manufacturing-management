@@ -12,6 +12,7 @@ import {
     Unit,
     PhysicalInventoryFilters,
 } from "../types";
+import { saveOffsettingPairings } from "../../physical-inventory-offsetting/services/offsetting-api";
 
 const API_BASE = "/api/manufacturing/physical-inventory-manufacturing";
 
@@ -380,20 +381,6 @@ export async function savePhysicalInventoryOffsetPairings(
     piId: number,
     pairings: MmOffsetPairing[]
 ): Promise<MmOffsetPairing[]> {
-    try {
-        const res = await fetch(`${API_BASE}/${piId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ offset_pairings: pairings }),
-        });
-        if (res.ok) {
-            const json = await res.json();
-            return json.data?.offset_pairings || pairings;
-        }
-        return pairings;
-    } catch (e) {
-        console.error("Failed to save offset pairings to backend:", e);
-        return pairings;
-    }
+    return saveOffsettingPairings(piId, pairings);
 }
 
