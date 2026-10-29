@@ -315,8 +315,8 @@ export const LotTransferApprovalModule: React.FC<LotTransferApprovalModuleProps>
               <AnimatePresence mode="popLayout" initial={false}>
                 {(transfers || []).map((item, idx) => {
                   const branchDisplay = item.branchName && item.branchName !== "-" ? item.branchName : item.branchId ? `Branch #${item.branchId}` : "-";
-                  const sourceLotDisplay = item.sourceLotName || `Lot #${item.sourceLotId}`;
-                  const targetLotDisplay = item.targetLotName || `Lot #${item.targetLotId}`;
+                  const sourceLotDisplay = item.sourceLotName && item.sourceLotName !== "-" ? item.sourceLotName : "-";
+                  const targetLotDisplay = item.targetLotName && item.targetLotName !== "-" ? item.targetLotName : "-";
                   const lineCount = item.lineCount || item.details?.length || 1;
                   const requestedByDisplay = item.requestedByName || "-";
 
@@ -405,8 +405,8 @@ export const LotTransferApprovalModule: React.FC<LotTransferApprovalModuleProps>
                 <TransferStatusBadge status={selectedTransfer.status} />
               </div>
               <DialogDescription>
-                Transfer from <strong className="text-foreground">{selectedTransfer.sourceLotName || `Lot #${selectedTransfer.sourceLotId}`}</strong> to{" "}
-                <strong className="text-foreground">{selectedTransfer.targetLotName || `Lot #${selectedTransfer.targetLotId}`}</strong> on {selectedTransfer.transferDate}.
+                Transfer from <strong className="text-foreground">{selectedTransfer.sourceLotName || "-"}</strong> to{" "}
+                <strong className="text-foreground">{selectedTransfer.targetLotName || "-"}</strong> on {selectedTransfer.transferDate}.
               </DialogDescription>
             </DialogHeader>
 
@@ -444,7 +444,7 @@ export const LotTransferApprovalModule: React.FC<LotTransferApprovalModuleProps>
                       const primaryTitle = pDesc || pName || (d.productId ? `Product #${d.productId}` : "-");
                       const mfgDate = d.sourceManufacturingDate ? String(d.sourceManufacturingDate).slice(0, 10) : "-";
                       const expDate = d.sourceExpiryDate ? String(d.sourceExpiryDate).slice(0, 10) : "-";
-                      const lineRemarks = d.lineRemarks || selectedTransfer.reason || "-";
+                      const lineRemarks = d.lineRemarks || "-";
                       return (
                         <motion.tr
                           key={d.detailId || i}
@@ -497,20 +497,7 @@ export const LotTransferApprovalModule: React.FC<LotTransferApprovalModuleProps>
                 </Table>
               </div>
 
-              {/* QA Evidence / Approval Remarks */}
-              {selectedTransfer.status === "Submitted" && (
-                <div className="space-y-1.5 p-4 border rounded-xl bg-card">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    QA Evidence / Approval Remarks (Optional)
-                  </label>
-                  <Input
-                    value={qaEvidence}
-                    onChange={(e) => setQaEvidence(e.target.value)}
-                    placeholder="e.g. Verified COA and quarantine clearance passed"
-                    className="h-9 text-sm"
-                  />
-                </div>
-              )}
+ 
 
               {selectedTransfer.rejectionReason && (
                 <div className="p-3 border border-destructive/30 rounded-lg bg-destructive/10 text-destructive text-sm space-y-1">

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+ 
 import {
   Table,
   TableBody,
@@ -43,11 +43,10 @@ import {
   Search,
   Eye,
   History,
-  Activity,
-  ArrowRight,
-  Building2,
-  RotateCcw,
   Printer,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { TransferStatusBadge } from "./components/TransferStatusBadge";
@@ -102,6 +101,9 @@ const formatAuditTimestamp = (val?: string | null): string => {
   return "-";
 };
 
+type SortField = "requestNo" | "transferDate" | "status" | "sourceLot" | "targetLot" | "quantity";
+type SortDirection = "asc" | "desc";
+
 interface LotTransferSummaryModuleProps {
   userBranchId?: number | null;
   transferId?: number;
@@ -118,8 +120,40 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
   const [auditLoadingId, setAuditLoadingId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [filterSourceLotId, setFilterSourceLotId] = useState<number | "ALL">("ALL");
+  const [filterTargetLotId, setFilterTargetLotId] = useState<number | "ALL">("ALL");
+  const [datePreset, setDatePreset] = useState<"ALL" | "TODAY" | "THIS_WEEK" | "THIS_MONTH" | "CUSTOM">("ALL");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
+
+  // Sort state
+  const [sortField, setSortField] = useState<SortField | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      if (sortDirection === "asc") {
+        setSortDirection("desc");
+      } else {
+        setSortField(null);
+        setSortDirection("asc");
+      }
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };
+
+  const renderSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="w-3 h-3 ml-1 inline text-muted-foreground/40" />;
+    }
+    return sortDirection === "asc" ? (
+      <ArrowUp className="w-3 h-3 ml-1 inline text-primary" />
+    ) : (
+      <ArrowDown className="w-3 h-3 ml-1 inline text-primary" />
+    );
+  };
 
   // Load active branches
   useEffect(() => {
@@ -143,17 +177,95 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
     ];
   }, [activeBranches]);
 
+  // Source & Target Lot options derived dynamically from transfers
+  const sourceLotFilterOptions: Option[] = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const t of transfers) {
+      if (t.sourceLotId && t.sourceLotName && t.sourceLotName !== "-") {
+        map.set(t.sourceLotId, t.sourceLotName);
+      }
+    }
+    const list = Array.from(map.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([id, name]) => ({
+        value: id,
+        label: name,
+      }));
+    return [
+      { value: "ALL", label: "All Source Lots" },
+      ...list,
+    ];
+  }, [transfers]);
+
+  const targetLotFilterOptions: Option[] = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const t of transfers) {
+      if (t.targetLotId && t.targetLotName && t.targetLotName !== "-") {
+        map.set(t.targetLotId, t.targetLotName);
+      }
+    }
+    const list = Array.from(map.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([id, name]) => ({
+        value: id,
+        label: name,
+      }));
+    return [
+      { value: "ALL", label: "All Target Lots" },
+      ...list,
+    ];
+  }, [transfers]);
+
+  const isDateInRange = useCallback(
+    (dateStr?: string | null): boolean => {
+      if (datePreset === "ALL") return true;
+      if (!dateStr) return false;
+      const d = String(dateStr).slice(0, 10);
+      if (!d || d.length < 10) return false;
+
+      const now = new Date();
+      const todayStr = now.toLocaleDateString("sv-SE", { timeZone: "Asia/Manila" });
+
+      if (datePreset === "TODAY") {
+        return d === todayStr;
+      }
+
+      if (datePreset === "THIS_WEEK") {
+        const parts = todayStr.split("-").map(Number);
+        const curr = new Date(parts[0], parts[1] - 1, parts[2]);
+        const day = curr.getDay();
+        const diffToMon = (day === 0 ? -6 : 1) - day;
+        const monday = new Date(curr);
+        monday.setDate(curr.getDate() + diffToMon);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        const monStr = monday.toLocaleDateString("sv-SE");
+        const sunStr = sunday.toLocaleDateString("sv-SE");
+        return d >= monStr && d <= sunStr;
+      }
+
+      if (datePreset === "THIS_MONTH") {
+        const monthPrefix = todayStr.slice(0, 7);
+        return d.startsWith(monthPrefix);
+      }
+
+      if (datePreset === "CUSTOM") {
+        if (dateFrom && d < dateFrom) return false;
+        if (dateTo && d > dateTo) return false;
+        return true;
+      }
+
+      return true;
+    },
+    [datePreset, dateFrom, dateTo]
+  );
+
   // Audit and movement details modal
   const [selectedTransfer, setSelectedTransfer] = useState<LotTransfer | null>(null);
   const [statusHistory, setStatusHistory] = useState<LotTransferStatusHistory[]>([]);
-  const [movements, setMovements] = useState<LotTransferMovementHistory[]>([]);
+  const [, setMovements] = useState<LotTransferMovementHistory[]>([]);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [loadingAudit, setLoadingAudit] = useState(false);
-
-  // Reversal state for posted transfers
-  const [reverseModalOpen, setReverseModalOpen] = useState(false);
-  const [reversalReason, setReversalReason] = useState("");
-  const [reversalLoading, setReversalLoading] = useState(false);
 
   // Printable slip modal state
   const [printTransfer, setPrintTransfer] = useState<LotTransfer | null>(null);
@@ -180,18 +292,16 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
   }, []);
 
   const loadTransfers = useCallback(async () => {
-    if (filterBranchId === null) {
-      setTransfers([]);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     try {
       const filter: Parameters<typeof lotTransferService.listTransfers>[0] = {
-        branchId: filterBranchId === "all" ? undefined : filterBranchId,
+        branchId:
+          filterBranchId && filterBranchId !== "all" && Number(filterBranchId) > 0
+            ? Number(filterBranchId)
+            : undefined,
         search: search.trim() || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
+        dateFrom: datePreset === "CUSTOM" ? dateFrom || undefined : undefined,
+        dateTo: datePreset === "CUSTOM" ? dateTo || undefined : undefined,
       };
       if (statusFilter !== "ALL") {
         filter.status = statusFilter as LotTransferStatus;
@@ -203,11 +313,58 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
     } finally {
       setLoading(false);
     }
-  }, [filterBranchId, search, statusFilter, dateFrom, dateTo]);
+  }, [filterBranchId, search, statusFilter, datePreset, dateFrom, dateTo]);
 
   useEffect(() => {
     loadTransfers();
   }, [loadTransfers]);
+
+  const filteredTransfers = useMemo(() => {
+    return transfers.filter((t) => {
+      if (filterSourceLotId !== "ALL" && t.sourceLotId !== filterSourceLotId) {
+        return false;
+      }
+      if (filterTargetLotId !== "ALL" && t.targetLotId !== filterTargetLotId) {
+        return false;
+      }
+      if (!isDateInRange(t.transferDate)) {
+        return false;
+      }
+      return true;
+    });
+  }, [transfers, filterSourceLotId, filterTargetLotId, isDateInRange]);
+
+  const displayedTransfers = useMemo(() => {
+    if (!sortField) return filteredTransfers;
+    return [...filteredTransfers].sort((a, b) => {
+      let aVal: string | number = "";
+      let bVal: string | number = "";
+      if (sortField === "requestNo") {
+        aVal = a.requestNo || "";
+        bVal = b.requestNo || "";
+      } else if (sortField === "transferDate") {
+        aVal = a.transferDate || "";
+        bVal = b.transferDate || "";
+      } else if (sortField === "status") {
+        aVal = a.status || "";
+        bVal = b.status || "";
+      } else if (sortField === "sourceLot") {
+        aVal = a.sourceLotName && a.sourceLotName !== "-" ? a.sourceLotName : "";
+        bVal = b.sourceLotName && b.sourceLotName !== "-" ? b.sourceLotName : "";
+      } else if (sortField === "targetLot") {
+        aVal = a.targetLotName && a.targetLotName !== "-" ? a.targetLotName : "";
+        bVal = b.targetLotName && b.targetLotName !== "-" ? b.targetLotName : "";
+      } else if (sortField === "quantity") {
+        aVal = a.quantity || 0;
+        bVal = b.quantity || 0;
+      }
+      if (typeof aVal === "number" && typeof bVal === "number") {
+        return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
+      }
+      const cmp = String(aVal).localeCompare(String(bVal));
+      return sortDirection === "asc" ? cmp : -cmp;
+    });
+  }, [filteredTransfers, sortField, sortDirection]);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -216,20 +373,43 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
   // Auto-reset to page 1 on filter/search change
   useEffect(() => {
     setCurrentPage(1);
-  }, [filterBranchId, search, statusFilter, dateFrom, dateTo]);
+  }, [filterBranchId, search, statusFilter, filterSourceLotId, filterTargetLotId, datePreset, dateFrom, dateTo, sortField, sortDirection]);
 
-  const totalItems = transfers.length;
+  const totalItems = displayedTransfers.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
 
   const paginatedTransfers = useMemo(() => {
     const startIndex = (safeCurrentPage - 1) * itemsPerPage;
-    return transfers.slice(startIndex, startIndex + itemsPerPage);
-  }, [transfers, safeCurrentPage, itemsPerPage]);
+    return displayedTransfers.slice(startIndex, startIndex + itemsPerPage);
+  }, [displayedTransfers, safeCurrentPage, itemsPerPage]);
 
   const listAnimKey = useMemo(() => {
-    return `${filterBranchId ?? "none"}-${statusFilter}-${search}-${dateFrom}-${dateTo}-${safeCurrentPage}`;
-  }, [filterBranchId, statusFilter, search, dateFrom, dateTo, safeCurrentPage]);
+    return `${filterBranchId ?? "none"}-${filterSourceLotId}-${filterTargetLotId}-${statusFilter}-${datePreset}-${search}-${sortField}-${sortDirection}-${safeCurrentPage}`;
+  }, [filterBranchId, filterSourceLotId, filterTargetLotId, statusFilter, datePreset, search, sortField, sortDirection, safeCurrentPage]);
+
+  const hasActiveFilters =
+    (filterBranchId !== null && filterBranchId !== "all" && Number(filterBranchId) !== 0) ||
+    filterSourceLotId !== "ALL" ||
+    filterTargetLotId !== "ALL" ||
+    datePreset !== "ALL" ||
+    dateFrom !== "" ||
+    dateTo !== "" ||
+    statusFilter !== "ALL" ||
+    search !== "";
+
+  const resetFilters = () => {
+    setFilterBranchId(null);
+    setFilterSourceLotId("ALL");
+    setFilterTargetLotId("ALL");
+    setDatePreset("ALL");
+    setDateFrom("");
+    setDateTo("");
+    setStatusFilter("ALL");
+    setSearch("");
+    setSortField(null);
+    setSortDirection("asc");
+  };
 
   const handleOpenDetail = useCallback(async (item: LotTransfer) => {
     setAuditLoadingId(item.id);
@@ -266,25 +446,6 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
     }
   }, [transferId, handleOpenDetail]);
 
-  const handleConfirmReversal = async () => {
-    if (!selectedTransfer || !reversalReason.trim()) {
-      toast.error("Please provide a reason for reversing this transfer.");
-      return;
-    }
-    setReversalLoading(true);
-    try {
-      await lotTransferService.reverseTransfer(selectedTransfer.id, reversalReason.trim());
-      setReverseModalOpen(false);
-      setDetailModalOpen(false);
-      setReversalReason("");
-      loadTransfers();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to reverse lot transfer";
-      toast.error(msg);
-    } finally {
-      setReversalLoading(false);
-    }
-  };
 
   return (
     <div className="flex-1 min-h-0 flex flex-col p-4 space-y-4 max-w-7xl mx-auto w-full">
@@ -299,87 +460,156 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
             Full audit register of all manufacturing lot transfers, lifecycle transitions, and stock movements.
           </p>
         </div>
+      </div>
 
-        <div className="flex items-center gap-2">
-          <motion.div whileTap={{ scale: 0.95 }}>
+      {/* Search & Filter Bar */}
+      <div className="flex flex-col gap-2.5">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Active Branch Filter */}
+          <div className="w-56 shrink-0">
+            <SearchableSelect
+              options={[
+                { value: "all", label: "All Active Branches" },
+                ...branchOptions.filter((b) => b.value !== "all"),
+              ]}
+              value={filterBranchId || "all"}
+              onChange={(val) => {
+                if (val === "all" || val === 0 || val === "0") {
+                  setFilterBranchId("all");
+                } else {
+                  const num = Number(val);
+                  setFilterBranchId(Number.isNaN(num) || num <= 0 ? null : num);
+                }
+              }}
+              placeholder="Select a branch..."
+              triggerClassName="h-9"
+            />
+          </div>
+
+          {/* Source Lot Filter */}
+          <div className="w-48 shrink-0">
+            <SearchableSelect
+              options={sourceLotFilterOptions}
+              value={filterSourceLotId}
+              onChange={(val) => {
+                if (val === "ALL") {
+                  setFilterSourceLotId("ALL");
+                } else {
+                  const num = Number(val);
+                  setFilterSourceLotId(Number.isNaN(num) ? "ALL" : num);
+                }
+              }}
+              placeholder="All Source Lots"
+              triggerClassName="h-9"
+            />
+          </div>
+
+          {/* Target Lot Filter */}
+          <div className="w-48 shrink-0">
+            <SearchableSelect
+              options={targetLotFilterOptions}
+              value={filterTargetLotId}
+              onChange={(val) => {
+                if (val === "ALL") {
+                  setFilterTargetLotId("ALL");
+                } else {
+                  const num = Number(val);
+                  setFilterTargetLotId(Number.isNaN(num) ? "ALL" : num);
+                }
+              }}
+              placeholder="All Target Lots"
+              triggerClassName="h-9"
+            />
+          </div>
+
+          {/* Date Range Preset Selector */}
+          <div className="w-36 shrink-0">
+            <select
+              value={datePreset}
+              onChange={(e) => setDatePreset(e.target.value as typeof datePreset)}
+              className="w-full h-9 px-3 border rounded-md text-xs bg-background font-medium focus:ring-1 focus:ring-primary focus:outline-none"
+              title="Filter by Transfer Date"
+            >
+              <option value="ALL">All Dates</option>
+              <option value="TODAY">Today</option>
+              <option value="THIS_WEEK">This Week</option>
+              <option value="THIS_MONTH">This Month</option>
+              <option value="CUSTOM">Custom Range</option>
+            </select>
+          </div>
+
+          {/* Status Selector */}
+          <div className="w-36 shrink-0">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full h-9 px-3 border rounded-md text-xs bg-background font-medium focus:ring-1 focus:ring-primary focus:outline-none"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="Draft">Draft</option>
+              <option value="Submitted">Submitted</option>
+              <option value="Posted">Posted</option>
+              <option value="Rejected">Rejected</option>
+              <option value="Cancelled">Cancelled</option>
+              <option value="Reversed">Reversed</option>
+            </select>
+          </div>
+
+          {/* Search Bar */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search request #, reason, batch..."
+              className="pl-9 h-9 text-xs"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {hasActiveFilters && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetFilters}
+                className="h-9 text-xs text-muted-foreground hover:text-foreground"
+                title="Reset all filters"
+              >
+                Reset
+              </Button>
+            )}
             <Button
               variant="outline"
               size="icon"
               onClick={loadTransfers}
-              disabled={loading || filterBranchId === null}
-              className="h-9 w-9"
+              disabled={loading}
+              className="h-9 w-9 shrink-0"
               title="Refresh audit register"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
-          </motion.div>
-        </div>
-      </div>
-
-      {/* Filters Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
-        {/* Active Branch Filter */}
-        <div>
-          <SearchableSelect
-            options={branchOptions}
-            value={filterBranchId !== null ? filterBranchId : ""}
-            onChange={(val) => {
-              if (val === "all") {
-                setFilterBranchId("all");
-              } else {
-                const num = Number(val);
-                setFilterBranchId(Number.isNaN(num) || num <= 0 ? null : num);
-              }
-            }}
-            placeholder="Select a branch..."
-            triggerClassName="h-9"
-          />
+          </div>
         </div>
 
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            disabled={filterBranchId === null}
-            placeholder={filterBranchId === null ? "Select a branch first to search..." : "Search request #, batch..."}
-            className="pl-9 h-9"
-          />
-        </div>
-
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          disabled={filterBranchId === null}
-          className="h-9 px-3 border rounded-md text-sm bg-background font-medium disabled:opacity-50"
-        >
-          <option value="ALL">All Statuses</option>
-          <option value="Draft">Draft</option>
-          <option value="Submitted">Submitted</option>
-          <option value="Approved">Approved</option>
-          <option value="Posted">Posted</option>
-          <option value="Rejected">Rejected</option>
-          <option value="Cancelled">Cancelled</option>
-          <option value="Reversed">Reversed</option>
-        </select>
-
-        <Input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-          disabled={filterBranchId === null}
-          placeholder="From Date"
-          className="h-9 disabled:opacity-50"
-        />
-
-        <Input
-          type="date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-          disabled={filterBranchId === null}
-          placeholder="To Date"
-          className="h-9 disabled:opacity-50"
-        />
+        {/* Custom Date Range Inputs (when datePreset === 'CUSTOM') */}
+        {datePreset === "CUSTOM" && (
+          <div className="flex items-center gap-2 text-xs bg-muted/40 p-2 rounded-lg border w-fit">
+            <span className="font-medium text-muted-foreground">From:</span>
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-8 w-36 text-xs bg-background"
+            />
+            <span className="font-medium text-muted-foreground">To:</span>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-8 w-36 text-xs bg-background"
+            />
+          </div>
+        )}
       </div>
 
       {/* Summary Table */}
@@ -387,40 +617,49 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/30">
-              <TableHead title="Transfer Request Number, Date & Branch">Request & Details</TableHead>
-              <TableHead title="Workflow Status">Status</TableHead>
-              <TableHead title="Storage Route (Source → Target Lot)">Storage Route</TableHead>
-              <TableHead className="text-right" title="Total Transfer Quantity & Lines">Total Qty & Lines</TableHead>
+              <TableHead
+                className="min-w-[175px] whitespace-nowrap cursor-pointer select-none"
+                onClick={() => handleSort("requestNo")}
+                title="Transfer Request Number, Date & Branch"
+              >
+                Request & Details {renderSortIcon("requestNo")}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer select-none"
+                onClick={() => handleSort("status")}
+                title="Workflow Status"
+              >
+                Status {renderSortIcon("status")}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer select-none"
+                onClick={() => handleSort("sourceLot")}
+                title="Originating Storage Lot"
+              >
+                Source Lot {renderSortIcon("sourceLot")}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer select-none"
+                onClick={() => handleSort("targetLot")}
+                title="Receiving Storage Lot"
+              >
+                Target Lot {renderSortIcon("targetLot")}
+              </TableHead>
+              <TableHead
+                className="text-right cursor-pointer select-none"
+                onClick={() => handleSort("quantity")}
+                title="Total Transfer Quantity & Lines"
+              >
+                Total Qty & Lines {renderSortIcon("quantity")}
+              </TableHead>
               <TableHead title="Transfer Reason / Operational Justification">Reason</TableHead>
-              <TableHead className="text-right" title="Actions & Audit Log">Audit</TableHead>
+              <TableHead className="text-right" title="Actions & Audit Log">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filterBranchId === null ? (
+            {loading && transfers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-72 text-center">
-                  <motion.div
-                    initial={{ opacity: 0, y: 16, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ duration: 0.28, ease: "easeOut" }}
-                    className="flex flex-col items-center justify-center max-w-md mx-auto text-center p-6 space-y-3.5"
-                  >
-                    <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-sm ring-8 ring-primary/5">
-                      <Building2 className="w-7 h-7 text-primary" />
-                    </div>
-                    <div className="space-y-1">
-                      <h3 className="text-base font-bold text-foreground">Select an Operating Branch</h3>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Please select an active branch from the dropdown above to view the audit register of manufacturing lot transfers.
-                      </p>
-                    </div>
-
-                  </motion.div>
-                </TableCell>
-              </TableRow>
-            ) : loading && (transfers || []).length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="h-36 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-36 text-center text-muted-foreground">
                   <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
@@ -431,9 +670,9 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
                   </motion.div>
                 </TableCell>
               </TableRow>
-            ) : (transfers || []).length === 0 ? (
+            ) : displayedTransfers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-44 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-44 text-center text-muted-foreground">
                   <motion.div
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -445,19 +684,19 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
                     </div>
                     <span className="font-semibold text-foreground text-sm">No lot transfer records found</span>
                     <span className="text-xs text-muted-foreground max-w-sm">
-                      {search || statusFilter !== "ALL" || dateFrom || dateTo
-                        ? "No transfers match the selected filter criteria for this branch."
-                        : "No lot transfer records have been registered under this branch."}
+                      {hasActiveFilters
+                        ? "No transfers match the selected filter criteria."
+                        : "No lot transfer records have been registered in the system."}
                     </span>
                   </motion.div>
                 </TableCell>
               </TableRow>
             ) : (
               <AnimatePresence mode="popLayout" initial={false}>
-                {(paginatedTransfers || []).map((item, idx) => {
+                {paginatedTransfers.map((item, idx) => {
                   const branchDisplay = item.branchName && item.branchName !== "-" ? item.branchName : item.branchId ? `Branch #${item.branchId}` : "-";
-                  const sourceLotDisplay = item.sourceLotName || `Lot #${item.sourceLotId}`;
-                  const targetLotDisplay = item.targetLotName || `Lot #${item.targetLotId}`;
+                  const sourceLotDisplay = item.sourceLotName && item.sourceLotName !== "-" ? item.sourceLotName : "-";
+                  const targetLotDisplay = item.targetLotName && item.targetLotName !== "-" ? item.targetLotName : "-";
                   const lineCount = item.lineCount || item.details?.length || 1;
 
                   return (
@@ -486,12 +725,11 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
                       <TableCell title={`Status: ${item.status}`}>
                         <TransferStatusBadge status={item.status} />
                       </TableCell>
-                      <TableCell title={`${sourceLotDisplay} → ${targetLotDisplay}`}>
-                        <div className="flex items-center gap-1 text-xs font-semibold text-foreground flex-wrap">
-                          <span>{sourceLotDisplay}</span>
-                          <ArrowRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                          <span>{targetLotDisplay}</span>
-                        </div>
+                      <TableCell title={sourceLotDisplay}>
+                        <span className="text-xs font-semibold text-foreground">{sourceLotDisplay}</span>
+                      </TableCell>
+                      <TableCell title={targetLotDisplay}>
+                        <span className="text-xs font-semibold text-foreground">{targetLotDisplay}</span>
                       </TableCell>
                       <TableCell className="text-right" title={`${item.quantity.toLocaleString()} total units across ${lineCount} line(s)`}>
                         <div className="font-mono font-bold text-xs text-foreground">
@@ -552,7 +790,7 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
         </Table>
 
         {/* Pagination Controls */}
-        {transfers.length > 0 && (
+        {displayedTransfers.length > 0 && (
           <div className="p-3 sm:p-4 border-t border-border bg-muted/5 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-3 flex-wrap">
               <div className="text-xs text-muted-foreground font-medium whitespace-nowrap">
@@ -645,41 +883,51 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
 
       {/* Comprehensive Detail & Audit Dialog */}
       {selectedTransfer && (
-        <Dialog open={detailModalOpen} onOpenChange={setDetailModalOpen}>
-          <DialogContent className="max-w-6xl sm:max-w-6xl w-[95vw] h-[90vh] max-h-[920px] flex flex-col p-6 overflow-hidden">
+        <Dialog  open={detailModalOpen} onOpenChange={setDetailModalOpen} >
+          <DialogContent showCloseButton={false} className="max-w-6xl sm:max-w-6xl w-[95vw] h-[90vh] max-h-[920px] flex flex-col p-6 overflow-hidden">
             <DialogHeader>
               <div className="flex items-center justify-between">
                 <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
                   <FileText className="w-5 h-5 text-primary" />
                   Lot Transfer {selectedTransfer.requestNo}
                 </DialogTitle>
-
               </div>
-              <DialogDescription>
-                Transfer Date: {selectedTransfer.transferDate} • From {selectedTransfer.sourceLotName || `Lot #${selectedTransfer.sourceLotId}`} to {selectedTransfer.targetLotName || `Lot #${selectedTransfer.targetLotId}`}.
+              <DialogDescription className="sr-only">
+                Transfer Date: {selectedTransfer.transferDate} • From {selectedTransfer.sourceLotName || "-"} to {selectedTransfer.targetLotName || "-"}.
               </DialogDescription>
             </DialogHeader>
 
             <div className="flex-1 overflow-y-auto space-y-4 pr-1">
               {/* Header metrics */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 border rounded-xl bg-card text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 p-3.5 border rounded-xl bg-card text-xs">
                 <div>
-                  <span className="text-muted-foreground block">Requested By</span>
-                  <span className="font-semibold text-sm">{selectedTransfer.requestedByName || "System User"}</span>
+                  <span className="text-muted-foreground block">Source Lot</span>
+                  <span className="font-semibold text-sm truncate block" title={selectedTransfer.sourceLotName || "-"}>
+                    {selectedTransfer.sourceLotName || "-"}
+                  </span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground block">Approved By</span>
-                  <span className="font-semibold text-sm">{selectedTransfer.approvedByName || "-"}</span>
+                  <span className="text-muted-foreground block">Destination Lot</span>
+                  <span className="font-semibold text-sm truncate block" title={selectedTransfer.targetLotName || "-"}>
+                    {selectedTransfer.targetLotName || "-"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Transfer Date</span>
+                  <span className="font-semibold text-sm font-mono block">
+                    {selectedTransfer.transferDate || "-"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Requested By</span>
+                  <span className="font-semibold text-sm truncate block" title={selectedTransfer.requestedByName || "System User"}>
+                    {selectedTransfer.requestedByName || "System User"}
+                  </span>
                 </div>
                 <div>
                   <span className="text-muted-foreground block">Posted By</span>
-                  <span className="font-semibold text-sm">{selectedTransfer.postedByName || "-"}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block">Total Quantity</span>
-                  <span className="font-semibold text-sm font-mono">
-                    {selectedTransfer.quantity.toLocaleString()}
-                    {selectedTransfer.unitName ? ` ${selectedTransfer.unitName}` : ""}
+                  <span className="font-semibold text-sm truncate block" title={selectedTransfer.postedByName || "-"}>
+                    {selectedTransfer.postedByName || "-"}
                   </span>
                 </div>
               </div>
@@ -710,7 +958,7 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
                       const primaryTitle = pDesc || pName || (d.productId ? `Product #${d.productId}` : "-");
                       const mfgDate = d.sourceManufacturingDate ? String(d.sourceManufacturingDate).slice(0, 10) : "-";
                       const expDate = d.sourceExpiryDate ? String(d.sourceExpiryDate).slice(0, 10) : "-";
-                      const lineRemarks = d.lineRemarks || selectedTransfer.reason || "-";
+                      const lineRemarks = d.lineRemarks || "-";
                       const unitSuffix = selectedTransfer.unitName ? ` ${selectedTransfer.unitName}` : "";
 
                       return (
@@ -800,146 +1048,36 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
                   </div>
                 )}
               </div>
-
-              {/* Inventory Movements Audit */}
-              {movements.length > 0 && (
-                <div className="border rounded-xl bg-card overflow-hidden">
-                  <div className="p-2.5 bg-muted/30 font-semibold text-xs uppercase tracking-wider border-b flex items-center gap-1.5">
-                    <Activity className="w-3.5 h-3.5 text-primary" />
-                    Posted Inventory Movements ({movements.length})
-                  </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/20">
-                        <TableHead className="w-20">ID</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Direction</TableHead>
-                        <TableHead>Batch #</TableHead>
-                        <TableHead className="text-right">Quantity</TableHead>
-                        <TableHead>Remarks</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {movements.map((m, mIdx) => (
-                        <motion.tr
-                          key={m.movementId}
-                          initial={{ opacity: 0, y: -6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.18, delay: Math.min(mIdx * 0.03, 0.3) }}
-                          className="border-b"
-                        >
-                          <TableCell className="font-mono text-xs">{m.movementId}</TableCell>
-                          <TableCell className="text-xs">{m.transactionType || "Lot Transfer"}</TableCell>
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={m.movementDirection === "OUT" ? "text-destructive border-destructive" : "text-emerald-600 border-emerald-600"}
-                            >
-                              {m.movementDirection}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{m.batchNo}</TableCell>
-                          <TableCell className="text-right font-mono text-xs font-semibold">
-                            {m.movementDirection === "OUT" ? `-${m.quantity}` : `+${m.quantity}`}
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{m.remarks || "-"}</TableCell>
-                        </motion.tr>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
             </div>
 
-            <DialogFooter className="pt-3 border-t flex items-center justify-between">
-              <div>
-                {selectedTransfer.status === "Posted" && (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setReverseModalOpen(true)}
-                    className="gap-1.5 text-xs h-8"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    Reverse Transfer
-                  </Button>
-                )}
-              </div>
-              <motion.div whileTap={{ scale: 0.96 }}>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setPrintTransfer(selectedTransfer);
-                      setPrintModalOpen(true);
-                    }}
-                    className="h-9 gap-1.5 "
-                    title="Print transfer document"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    Print Slip
-                  </Button>
-                  <Button variant="outline" onClick={() => setDetailModalOpen(false)}>
-                    Close
-                  </Button>
-                </div>
-              </motion.div>
+            <DialogFooter className="pt-3 border-t flex items-center justify-end  w-full">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setPrintTransfer(selectedTransfer);
+                  setPrintModalOpen(true);
+                }}
+                className="h-9 gap-1.5"
+                title="Print transfer document"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                Print Slip
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDetailModalOpen(false)}
+                className="h-9 gap-1.5"
+              >
+                Close
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
 
-      {/* Reversal Confirmation Dialog */}
-      <Dialog open={reverseModalOpen} onOpenChange={setReverseModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <RotateCcw className="w-5 h-5" />
-              Reverse Lot Transfer {selectedTransfer?.requestNo}
-            </DialogTitle>
-            <DialogDescription>
-              Reversing this transfer will create compensating opposite inventory movements, returning stock from{" "}
-              <strong className="text-foreground">{selectedTransfer?.targetLotName || `Lot #${selectedTransfer?.targetLotId}`}</strong> back to{" "}
-              <strong className="text-foreground">{selectedTransfer?.sourceLotName || `Lot #${selectedTransfer?.sourceLotId}`}</strong>.
-            </DialogDescription>
-          </DialogHeader>
 
-          <div className="space-y-2 py-2">
-            <label className="text-xs font-semibold text-foreground">
-              Reason for Reversal *
-            </label>
-            <Input
-              value={reversalReason}
-              onChange={(e) => setReversalReason(e.target.value)}
-              placeholder="e.g. Relocation clerical error / wrong destination bin selected"
-              className="text-sm"
-            />
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setReverseModalOpen(false);
-                setReversalReason("");
-              }}
-              disabled={reversalLoading}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleConfirmReversal}
-              disabled={reversalLoading || !reversalReason.trim()}
-              className="gap-1.5"
-            >
-              {reversalLoading && <RefreshCw className="w-4 h-4 animate-spin" />}
-              Confirm Reversal
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Lot Transfer Print Slip Modal */}
       <LotTransferPrintModal

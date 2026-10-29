@@ -41,6 +41,9 @@ export interface LotTransferDetail {
   productName?: string;
   productCode?: string;
   productDescription?: string;
+  productTypeId?: number | null;
+  productTypeName?: string;
+  productClassification?: "RM" | "PKG" | "FG" | "OTHER";
   sourceInventoryLotId: number;
   sourceBatchNo: string;
   targetInventoryLotId?: number | null;
@@ -76,6 +79,9 @@ export interface LotTransfer {
   transferDate: string;
   unitId: number;
   unitName?: string;
+  productTypeId?: number | null;
+  productTypeName?: string;
+  productClassification?: "RM" | "PKG" | "FG" | "OTHER";
   sourceLotId: number;
   sourceLotName?: string;
   targetLotId: number;

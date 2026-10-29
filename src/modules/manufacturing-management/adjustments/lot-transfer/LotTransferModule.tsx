@@ -2,7 +2,6 @@
 
 import React from "react";
 import LotTransferRequestModule from "./LotTransferRequestModule";
-import LotTransferApprovalModule from "./LotTransferApprovalModule";
 import LotTransferPostingModule from "./LotTransferPostingModule";
 import LotTransferSummaryModule from "./LotTransferSummaryModule";
 import type { LotTransferMode } from "./types";
@@ -27,7 +26,6 @@ export const LotTransferModule: React.FC<LotTransferModuleProps> = ({
 
   switch (mode) {
     case "approval":
-      return <LotTransferApprovalModule userBranchId={branchId} transferId={numTransferId} />;
     case "posting":
       return <LotTransferPostingModule userBranchId={branchId} transferId={numTransferId} />;
     case "summary":

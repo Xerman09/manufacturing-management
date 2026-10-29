@@ -1,4 +1,8 @@
 import { DIRECTUS_URL, headers as baseHeaders } from "@/app/api/manufacturing/directus-api";
+import { cookies } from "next/headers";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { resolveProductClassification } from "../services/lot-allocation.engine";
 import type {
   LotTransfer,
   LotTransferDetail,
@@ -155,6 +159,7 @@ export async function listLotTransfersServer(filter: LotTransferFilter = {}): Pr
   const offset = filter.offset && filter.offset >= 0 ? filter.offset : 0;
   queryParams.set("limit", String(limit));
   queryParams.set("offset", String(offset));
+  queryParams.set("fields", "*.*");
   queryParams.set("meta", "filter_count");
 
   const [res, lookups] = await Promise.all([
@@ -279,6 +284,125 @@ export async function getLotTransferMovementsServer(transferId: number): Promise
  * Validates target lot capacity by checking current stock quantity + incoming transfer quantity
  * against mm_lots.max_batch_capacity (total product quantity in units).
  */
+async function getReconciledLotOccupancyServer(targetLotId: number): Promise<number> {
+  const springUrl = process.env.SPRING_API_BASE_URL?.trim().replace(/\/+$/, "");
+  if (!springUrl) return 0;
+
+  let token: string | undefined;
+  try {
+    const cookieStore = await cookies();
+    token =
+      cookieStore.get("vos_access_token")?.value ||
+      cookieStore.get("springboot_token")?.value ||
+      cookieStore.get("token")?.value;
+  } catch {
+    // ignore
+  }
+  if (!token) {
+    try {
+      const tokenPath = resolve(process.cwd(), "node_modules/.cache/vos-tokens/latest_token.txt");
+      if (existsSync(tokenPath)) {
+        token = readFileSync(tokenPath, "utf8").trim();
+      }
+    } catch {
+      // ignore
+    }
+  }
+  const reqHeaders: Record<string, string> = { Accept: "application/json" };
+  if (token) {
+    reqHeaders["Authorization"] = `Bearer ${token}`;
+    reqHeaders["Cookie"] = `vos_access_token=${token}`;
+  }
+
+  // 1. Fetch inventory lots for this target lot from Directus to know which inventory_lot_ids belong to targetLotId
+  const invLotsRes = await directusFetch<{ data: Array<{ inventory_lot_id: number; lot_id: unknown }> }>(
+    `/items/mm_inventory_lots?filter[lot_id][_eq]=${targetLotId}&fields=inventory_lot_id,lot_id&limit=-1`
+  ).catch(() => ({ data: [] }));
+
+  const targetInvLotIds = new Set<number>(
+    (invLotsRes.data || []).map((r) => Number(r.inventory_lot_id)).filter((id) => id > 0)
+  );
+
+  // 2. Fetch movements and on-hand in parallel
+  const [movementsRes, onhandRes] = await Promise.all([
+    fetch(`${springUrl}/api/mm-inventory-movements/all`, { headers: reqHeaders, cache: "no-store" }).catch(() => null),
+    fetch(`${springUrl}/api/mm-batch-onhand/all`, { headers: reqHeaders, cache: "no-store" }).catch(() => null),
+  ]);
+
+  let rawMovements: Array<Record<string, unknown>> = [];
+  if (movementsRes && movementsRes.ok) {
+    try {
+      const movJson = await movementsRes.json();
+      rawMovements = Array.isArray(movJson) ? movJson : movJson?.data || [];
+    } catch {
+      rawMovements = [];
+    }
+  }
+
+  let rawOnhand: Array<Record<string, unknown>> = [];
+  if (onhandRes && onhandRes.ok) {
+    try {
+      const ohJson = await onhandRes.json();
+      rawOnhand = Array.isArray(ohJson) ? ohJson : ohJson?.data || [];
+    } catch {
+      rawOnhand = [];
+    }
+  }
+
+  const isRowForTargetLot = (r: Record<string, unknown>): boolean => {
+    const rawLot = r.mmLotId ?? r.mm_lot_id ?? r.lotId ?? r.lot_id;
+    const lotId = typeof rawLot === "object" && rawLot !== null ? Number((rawLot as { lot_id?: number }).lot_id || 0) : Number(rawLot || 0);
+    if (lotId === targetLotId) return true;
+    const invId = Number(r.inventoryLotId ?? r.inventory_lot_id ?? 0);
+    if (invId > 0 && targetInvLotIds.has(invId)) return true;
+    return false;
+  };
+
+  // Reconcile batch quantities: movement net takes precedence, fallback to onhand
+  const batchNetMap = new Map<string, { onhand: number; count: number }>();
+
+  rawMovements.forEach((m) => {
+    if (!isRowForTargetLot(m)) return;
+    const pId = Number(m.productId || m.product_id || 0);
+    const bNo = String(m.batchNo || m.batch_no || "").trim().toLowerCase();
+    const qIn = Number(m.quantityIn || m.quantity_in || 0);
+    const qOut = Number(m.quantityOut || m.quantity_out || 0);
+    const net = qIn - qOut;
+    const key = `${pId}_${bNo}`;
+    const cur = batchNetMap.get(key) || { onhand: 0, count: 0 };
+    cur.onhand += net;
+    cur.count += 1;
+    batchNetMap.set(key, cur);
+  });
+
+  rawOnhand.forEach((oh) => {
+    if (!isRowForTargetLot(oh)) return;
+    const pId = Number(oh.productId || oh.product_id || 0);
+    const bNo = String(oh.batchNo || oh.batch_no || "").trim().toLowerCase();
+    const onhand = Number(oh.onhandQuantity ?? oh.onhand_quantity ?? oh.quantity ?? 0);
+    const key = `${pId}_${bNo}`;
+    const cur = batchNetMap.get(key) || { onhand: 0, count: 0 };
+    if (cur.count === 0) {
+      cur.onhand = onhand;
+    }
+    batchNetMap.set(key, cur);
+  });
+
+  // Total occupancy is the sum of positive stock in this target lot
+  let totalOccupancy = 0;
+  batchNetMap.forEach((entry) => {
+    if (entry.onhand > 0) {
+      totalOccupancy += entry.onhand;
+    }
+  });
+
+  return parseFloat(totalOccupancy.toFixed(8));
+}
+
+/**
+ * Validates that incoming transfer lines will not exceed destination lot capacity
+ * against mm_lots.max_batch_capacity (total product quantity in units).
+ */
 async function validateTargetLotCapacity(
   targetLotId: number,
   lines: Array<{ productId: number; targetBatchNo: string; quantity?: number }>
@@ -291,19 +415,17 @@ async function validateTargetLotCapacity(
   }
 
   const maxCapacity = Number(lotRes.data.max_batch_capacity);
-  const lotName = String(lotRes.data.lot_name || `Lot #${targetLotId}`);
+  const lotName = String(lotRes.data.lot_name || "Destination Lot");
   const unitId = lotRes.data.unit_id ? Number(lotRes.data.unit_id) : null;
 
   if (maxCapacity > 0) {
-    // 1. Fetch current on-hand stock in destination lot via inventory_movements
-    const movementsRes = await directusFetch<{ data: Array<{ quantity: number }> }>(
-      `/items/inventory_movements?filter[mm_lot_id][_eq]=${targetLotId}&fields=quantity&limit=-1`
-    ).catch(() => ({ data: [] }));
+    let currentOccupancy = 0;
+    try {
+      currentOccupancy = await getReconciledLotOccupancyServer(targetLotId);
+    } catch {
+      currentOccupancy = 0;
+    }
 
-    const currentOccupancy = (movementsRes.data || []).reduce(
-      (sum, m) => sum + Number(m.quantity || 0),
-      0
-    );
     const incomingTransferQty = lines.reduce(
       (sum, l) => sum + Number(l.quantity || 0),
       0
@@ -446,7 +568,7 @@ export async function createLotTransferServer(
     source_batch_no: line.sourceBatchNo,
     target_batch_no: line.targetBatchNo,
     quantity: line.quantity,
-    line_remarks: line.lineRemarks || payload.reason || null,
+    line_remarks: line.lineRemarks ? String(line.lineRemarks).trim() : null,
     source_manufacturing_date: line.sourceManufacturingDate || null,
     source_expiry_date: line.sourceExpiryDate || null,
     target_manufacturing_date: line.sourceManufacturingDate || null,
@@ -487,6 +609,180 @@ export async function createLotTransferServer(
   }).catch((err) => console.warn("Failed to write status history:", err));
 
   return getLotTransferByIdServer(transferId);
+}
+
+export async function updateLotTransferServer(
+  id: number,
+  payload: {
+    branchId: number;
+    transferDate: string;
+    sourceLotId: number;
+    targetLotId: number;
+    unitId?: number;
+    reason: string;
+    status?: "Draft" | "Submitted";
+    lines: Array<{
+      productId: number;
+      sourceInventoryLotId: number;
+      sourceBatchNo: string;
+      targetBatchNo: string;
+      quantity: number;
+      lineRemarks?: string;
+      sourceManufacturingDate?: string | null;
+      sourceExpiryDate?: string | null;
+      sourceUnitCost?: number | null;
+    }>;
+  },
+  userId?: number | null
+): Promise<LotTransfer> {
+  const current = await getLotTransferByIdServer(id);
+  if (current.status !== "Draft") {
+    throw new LotTransferServerError(`Only Draft transfers can be edited. Current status: ${current.status}`, 400);
+  }
+
+  if (!payload.sourceLotId || !payload.targetLotId) {
+    throw new LotTransferServerError("Source and Target lot are required", 400);
+  }
+  if (payload.sourceLotId === payload.targetLotId) {
+    throw new LotTransferServerError("Source and Destination lots must be different", 400);
+  }
+  if (!payload.lines || payload.lines.length === 0) {
+    throw new LotTransferServerError("At least one line item is required", 400);
+  }
+
+  for (const [idx, line] of payload.lines.entries()) {
+    if (!line.quantity || line.quantity <= 0) {
+      throw new LotTransferServerError(`Line #${idx + 1} must have a quantity greater than zero`, 400);
+    }
+    if (!line.sourceBatchNo || !line.targetBatchNo) {
+      throw new LotTransferServerError(`Line #${idx + 1} must have valid source and target batch numbers`, 400);
+    }
+  }
+
+  await validateTargetLotCapacity(payload.targetLotId, payload.lines);
+
+  const now = getPhTimestamp();
+  const nextStatus: LotTransferStatus = payload.status === "Submitted" ? "Submitted" : "Draft";
+  const totalQuantity = payload.lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+  const primaryLine = payload.lines[0];
+
+  await directusFetch(`/items/mm_lot_transfers/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status: nextStatus,
+      branch_id: payload.branchId,
+      product_id: primaryLine.productId,
+      source_lot_id: payload.sourceLotId,
+      source_inventory_lot_id: primaryLine.sourceInventoryLotId,
+      source_batch_no: primaryLine.sourceBatchNo,
+      target_lot_id: payload.targetLotId,
+      target_batch_no: primaryLine.targetBatchNo,
+      quantity: totalQuantity,
+      transfer_date: payload.transferDate,
+      reason: payload.reason,
+      updated_at: now,
+    }),
+  });
+
+  // 1. Use existing details from current transfer record to update in-place
+  let existingDetails = (current.details || []).sort(
+    (a, b) => Number(a.lineNo || 0) - Number(b.lineNo || 0)
+  );
+
+  // If current.details was empty, query with fields=*.* as reliable fallback
+  if (existingDetails.length === 0) {
+    const fallbackRes = await directusFetch<{ data: Array<Record<string, unknown>> }>(
+      `/items/mm_lot_transfer_details?filter[lot_transfer_id][_eq]=${id}&sort=line_no&fields=*.*`
+    ).catch(() => ({ data: [] }));
+    existingDetails = (fallbackRes.data || []).map((d) => ({
+      detailId: Number(d.lot_transfer_detail_id || (d as Record<string, unknown>).id),
+      lotTransferId: id,
+      lineNo: Number(d.line_no || 1),
+      productId: Number(
+        typeof d.product_id === "object" && d.product_id !== null
+          ? (d.product_id as { product_id?: number }).product_id
+          : d.product_id || 0
+      ),
+      sourceInventoryLotId: Number(d.source_inventory_lot_id || 0),
+      sourceBatchNo: String(d.source_batch_no || ""),
+      targetBatchNo: String(d.target_batch_no || ""),
+      quantity: Number(d.quantity || 0),
+    })) as unknown as typeof current.details;
+  }
+
+  // 2. Update existing rows in place or insert new rows if line items were added
+  for (let idx = 0; idx < payload.lines.length; idx++) {
+    const line = payload.lines[idx];
+    const updateData = {
+      product_id: line.productId,
+      source_inventory_lot_id: line.sourceInventoryLotId,
+      source_batch_no: line.sourceBatchNo,
+      target_batch_no: line.targetBatchNo,
+      quantity: line.quantity,
+      line_remarks: line.lineRemarks ? String(line.lineRemarks).trim() : null,
+      source_manufacturing_date: line.sourceManufacturingDate || null,
+      source_expiry_date: line.sourceExpiryDate || null,
+      target_manufacturing_date: line.sourceManufacturingDate || null,
+      target_expiry_date: line.sourceExpiryDate || null,
+      source_unit_cost:
+        line.sourceUnitCost !== null && line.sourceUnitCost !== undefined && !isNaN(Number(line.sourceUnitCost))
+          ? Number(line.sourceUnitCost)
+          : null,
+      target_unit_cost:
+        line.sourceUnitCost !== null && line.sourceUnitCost !== undefined && !isNaN(Number(line.sourceUnitCost))
+          ? Number(line.sourceUnitCost)
+          : null,
+      updated_at: now,
+    };
+
+    if (idx < existingDetails.length) {
+      const detailId = existingDetails[idx].detailId;
+      await directusFetch(`/items/mm_lot_transfer_details/${detailId}`, {
+        method: "PATCH",
+        body: JSON.stringify(updateData),
+      });
+    } else {
+      await directusFetch(`/items/mm_lot_transfer_details`, {
+        method: "POST",
+        body: JSON.stringify({
+          lot_transfer_id: id,
+          line_no: idx + 1,
+          ...updateData,
+          created_at: now,
+        }),
+      });
+    }
+  }
+
+  // 3. Delete any surplus detail rows if lines were removed
+  if (existingDetails.length > payload.lines.length) {
+    for (let idx = payload.lines.length; idx < existingDetails.length; idx++) {
+      const surplusDetailId = existingDetails[idx].detailId;
+      if (surplusDetailId > 0) {
+        await directusFetch(`/items/mm_lot_transfer_details/${surplusDetailId}`, {
+          method: "DELETE",
+        }).catch((err) => console.warn(`Failed to delete surplus detail #${surplusDetailId}:`, err));
+      }
+    }
+  }
+
+  if (nextStatus === "Submitted") {
+    const historyPayload = {
+      lot_transfer_id: id,
+      old_status: "Draft",
+      new_status: "Submitted",
+      changed_by: userId || null,
+      changed_at: now,
+      remarks: "Draft transfer modified and submitted for QA approval.",
+      event_key: `LT-${id}-Submitted-${Date.now()}`,
+    };
+    await directusFetch(`/items/mm_lot_transfer_status_history`, {
+      method: "POST",
+      body: JSON.stringify(historyPayload),
+    }).catch((err) => console.warn("Failed to write status history:", err));
+  }
+
+  return getLotTransferByIdServer(id);
 }
 
 export async function submitLotTransferServer(id: number, userId?: number | null): Promise<LotTransfer> {
@@ -673,8 +969,8 @@ async function resolveTransactionTypeId(name: string, direction: "IN" | "OUT"): 
 
 export async function postLotTransferServer(id: number, userId?: number | null): Promise<LotTransfer> {
   const current = await getLotTransferByIdServer(id);
-  if (current.status !== "Approved") {
-    throw new LotTransferServerError(`Only Approved transfers can be posted. Current status: ${current.status}`, 400);
+  if (current.status !== "Approved" && current.status !== "Submitted") {
+    throw new LotTransferServerError(`Only Submitted or Approved transfers can be posted. Current status: ${current.status}`, 400);
   }
 
   const activeUserId = userId || current.postedBy || current.approvedBy || current.submittedBy || current.requestedBy || 1;
@@ -855,7 +1151,7 @@ export async function postLotTransferServer(id: number, userId?: number | null):
     method: "POST",
     body: JSON.stringify({
       lot_transfer_id: id,
-      old_status: "Approved",
+      old_status: current.status,
       new_status: "Posted",
       changed_by: activeUserId,
       changed_at: now,
@@ -1022,7 +1318,17 @@ interface ServerLookups {
   branches: Map<number, { name: string; code?: string }>;
   units: Map<number, string>;
   users: Map<number, string>;
-  products: Map<number, { name: string; code?: string; description?: string }>;
+  products: Map<
+    number,
+    {
+      name: string;
+      code?: string;
+      description?: string;
+      productTypeId?: number | null;
+      productTypeName?: string;
+      classificationCode?: "RM" | "PKG" | "FG" | "OTHER";
+    }
+  >;
 }
 
 let serverLookupsCache: ServerLookups | null = null;
@@ -1047,15 +1353,24 @@ export async function getServerLookups(): Promise<ServerLookups> {
     directusFetch<{ data: Array<{ user_id?: number; user_fname?: string; user_lname?: string }> }>(
       "/items/user?limit=-1&fields=user_id,user_fname,user_lname"
     ).catch(() => ({ data: [] })),
-    directusFetch<{ data: Array<{ product_id?: number; product_name?: string; product_code?: string; description?: string }> }>(
-      "/items/products?limit=-1&fields=product_id,product_name,product_code,description"
+    directusFetch<{
+      data: Array<{
+        product_id?: number;
+        product_name?: string;
+        product_code?: string;
+        description?: string;
+        product_type?: unknown;
+        product_category?: unknown;
+      }>;
+    }>(
+      "/items/products?limit=-1&fields=product_id,product_name,product_code,description,product_type,product_type.*,product_category.category_name"
     ).catch(() => ({ data: [] })),
   ]);
 
   const lots = new Map<number, string>();
   for (const l of rawLots.data || []) {
-    const id = Number(l.lot_id);
-    if (id > 0) lots.set(id, String(l.lot_name || `Lot #${id}`));
+    const id = Number(l.lot_id || (l as Record<string, unknown>).id);
+    if (id > 0 && l.lot_name) lots.set(id, String(l.lot_name));
   }
 
   const branches = new Map<number, { name: string; code?: string }>();
@@ -1086,14 +1401,54 @@ export async function getServerLookups(): Promise<ServerLookups> {
     if (id > 0) users.set(id, full || `User #${id}`);
   }
 
-  const products = new Map<number, { name: string; code?: string; description?: string }>();
+  const products = new Map<
+    number,
+    {
+      name: string;
+      code?: string;
+      description?: string;
+      productTypeId?: number | null;
+      productTypeName?: string;
+      classificationCode?: "RM" | "PKG" | "FG" | "OTHER";
+    }
+  >();
   for (const p of rawProducts.data || []) {
     const id = Number(p.product_id);
     if (id > 0) {
+      const ptObj = p.product_type as { id?: number; name?: string } | number | undefined;
+      const ptId =
+        typeof ptObj === "object" && ptObj !== null
+          ? Number(ptObj.id || 0)
+          : typeof ptObj === "number"
+          ? ptObj
+          : null;
+      const ptName = typeof ptObj === "object" && ptObj !== null ? String(ptObj.name || "") : "";
+      const catObj = p.product_category as { category_name?: string } | undefined;
+      const catName = catObj?.category_name || "";
+      const classification = resolveProductClassification(ptName || ptId, catName);
+
+      let resolvedPtId = ptId;
+      if (!resolvedPtId || resolvedPtId <= 0) {
+        if (classification.code === "RM") resolvedPtId = 389;
+        else if (classification.code === "FG") resolvedPtId = 388;
+        else if (classification.code === "PKG") resolvedPtId = 390;
+      }
+
       products.set(id, {
         name: String(p.product_name || `Product #${id}`),
         code: p.product_code as string | undefined,
         description: p.description ? String(p.description).trim() : undefined,
+        productTypeId: resolvedPtId || null,
+        productTypeName:
+          ptName ||
+          (classification.code === "RM"
+            ? "Raw Materials"
+            : classification.code === "FG"
+            ? "Finished Goods"
+            : classification.code === "PKG"
+            ? "Packaging Items"
+            : ""),
+        classificationCode: classification.code,
       });
     }
   }
@@ -1161,12 +1516,15 @@ function mapToLotTransfer(
         productName: prodName,
         productCode: prodCode,
         productDescription: prodDesc || undefined,
+        productTypeId: prodMeta?.productTypeId || null,
+        productTypeName: prodMeta?.productTypeName || undefined,
+        productClassification: prodMeta?.classificationCode || undefined,
         sourceInventoryLotId: Number(d.source_inventory_lot_id),
         sourceBatchNo: String(d.source_batch_no || ""),
         targetInventoryLotId: d.target_inventory_lot_id ? Number(d.target_inventory_lot_id) : null,
         targetBatchNo: String(d.target_batch_no || ""),
         quantity: Number(d.quantity || 0),
-        lineRemarks: d.line_remarks ? String(d.line_remarks) : (row.reason ? String(row.reason) : undefined),
+        lineRemarks: d.line_remarks ? String(d.line_remarks) : undefined,
         sourceManufacturingDate: d.source_manufacturing_date ? String(d.source_manufacturing_date) : null,
         sourceExpiryDate: d.source_expiry_date ? String(d.source_expiry_date) : null,
         targetManufacturingDate: d.target_manufacturing_date ? String(d.target_manufacturing_date) : null,
@@ -1190,6 +1548,22 @@ function mapToLotTransfer(
 
   const branchMeta = lookups?.branches.get(branchId);
 
+  const primaryLine = details[0];
+  const headerProductId = typeof row.product_id === "object"
+    ? Number((row.product_id as Record<string, unknown>)?.product_id || (row.product_id as Record<string, unknown>)?.id)
+    : Number(row.product_id || primaryLine?.productId || 0);
+
+  const headerProdMeta = lookups?.products.get(headerProductId);
+  let resolvedProductTypeId = headerProdMeta?.productTypeId || primaryLine?.productTypeId || null;
+  const resolvedProductTypeName = headerProdMeta?.productTypeName || primaryLine?.productTypeName || undefined;
+  const resolvedClassification = headerProdMeta?.classificationCode || primaryLine?.productClassification || undefined;
+
+  if (!resolvedProductTypeId && resolvedClassification) {
+    if (resolvedClassification === "RM") resolvedProductTypeId = 389;
+    else if (resolvedClassification === "FG") resolvedProductTypeId = 388;
+    else if (resolvedClassification === "PKG") resolvedProductTypeId = 390;
+  }
+
   return {
     id,
     requestNo: String(row.request_no || ""),
@@ -1200,6 +1574,9 @@ function mapToLotTransfer(
     transferDate: String(row.transfer_date || "").slice(0, 10),
     unitId,
     unitName: typeof row.unit_id === "object" ? String(unit?.unit_name || unit?.name || "") : (lookups?.units.get(unitId) || "-"),
+    productTypeId: resolvedProductTypeId,
+    productTypeName: resolvedProductTypeName,
+    productClassification: resolvedClassification,
     sourceLotId,
     sourceLotName: typeof row.source_lot_id === "object" ? String(sourceLot?.lot_name || "") : (lookups?.lots.get(sourceLotId) || "-"),
     targetLotId,
