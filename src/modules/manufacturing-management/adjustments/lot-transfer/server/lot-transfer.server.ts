@@ -757,7 +757,7 @@ export async function updateLotTransferServer(
   // 3. Delete any surplus detail rows if lines were removed
   if (existingDetails.length > payload.lines.length) {
     for (let idx = payload.lines.length; idx < existingDetails.length; idx++) {
-      const surplusDetailId = existingDetails[idx].detailId;
+      const surplusDetailId = existingDetails[idx].detailId || 0;
       if (surplusDetailId > 0) {
         await directusFetch(`/items/mm_lot_transfer_details/${surplusDetailId}`, {
           method: "DELETE",
