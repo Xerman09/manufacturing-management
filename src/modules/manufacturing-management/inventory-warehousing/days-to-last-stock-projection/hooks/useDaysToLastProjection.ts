@@ -157,9 +157,9 @@ export function useDaysToLastProjection() {
             "Total Consumed",
             "Assessed Months",
             "Working Days/Mo",
-            "MAvg",
-            "DAvg",
-            "Days To Last",
+            "MAvg (units/month; full precision)",
+            "DAvg (units/working day; full precision)",
+            "Days To Last (working days; full precision)",
             "Status",
         ];
 

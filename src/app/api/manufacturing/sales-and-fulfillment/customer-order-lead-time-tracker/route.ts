@@ -1,3 +1,4 @@
+import { assessOrder } from "@/modules/manufacturing-management/sales-and-fulfillment/customer-order-lead-time-tracker/utils/assessment";
 import { NextRequest, NextResponse } from "next/server";
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
 import { LifecycleMilestone, MilestoneStage, StageDuration } from "@/modules/manufacturing-management/sales-and-fulfillment/customer-order-lead-time-tracker/types";
@@ -340,6 +341,7 @@ export async function GET(req: NextRequest) {
             }
 
             return {
+                assessment: assessOrder({ status: order.order_status || "", deliveryDate: order.delivery_date, approvalAt: forApprovalTimeStr, completed: isCompleted, cancelled: isCancelled, dataQualityProblem: hasNegativeDurations || missingMilestonesList.length > 0 }, now),
                 orderId: order.order_id,
                 orderNo: order.order_no,
                 poNo: order.po_no,

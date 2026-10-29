@@ -6,6 +6,8 @@ export type ProjectionStatus =
     | "NO_RECORDED_CONSUMPTION";
 
 export interface StockProjectionItem {
+    assessment_start: string | null;
+    assessment_end: string;
     product_id: number;
     product_code: string;
     product_name: string;
@@ -48,6 +50,7 @@ export interface StockProjectionItem {
 }
 
 export interface VerifiedConsumptionDetail {
+    unit_id?: number;
     movement_key: string;
     reference_no: string; // Job Order No
     reference_id: number; // Job Order ID

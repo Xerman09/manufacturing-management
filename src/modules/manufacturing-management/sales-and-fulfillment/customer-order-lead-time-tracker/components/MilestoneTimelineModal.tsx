@@ -1,6 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { inversionDetails } from "../utils/inversions";
+import { AssessmentBadge } from "./AssessmentBadge";
 import {
     X,
     CheckCircle2,
@@ -14,24 +17,50 @@ import { CustomerOrderLeadTimeItem } from "../types";
 import { Button } from "@/components/ui/button";
 
 interface MilestoneTimelineModalProps {
+    targetPair?: string;
     isOpen: boolean;
     onClose: () => void;
     order: CustomerOrderLeadTimeItem | null;
 }
 
-export function MilestoneTimelineModal({ isOpen, onClose, order }: MilestoneTimelineModalProps) {
+export function MilestoneTimelineModal({ isOpen, onClose, order, targetPair }: MilestoneTimelineModalProps) {
+    const [reviewPair, setReviewPair] = useState<string | undefined>();
+    const content = useRef<HTMLDivElement>(null);
+    const invoker = useRef<HTMLElement | null>(null);
+    const activePair = reviewPair || targetPair;
+    useEffect(() => {
+        if (isOpen) invoker.current = document.activeElement as HTMLElement;
+    }, [isOpen]);
+    useEffect(() => {
+        if (!isOpen || !activePair) return;
+        const timer = setTimeout(() => {
+            const target = content.current?.querySelector<HTMLElement>(`[data-pair="${activePair}"]`);
+            target?.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+            target?.focus({ preventScroll: true });
+        }, 100);
+        return () => clearTimeout(timer);
+    }, [isOpen, activePair]);
     if (!isOpen || !order) return null;
+    const inversions = inversionDetails(order);
+    const selected = inversions.find(pair => pair.key === activePair);
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-card text-card-foreground border border-border rounded-2xl w-full max-w-3xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+        <Dialog open={isOpen} onOpenChange={open => { if (!open) onClose(); }}>
+            <DialogContent ref={content} showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); if (invoker.current?.isConnected) invoker.current.focus(); }} className="sm:max-w-3xl max-h-[90vh] flex flex-col overflow-hidden p-0 gap-0">
+                {inversions.length > 0 && <section className="border-b p-4 text-xs space-y-2"><p>Expected lifecycle sequence differs from recorded timestamps; review the source records.</p>{inversions.map(pair => <button type="button" key={pair.key} onClick={() => setReviewPair(pair.key)} className="block text-left text-destructive underline focus-visible:outline-2">{pair.explanation}</button>)}</section>}
+                <section className="px-6 py-3 space-y-1 border-b text-xs">
+                    <AssessmentBadge assessment={order.assessment} />
+                    {order.assessment.reasons.map(reason => <p key={reason}>{reason}</p>)}
+                    <p>Assessed {new Date(order.assessment.assessedAt).toLocaleString("en-PH", { timeZone: "Asia/Manila" })} PHT. Approval SLA: 8 continuous elapsed hours.</p>
+                    <p>On Track checks delivery date and approval turnaround only. Other stage SLAs are not assessed.</p>
+                </section>
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-muted/40">
                     <div className="flex flex-col">
                         <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-bold text-foreground">
+                            <DialogTitle className="text-lg font-bold text-foreground">
                                 Lifecycle Milestones & Lead Time Audit
-                            </h2>
+                            </DialogTitle>
                             <span className="px-2 py-0.5 rounded text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
                                 {order.orderNo}
                             </span>
@@ -73,7 +102,7 @@ export function MilestoneTimelineModal({ isOpen, onClose, order }: MilestoneTime
                         </div>
                         <div>
                             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block">
-                                Promised Date
+                                Delivery Date
                             </span>
                             <span className="text-sm font-semibold text-foreground">
                                 {order.promisedDate ? new Date(order.promisedDate).toLocaleDateString() : "Not Specified"}
@@ -136,7 +165,7 @@ export function MilestoneTimelineModal({ isOpen, onClose, order }: MilestoneTime
 
                                         {/* Milestone Card */}
                                         <div
-                                            className={`p-3.5 rounded-xl border text-xs transition-all ${
+                                            className={`p-3.5 rounded-xl border text-xs transition-all ${selected && [selected.fromStage, selected.toStage].includes(m.stage) ? "ring-2 ring-destructive " : ""}${
                                                 isRecorded
                                                     ? "bg-card border-border shadow-sm text-foreground"
                                                     : "bg-muted/20 border-dashed border-border text-muted-foreground"
@@ -171,6 +200,8 @@ export function MilestoneTimelineModal({ isOpen, onClose, order }: MilestoneTime
 
                                         {/* Stage Duration Pill to next node */}
                                         {stageDur && (
+                                            <div data-pair={`${stageDur.fromStage}-${stageDur.toStage}`} tabIndex={-1} className={activePair === `${stageDur.fromStage}-${stageDur.toStage}` ? "rounded ring-2 ring-destructive focus:outline-none" : ""}>
+                                            {stageDur.isNegative && <p className="text-destructive">{inversions.find(pair => pair.key === `${stageDur.fromStage}-${stageDur.toStage}`)?.explanation}</p>}
                                             <div className="my-2 ml-4 flex items-center gap-2">
                                                 <div
                                                     className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${
@@ -190,10 +221,11 @@ export function MilestoneTimelineModal({ isOpen, onClose, order }: MilestoneTime
                                                     )}
                                                     {stageDur.isDelayed && !stageDur.isNegative && (
                                                         <span className="text-[10px] text-amber-500 font-normal">
-                                                            (High Latency)
+                                                            (Over 48 hours; duration marker, not SLA)
                                                         </span>
                                                     )}
                                                 </div>
+                                            </div>
                                             </div>
                                         )}
                                     </div>
@@ -213,7 +245,7 @@ export function MilestoneTimelineModal({ isOpen, onClose, order }: MilestoneTime
                         Close
                     </Button>
                 </div>
-            </div>
-        </div>
+            </DialogContent>
+        </Dialog>
     );
 }

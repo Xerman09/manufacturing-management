@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
     Search,
     Download,
@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { ComponentRequirementRow } from "../types";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface RequirementsGridProps {
     components: ComponentRequirementRow[];
@@ -34,6 +36,19 @@ export const RequirementsGrid: React.FC<RequirementsGridProps> = ({
     const [materialFilter, setMaterialFilter] = useState<"ALL" | "RAW_MATERIALS" | "PACKAGING">("ALL");
     const [statusFilter, setStatusFilter] = useState<"ALL" | "SHORTAGE_ONLY" | "SUFFICIENT_ONLY">("ALL");
     const [isCopied, setIsCopied] = useState(false);
+
+    const [isCopying, setIsCopying] = useState(false);
+    const [copyStatus, setCopyStatus] = useState("");
+    const [manualSummary, setManualSummary] = useState<string | null>(null);
+    const copyButton = useRef<HTMLButtonElement>(null);
+    const copyText = useRef<HTMLTextAreaElement>(null);
+    const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const copying = useRef(false);
+    const mounted = useRef(true);
+    useEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; if (copyTimer.current) clearTimeout(copyTimer.current); };
+    }, []);
 
     // Filter components
     const filteredComponents = useMemo(() => {
@@ -56,9 +71,11 @@ export const RequirementsGrid: React.FC<RequirementsGridProps> = ({
     }, [components, searchQuery, materialFilter, statusFilter]);
 
     // Copy Shortage Summary to Clipboard
-    const handleCopySummary = () => {
+    const handleCopySummary = async () => {
+        if (copying.current) return;
         const shortages = components.filter((c) => c.shortageQuantity > 0);
         if (shortages.length === 0) {
+            setCopyStatus("No shortages found to copy.");
             toast.info("No shortages found to copy!");
             return;
         }
@@ -78,10 +95,28 @@ export const RequirementsGrid: React.FC<RequirementsGridProps> = ({
             text += `   - Shortage: ${s.shortageQuantity.toLocaleString()} ${s.unitShortcut}\n\n`;
         });
 
-        navigator.clipboard.writeText(text);
-        setIsCopied(true);
-        toast.success("Shortage summary copied to clipboard!");
-        setTimeout(() => setIsCopied(false), 2500);
+        copying.current = true;
+        setIsCopying(true);
+        setIsCopied(false);
+        setCopyStatus("Copying shortage summary...");
+        if (copyTimer.current) clearTimeout(copyTimer.current);
+        try {
+            if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+            await navigator.clipboard.writeText(text);
+            if (!mounted.current) return;
+            setIsCopied(true);
+            setCopyStatus("Shortage summary copied to clipboard.");
+            toast.success("Shortage summary copied to clipboard!");
+            copyTimer.current = setTimeout(() => setIsCopied(false), 2500);
+        } catch {
+            if (!mounted.current) return;
+            setCopyStatus("Automatic copying failed. Copy the selected summary manually.");
+            toast.error("Unable to copy automatically. Use the selected summary to copy manually.");
+            setManualSummary(text);
+        } finally {
+            copying.current = false;
+            if (mounted.current) setIsCopying(false);
+        }
     };
 
     // Export CSV
@@ -189,11 +224,14 @@ export const RequirementsGrid: React.FC<RequirementsGridProps> = ({
                     {/* Copy Summary Button */}
                     <button
                         type="button"
+                        ref={copyButton}
                         onClick={handleCopySummary}
+                        disabled={isCopying}
+                        aria-describedby="shortage-copy-scope"
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-xs font-medium text-foreground shadow-2xs transition-all cursor-pointer"
                         title="Copy shortage breakdown for Purchasing / Job Order Planning"
                     >
-                        {isCopied ? (
+                        {isCopying ? <span>Copying...</span> : isCopied ? (
                             <>
                                 <Check className="h-3.5 w-3.5 text-emerald-600" />
                                 <span className="text-emerald-600 font-semibold">Copied</span>
@@ -217,6 +255,20 @@ export const RequirementsGrid: React.FC<RequirementsGridProps> = ({
                     </button>
                 </div>
             </div>
+
+            <p id="shortage-copy-scope" className="px-4 py-2 text-xs text-muted-foreground">Copies all shortages in this calculation; table filters do not narrow the summary.</p>
+            <p role="status" aria-live="polite" className="sr-only">{copyStatus}</p>
+            <Dialog open={manualSummary !== null} onOpenChange={open => { if (!open) setManualSummary(null); }}>
+                <DialogContent onOpenAutoFocus={event => { event.preventDefault(); copyText.current?.focus(); copyText.current?.select(); }} onCloseAutoFocus={event => { event.preventDefault(); copyButton.current?.focus(); }}>
+                    <DialogHeader>
+                        <DialogTitle>Copy shortage summary</DialogTitle>
+                        <DialogDescription id="manual-copy-hint">Automatic clipboard access failed or is unavailable. Copy the selected text using Ctrl+C (Windows) or Command+C (Mac), or your device Copy command.</DialogDescription>
+                    </DialogHeader>
+                    <label htmlFor="manual-shortage-summary" className="text-sm font-medium">Shortage summary</label>
+                    <textarea id="manual-shortage-summary" ref={copyText} readOnly value={manualSummary ?? ""} aria-describedby="manual-copy-hint" className="h-72 w-full rounded-md border p-3 text-sm focus-visible:outline-2 focus-visible:outline-ring" />
+                    <DialogFooter><Button variant="outline" onClick={() => setManualSummary(null)}>Close</Button></DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Table Container */}
             <div className="overflow-x-auto min-h-[300px]">
