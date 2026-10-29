@@ -459,7 +459,8 @@ export async function GET(request: Request) {
         if (items.length === 0) return;
 
         const base = items[0];
-        const totalQty = items.reduce((sum, item) => sum + item.quantity, 0);
+        const rawTotalQty = items.reduce((sum, item) => sum + item.quantity, 0);
+        const totalQty = parseFloat(rawTotalQty.toFixed(8));
         if (totalQty <= 0) return;
 
         const displayBatchNo = idx === 0 ? base.batchNumber : `${base.batchNumber}-${idx}`;
@@ -482,11 +483,12 @@ export async function GET(request: Request) {
 
       const lotBatches = deduplicatedBatches.filter((b) => b.lotId === lId);
 
-      // Total occupancy sums positive stock quantities in this lot (matching WarehouseRackView totalRackOccupancy)
-      const totalOccupancy = lotBatches.reduce((sum, b) => {
+      // Total occupancy sums positive live stock quantities in this lot from Spring Boot on-hand
+      const rawTotalOccupancy = lotBatches.reduce((sum, b) => {
         const q = Number(b.quantity) || 0;
         return q > 0 ? sum + q : sum;
       }, 0);
+      const totalOccupancy = parseFloat(rawTotalOccupancy.toFixed(8));
       const totalBatchCount = lotBatches.length;
 
       // Filter matching batches by selected Product Type
@@ -502,7 +504,7 @@ export async function GET(request: Request) {
         return false;
       });
 
-      const matchingQtyToMove = matchingBatches.reduce((sum, b) => sum + b.quantity, 0);
+      const matchingQtyToMove = parseFloat(matchingBatches.reduce((sum, b) => sum + b.quantity, 0).toFixed(8));
       const matchingBatchesToMove = matchingBatches.length;
 
       const maxCap = lot.maxCapacity;

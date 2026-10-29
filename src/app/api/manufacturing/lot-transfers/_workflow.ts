@@ -196,7 +196,7 @@ export async function approveLotTransfer(id: number, actorUserId: number | null)
 export async function postLotTransfer(id: number, idempotencyKey: string, actorUserId: number | null): Promise<{ record: LotTransferRecord; preview: LotTransferPreview; idempotent: boolean }> {
     const record = await getLotTransfer(id);
     if (record.status === "Posted") return { record, preview: storedPostedPreview(record), idempotent: true };
-    if (record.status !== "Approved") throw new LotTransferError(409, `Only Approved requests can be posted. Current status: ${record.status}.`);
+    if (record.status !== "Approved" && record.status !== "Submitted") throw new LotTransferError(409, `Only Submitted or Approved requests can be posted. Current status: ${record.status}.`);
     if (record.reconciliationRequired) {
         throw new LotTransferError(409, "This lot-transfer request requires reconciliation before it can be posted again.");
     }
