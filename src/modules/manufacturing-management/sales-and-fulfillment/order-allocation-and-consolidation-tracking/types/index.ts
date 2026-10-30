@@ -68,6 +68,8 @@ export interface OrderTrackingLineItem {
     is_missing_reservations: boolean;
     is_zero_quantity: boolean;
     is_cancelled: boolean;
+    invoiced_quantity: number;
+    served_quantity: number;
     reservations: LotReservationRef[];
     consolidation_batches: ConsolidationBatchRef[];
 }
@@ -96,6 +98,11 @@ export interface OrderTrackingItem {
     total_planned_applied_quantity: number;
     total_remaining_to_allocate: number;
     total_remaining_to_consolidate: number;
+    total_invoiced_quantity: number;
+    total_served_quantity: number;
+    invoiced_served_rate: number;
+    invoice_count: number;
+    invoice_numbers: string[];
     allocation_rate: number;
     physical_consolidation_rate: number;
     planned_consolidation_rate: number;

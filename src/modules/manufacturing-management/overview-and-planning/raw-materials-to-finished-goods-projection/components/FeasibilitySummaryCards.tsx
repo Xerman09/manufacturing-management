@@ -35,22 +35,22 @@ const statusConfig: Record<
     }
 > = {
     PRODUCIBLE: {
-        label: "Producible",
-        description: "Eligible inventory fulfills recipe requirements.",
+        label: "Ready to Produce",
+        description: "Eligible inventory fulfills all recipe requirements.",
         badgeClass: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
         icon: CheckCircle2,
         cardBorder: "border-emerald-500/20"
     },
     NOT_PRODUCIBLE: {
-        label: "Not Producible",
+        label: "Cannot Produce (Shortage)",
         description: "Material shortage halts production execution.",
         badgeClass: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
         icon: AlertTriangle,
         cardBorder: "border-rose-500/30"
     },
     INCOMPLETE_DATA: {
-        label: "Incomplete Data",
-        description: "Missing recipe, conversion factor, or movement data.",
+        label: "Missing Unit Conversion / Recipe Data",
+        description: "Calculation paused: Unit conversion or recipe specifications are missing.",
         badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
         icon: HelpCircle,
         cardBorder: "border-amber-500/20"
@@ -296,14 +296,19 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                         <Card className={`border shadow-xs h-full ${isNotProducible ? "border-rose-500/40 bg-rose-500/5" : currentStatus.cardBorder} bg-card transition-colors`}>
                             <CardContent className="flex flex-col justify-between h-full space-y-3">
                                 <div className="flex items-center justify-between">
-                                    <span className="text-xs font-semibold text-muted-foreground">Projection Status</span>
+                                    <span
+                                        className="text-xs font-semibold text-muted-foreground"
+                                        title="Indicates whether current material stock is sufficient to start production or if shortages exist."
+                                    >
+                                        Production Readiness Status
+                                    </span>
                                     <div className={`p-2 rounded-lg ${isNotProducible ? "bg-rose-500/20 text-rose-600 dark:text-rose-400" : "bg-muted/60 text-muted-foreground"}`}>
                                         <StatusIcon className="h-4 w-4" />
                                     </div>
                                 </div>
                                 <div className="space-y-1">
                                     <Badge variant="outline" className={`text-xs px-2.5 py-0.5 font-semibold ${currentStatus.badgeClass}`}>
-                                        {isNotProducible ? "Not Producible (0 Units)" : currentStatus.label}
+                                        {isNotProducible ? "Cannot Produce (0 Units)" : currentStatus.label}
                                     </Badge>
                                     <p className="text-xs text-muted-foreground mt-1.5 leading-snug">
                                         {result.bottleneckReason && result.status !== "PRODUCIBLE"
@@ -324,7 +329,12 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                         <Card className={`border shadow-xs h-full bg-card ${isNotProducible ? "border-rose-500/30" : "border-border/80"}`}>
                             <CardContent className=" flex flex-col justify-between h-full space-y-3 ">
                                 <div className="flex items-center justify-between">
-                                    <span className="text-xs font-semibold text-muted-foreground">Feasible Production Output</span>
+                                    <span
+                                        className="text-xs font-semibold text-muted-foreground"
+                                        title="The maximum volume of finished goods and batches that can be manufactured with available stock."
+                                    >
+                                        Estimated Production Output
+                                    </span>
                                     <div className={`p-2 rounded-lg ${isNotProducible ? "bg-rose-500/10 text-rose-500" : "bg-primary/10 text-primary"}`}>
                                         {isNotProducible ? <Ban className="h-4 w-4" /> : <Boxes className="h-4 w-4" />}
                                     </div>
@@ -340,7 +350,7 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                     <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                                         {result.status === "INCOMPLETE_DATA" ? (
                                             <span className="text-amber-600 dark:text-amber-400 font-medium">
-                                                Awaiting BOM recipe definitions
+                                                Calculation paused: Missing recipe or unit conversion data
                                             </span>
                                         ) : isNotProducible ? (
                                             <span className="text-rose-500 font-medium">
@@ -351,10 +361,10 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                                 <span className="font-semibold text-foreground">
                                                     {formattedMaxFgUnits} {result.fgUomName || "units"}
                                                 </span>
-                                                <span>({formattedFullBatches} complete {result.fullBatches === 1 ? "batch" : "batches"})</span>
+                                                <span>({formattedFullBatches} full {result.fullBatches === 1 ? "batch" : "batches"})</span>
                                                 {result.mode === "WHOLE_UNITS" && result.batchRemainderUnits > 0 && (
                                                     <span className="text-[11px] text-primary font-medium">
-                                                        (+{formattedRemainder} remainder)
+                                                        (+{formattedRemainder} extra units)
                                                     </span>
                                                 )}
                                             </>
@@ -367,12 +377,12 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                         className={`text-[10px] font-normal py-0 ${result.status === "INCOMPLETE_DATA" ? "border-amber-500/30 text-amber-600 dark:text-amber-400" : ""}`}
                                     >
                                         {result.status === "INCOMPLETE_DATA"
-                                            ? "Incomplete Recipe"
+                                            ? "Missing Recipe or Conversion"
                                             : isNotProducible
                                                 ? "Zero Feasible Output"
                                                 : result.mode === "WHOLE_UNITS"
-                                                    ? "Whole Units Allowed"
-                                                    : "Full Batches Enforced"}
+                                                    ? "Allow Partial Batches"
+                                                    : "Full Batches Only"}
                                     </Badge>
                                     {hasAnyConvertibleStock && !isNotProducible && (
                                         <Badge
@@ -393,8 +403,11 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                             <CardContent className="flex flex-col justify-between h-full space-y-3">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                        <span className="text-xs font-semibold text-muted-foreground">
-                                            {isNotProducible && shortageComponents.length > 1 ? "Primary Bottleneck" : "Limiting Component"}
+                                        <span
+                                            className="text-xs font-semibold text-muted-foreground"
+                                            title="The material in shortest supply that sets the maximum limit on total production output."
+                                        >
+                                            {isNotProducible && shortageComponents.length > 1 ? "Primary Limiting Material (Bottleneck)" : "Limiting Material (Bottleneck)"}
                                         </span>
                                         {isNotProducible && shortageComponents.length > 1 && (
                                             <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 font-medium">
@@ -457,16 +470,16 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                     ) : result.status === "INCOMPLETE_DATA" ? (
                                         <>
                                             <div className="font-semibold text-sm text-amber-600 dark:text-amber-400">
-                                                Incomplete Recipe Data
+                                                Recipe or Unit Conversion Incomplete
                                             </div>
                                             <p className="text-xs text-muted-foreground mt-1">
-                                                BOM has no defined routing steps or component requirements.
+                                                Please resolve the missing unit conversions or component requirements listed above.
                                             </p>
                                         </>
                                     ) : (
                                         <>
                                             <div className="font-semibold text-sm text-emerald-600 dark:text-emerald-400">
-                                                No Bottleneck
+                                                No Material Bottleneck
                                             </div>
                                             <p className="text-xs text-muted-foreground mt-1">
                                                 All required materials exceed current batch capacity.
@@ -495,7 +508,12 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                         <Card className="border border-border/80 shadow-xs h-full bg-card">
                             <CardContent className="flex flex-col justify-between h-full space-y-3">
                                 <div className="flex items-center justify-between">
-                                    <span className="text-xs font-semibold text-muted-foreground">Batch &amp; Sizing Rules</span>
+                                    <span
+                                        className="text-xs font-semibold text-muted-foreground"
+                                        title="Recipe standard batch quantity and yield/wastage allowances factored into this projection."
+                                    >
+                                        Standard Recipe Batch Sizing
+                                    </span>
                                     <div className="p-2 rounded-lg bg-muted/60 text-muted-foreground">
                                         <Layers className="h-4 w-4" />
                                     </div>
@@ -509,14 +527,14 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                     </div>
                                     <p className="text-xs text-muted-foreground mt-1.5">
                                         {result.components.length > 0
-                                            ? `${result.components.length} components evaluated across BOM hierarchy`
+                                            ? `${result.components.length} recipe materials evaluated`
                                             : "BOM version lacks route step or component definitions"}
                                     </p>
                                 </div>
                                 <div className="pt-1 text-[11px] text-muted-foreground flex items-center justify-between">
-                                    <span>Yield &amp; Wastage Factored</span>
+                                    <span>Wastage &amp; Scrap Factored</span>
                                     <span className={`font-mono font-medium ${result.components.length > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
-                                        {result.components.length > 0 ? "Applied" : "Pending BOM"}
+                                        {result.components.length > 0 ? "Included" : "Pending Recipe"}
                                     </span>
                                 </div>
                             </CardContent>

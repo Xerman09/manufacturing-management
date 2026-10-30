@@ -43,7 +43,7 @@ function pickString(obj: Record<string, unknown> | null | undefined, keys: strin
 }
 export const metadata = {
     title: "Raw Materials to Finished Goods Projection | MM",
-    description: "Estimate how many finished goods can be produced from live eligible materials using approved recipe versions."
+    description: "Estimate the maximum finished goods you can manufacture based on live usable materials and approved recipes."
 }
 function buildHeaderUserFromToken(token: string | null | undefined) {
     const payload = token ? decodeJwtPayload(token) : null;

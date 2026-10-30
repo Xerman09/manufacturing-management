@@ -76,6 +76,8 @@ export const TrackingLineGrid: React.FC<TrackingLineGridProps> = ({ lines }) => 
                         <th className="p-2.5 text-left font-semibold" title="Physical Quantity Picked on Floor During Consolidation Picking">Physical (Pick)</th>
                         <th className="p-2.5 text-left font-semibold" title="Quantity Approved in Consolidation Batches">Approved Consolidation</th>
                         <th className="p-2.5 text-left font-semibold" title="Remaining Quantity to Physically Consolidate (Ordered - Physical Pick)">Remaining Consolidation</th>
+                        <th className="p-2.5 text-left font-semibold" title="Total Quantity Invoiced across Sales Invoices">Invoiced Qty</th>
+                        <th className="p-2.5 text-left font-semibold" title="Delivered or Served Quantity to Customer">Served Qty</th>
                         <th className="p-2.5 text-left font-semibold" title="Current Fulfillment Stage for this line item">Fulfillment Stage</th>
                         <th className="p-2.5 pr-3 text-left font-semibold" title="Operational alerts, lot substitutions, or picking discrepancies">Exceptions</th>
                     </tr>
@@ -154,6 +156,16 @@ export const TrackingLineGrid: React.FC<TrackingLineGridProps> = ({ lines }) => 
                                         {line.remaining_to_consolidate_physical.toLocaleString()}
                                     </td>
 
+                                    {/* Invoiced Qty */}
+                                    <td className="p-2.5 text-left font-medium text-sky-700 dark:text-sky-300" title={`Invoiced: ${line.invoiced_quantity > 0 ? `${line.invoiced_quantity.toLocaleString()} ${line.uom}` : "-"}`}>
+                                        {line.invoiced_quantity > 0 ? line.invoiced_quantity.toLocaleString() : "-"}
+                                    </td>
+
+                                    {/* Served Qty */}
+                                    <td className="p-2.5 text-left font-bold text-emerald-700 dark:text-emerald-300" title={`Served: ${line.served_quantity.toLocaleString()} ${line.uom}`}>
+                                        {line.served_quantity.toLocaleString()}
+                                    </td>
+
                                     {/* Fulfillment Stage */}
                                     <td className="p-2.5 text-left" title={`Fulfillment Stage: ${line.stage}`}>
                                         {getStageBadge(line.stage)}
@@ -213,7 +225,7 @@ export const TrackingLineGrid: React.FC<TrackingLineGridProps> = ({ lines }) => 
                                 {/* Expanded Audit Panels */}
                                 {isExpanded && (
                                     <tr className="bg-muted/15">
-                                        <td colSpan={11} className="p-3 pl-10 pr-3">
+                                        <td colSpan={13} className="p-3 pl-10 pr-3">
                                             <AuditReservationConsolidationPanels
                                                 reservations={line.reservations}
                                                 consolidationBatches={line.consolidation_batches}

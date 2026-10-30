@@ -6,7 +6,6 @@ import {
     AlertCircle,
     Info
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
     FeasibilityFilterBar,
@@ -289,12 +288,9 @@ export default function ProductionFeasibilityModule() {
                         <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
                             Raw Materials to Finished Goods Projection
                         </h1>
-                        <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20">
-                            Read-Only
-                        </Badge>
                     </div>
                     <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                        Estimate how many finished goods can be produced from live eligible materials using approved recipe versions.
+                        Estimate the maximum finished goods you can manufacture based on live usable materials and approved recipes.
                     </p>
                 </div>
             </div>
@@ -329,13 +325,18 @@ export default function ProductionFeasibilityModule() {
                 </Alert>
             )}
 
-            {/* Diagnostics Warnings Banner */}
+            {/* Production Notes & Unit Conversion Alerts Banner */}
             {result && result.diagnostics.length > 0 && (
                 <Alert className="border-amber-500/20 bg-amber-500/5 text-amber-900 dark:text-amber-200">
                     <Info className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                    <AlertTitle className="text-xs font-semibold">Diagnostics &amp; System Observations</AlertTitle>
+                    <AlertTitle
+                        className="text-xs font-semibold"
+                        title="Important system observations regarding material conversions, stock allocation, or recipe requirements."
+                    >
+                        Production Notes &amp; Unit Conversion Alerts
+                    </AlertTitle>
                     <AlertDescription className="text-xs mt-1 space-y-1">
-                        {result.diagnostics.map((diag, idx) => (
+                        {Array.from(new Set(result.diagnostics)).map((diag, idx) => (
                             <div key={idx} className="flex items-start gap-1">
                                 <span>•</span>
                                 <span>{diag}</span>

@@ -77,7 +77,7 @@ export async function GET(
         }
 
         // 2. Fetch Customer, Branch, Cancellation Request, and Order Lines in parallel
-        const [custRes, branchRes, cancelReqRes, sodRes] = await Promise.all([
+        const [custRes, branchRes, cancelReqRes, sodRes, invByIdRes, invByNoRes] = await Promise.all([
             so.customer_code
                 ? fetch(
                       `${DIRECTUS_URL}/items/customer?filter[customer_code][_eq]=${encodeURIComponent(
@@ -100,7 +100,32 @@ export async function GET(
                 `${DIRECTUS_URL}/items/sales_order_details?filter[order_id][_eq]=${oId}&limit=-1&fields=detail_id,order_id,product_id,ordered_quantity,allocated_quantity,served_quantity,remarks`,
                 { headers: directusHeaders, cache: "no-store" }
             ).catch(() => null),
+            fetch(
+                `${DIRECTUS_URL}/items/sales_invoice?filter[order_id][_eq]=${oId}&filter[transaction_status][_neq]=Cancelled&limit=-1&fields=invoice_id,invoice_no,order_id,transaction_status`,
+                { headers: directusHeaders, cache: "no-store" }
+            ).catch(() => null),
+            so.order_no
+                ? fetch(
+                      `${DIRECTUS_URL}/items/sales_invoice?filter[order_id][_eq]=${encodeURIComponent(so.order_no)}&filter[transaction_status][_neq]=Cancelled&limit=-1&fields=invoice_id,invoice_no,order_id,transaction_status`,
+                      { headers: directusHeaders, cache: "no-store" }
+                  ).catch(() => null)
+                : Promise.resolve(null),
         ]);
+
+        const invoiceList: Array<{ invoice_id: number; invoice_no: string }> = [];
+        const seenInvIds = new Set<number>();
+        for (const res of [invByIdRes, invByNoRes]) {
+            if (res && res.ok) {
+                const j = await res.json().catch(() => ({ data: [] }));
+                for (const inv of j.data || []) {
+                    const invId = Number(inv.invoice_id);
+                    if (invId && !seenInvIds.has(invId)) {
+                        seenInvIds.add(invId);
+                        invoiceList.push({ invoice_id: invId, invoice_no: String(inv.invoice_no || invId) });
+                    }
+                }
+            }
+        }
 
         let customerName = so.customer_code;
         if (custRes && custRes.ok) {
@@ -146,8 +171,12 @@ export async function GET(
             picked_by?: unknown;
         }> = [];
 
+        const invoiceIdArr = Array.from(seenInvIds);
+        const orderLineInvoiceQtyMap = new Map<number, number>();
+        let totalInvoicedFromDetails = 0;
+
         if (detailIds.length > 0) {
-            const [prodRes, resvRes, consolDetailRes] = await Promise.all([
+            const [prodRes, resvRes, consolDetailRes, sidByInvRes, sidByOrderRes] = await Promise.all([
                 productIds.length > 0
                     ? fetch(
                           `${DIRECTUS_URL}/items/products?filter[product_id][_in]=${productIds.join(",")}&limit=-1&fields=product_id,product_code,product_name,unit_of_measurement.unit_shortcut,unit_of_measurement.unit_name`,
@@ -162,7 +191,34 @@ export async function GET(
                     `${DIRECTUS_URL}/items/consolidator_details?filter[sales_order_detail_id][_in]=${detailIds.join(",")}&limit=-1&fields=id,consolidator_id,sales_order_detail_id,product_id,ordered_quantity,applied_quantity,picked_quantity,picked_at,picked_by.user_fname,picked_by.user_lname`,
                     { headers: directusHeaders, cache: "no-store" }
                 ).catch(() => null),
+                invoiceIdArr.length > 0
+                    ? fetch(
+                          `${DIRECTUS_URL}/items/sales_invoice_details?filter[invoice_no][_in]=${invoiceIdArr.join(",")}&limit=-1&fields=detail_id,order_id,invoice_no,product_id,quantity`,
+                          { headers: directusHeaders, cache: "no-store" }
+                      ).catch(() => null)
+                    : Promise.resolve(null),
+                fetch(
+                    `${DIRECTUS_URL}/items/sales_invoice_details?filter[order_id][_eq]=${oId}&limit=-1&fields=detail_id,order_id,invoice_no,product_id,quantity`,
+                    { headers: directusHeaders, cache: "no-store" }
+                ).catch(() => null),
             ]);
+
+            const seenSidIds = new Set<number>();
+            for (const res of [sidByInvRes, sidByOrderRes]) {
+                if (res && res.ok) {
+                    const sidJson = await res.json().catch(() => ({ data: [] }));
+                    for (const sid of sidJson.data || []) {
+                        const sidId = Number(sid.detail_id);
+                        if (sidId && seenSidIds.has(sidId)) continue;
+                        if (sidId) seenSidIds.add(sidId);
+
+                        const pId = Number(sid.product_id);
+                        const q = Number(sid.quantity) || 0;
+                        orderLineInvoiceQtyMap.set(pId, (orderLineInvoiceQtyMap.get(pId) || 0) + q);
+                        totalInvoicedFromDetails += q;
+                    }
+                }
+            }
 
             if (prodRes && prodRes.ok) {
                 const pJson = await prodRes.json();
@@ -437,6 +493,8 @@ export async function GET(
                 is_missing_reservations: isMissingReservations,
                 is_zero_quantity: isZeroQuantity,
                 is_cancelled: isOrderCancelled,
+                invoiced_quantity: orderLineInvoiceQtyMap.get(pId) || 0,
+                served_quantity: Number(sod.served_quantity) || 0,
                 reservations,
                 consolidation_batches: batches,
             });
@@ -453,6 +511,12 @@ export async function GET(
         const totalAppliedQty = lines.reduce((sum, l) => sum + l.applied_consolidation_quantity, 0);
         const totalRemainingAlloc = lines.reduce((sum, l) => sum + l.remaining_to_allocate, 0);
         const totalRemainingConsol = lines.reduce((sum, l) => sum + l.remaining_to_consolidate_physical, 0);
+
+        const totalServedQty = lines.reduce((sum, l) => sum + l.served_quantity, 0);
+        const totalInvoicedQty = totalInvoicedFromDetails || lines.reduce((sum, l) => sum + l.invoiced_quantity, 0);
+        const invoicedServedRate = totalInvoicedQty > 0 ? (totalServedQty / totalInvoicedQty) * 100 : 0;
+        const invoiceCount = invoiceList.length;
+        const invoiceNumbers = invoiceList.map((i) => i.invoice_no);
 
         // Quantity-weighted rates
         const allocRate = totalOrderedQty > 0 ? (totalAllocQty / totalOrderedQty) * 100 : 0;
@@ -531,6 +595,11 @@ export async function GET(
             total_planned_applied_quantity: totalAppliedQty,
             total_remaining_to_allocate: totalRemainingAlloc,
             total_remaining_to_consolidate: totalRemainingConsol,
+            total_invoiced_quantity: totalInvoicedQty,
+            total_served_quantity: totalServedQty,
+            invoiced_served_rate: invoicedServedRate,
+            invoice_count: invoiceCount,
+            invoice_numbers: invoiceNumbers,
             allocation_rate: allocRate,
             physical_consolidation_rate: physicalConsolRate,
             planned_consolidation_rate: plannedConsolRate,
