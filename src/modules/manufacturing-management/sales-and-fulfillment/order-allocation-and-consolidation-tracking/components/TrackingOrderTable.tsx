@@ -4,7 +4,6 @@ import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Eye,
-    AlertTriangle,
     FileText,
     Boxes,
     Layers,
