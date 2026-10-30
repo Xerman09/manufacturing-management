@@ -103,8 +103,8 @@ export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
                             <th className="p-3" title="Originating Branch or Location">Branch</th>
                             <th className="p-3" title="Order Date and Requested Delivery Date">Dates</th>
                             <th className="p-3 text-left" title="Total Ordered Quantity across all items in this order">Ordered Qty</th>
-                            <th className="p-3 min-w-[170px]" title="Progress of lot reservations allocated towards ordered quantity">Allocated vs Ordered</th>
                             <th className="p-3 min-w-[190px]" title="Progress of physical picks and approved consolidation towards ordered quantity">Consolidated vs Ordered</th>
+                            <th className="p-3 min-w-[190px]" title="Comparison of invoiced order quantity against physically served quantity">Invoiced Order vs Serve Qty</th>
                             <th className="p-3" title="Current warehouse fulfillment workflow stage">Fulfillment Stage</th>
                             <th className="p-3" title="Operational alerts and audit discrepancies for this order">Exceptions</th>
                             <th className="p-3 pr-4 text-right" title="View detailed order tracking and batch audit breakdown">Actions</th>
@@ -184,36 +184,7 @@ export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
                                                 {order.uom_summary} ({order.line_count} lines)
                                             </div>
                                         </td>
-
-                                        {/* 6. Allocated vs Ordered */}
-                                        <td className="p-3" title={`Allocated: ${order.total_allocated_quantity.toLocaleString()} (${order.allocation_rate.toFixed(1)}%) | Remaining: ${order.total_remaining_to_allocate.toLocaleString()}`}>
-                                            <div className="space-y-1">
-                                                <div className="flex items-center justify-between text-[11px]">
-                                                    <span className="font-bold text-blue-700 dark:text-blue-300">
-                                                        {order.total_allocated_quantity.toLocaleString()}
-                                                    </span>
-                                                    <span className="text-muted-foreground font-medium">
-                                                        {order.allocation_rate.toFixed(1)}%
-                                                    </span>
-                                                </div>
-                                                <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
-                                                    <div
-                                                        className={`h-1.5 rounded-full transition-all ${
-                                                            order.allocation_rate >= 100 ? "bg-emerald-500" : "bg-blue-600"
-                                                        }`}
-                                                        style={{ width: `${Math.min(100, order.allocation_rate)}%` }}
-                                                    />
-                                                </div>
-                                                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                                                    <span>Rem: {order.total_remaining_to_allocate.toLocaleString()}</span>
-                                                    {order.exceptions.has_discrepancy && (
-                                                        <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-0.5" title="Discrepancy: Active reservations total differs from stored allocated quantity">
-                                                            <AlertTriangle className="w-2.5 h-2.5" /> Discrepancy
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </td>
+ 
 
                                         {/* 7. Consolidated vs Ordered */}
                                         <td className="p-3" title={`Physical Picked: ${order.total_physical_picked_quantity.toLocaleString()} (${order.physical_consolidation_rate.toFixed(1)}%) | Approved Plan: ${order.total_planned_applied_quantity.toLocaleString()} | Remaining: ${order.total_remaining_to_consolidate.toLocaleString()}`}>
@@ -248,7 +219,69 @@ export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
                                             </div>
                                         </td>
 
-                                        {/* 8. Fulfillment Stage */}
+                                        {/* Invoiced Order vs Serve Qty */}
+                                        <td
+                                            className="p-3"
+                                            title={
+                                                order.total_invoiced_quantity > 0
+                                                    ? `Served: ${order.total_served_quantity.toLocaleString()} (${order.invoiced_served_rate.toFixed(1)}%) | Invoiced: ${order.total_invoiced_quantity.toLocaleString()} | Remaining: ${Math.max(0, order.total_invoiced_quantity - order.total_served_quantity).toLocaleString()}`
+                                                    : `Served: ${order.total_served_quantity.toLocaleString()} | Invoiced: - (No active invoice)`
+                                            }
+                                        >
+                                            <div className="space-y-1">
+                                                <div className="flex items-center justify-between text-[11px]">
+                                                    <span className="font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                                                        <span>Serve: {order.total_served_quantity.toLocaleString()}</span>
+                                                        {order.total_invoiced_quantity > 0 ? (
+                                                            <span className="text-[10px] text-sky-600 dark:text-sky-400 font-normal">
+                                                                (Inv: {order.total_invoiced_quantity.toLocaleString()})
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[10px] text-muted-foreground font-normal">
+                                                                (Inv: -)
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                    <span className="text-muted-foreground font-medium">
+                                                        {order.total_invoiced_quantity > 0
+                                                            ? `${order.invoiced_served_rate.toFixed(1)}%`
+                                                            : "-"}
+                                                    </span>
+                                                </div>
+                                                <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden relative">
+                                                    <div
+                                                        className={`h-1.5 rounded-full transition-all ${
+                                                            order.total_invoiced_quantity > 0 && order.invoiced_served_rate >= 100
+                                                                ? "bg-emerald-500"
+                                                                : "bg-teal-600"
+                                                        }`}
+                                                        style={{
+                                                            width: `${order.total_invoiced_quantity > 0 ? Math.min(100, order.invoiced_served_rate) : 0}%`,
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                                                    <span>
+                                                        Rem:{" "}
+                                                        {order.total_invoiced_quantity > 0
+                                                            ? Math.max(0, order.total_invoiced_quantity - order.total_served_quantity).toLocaleString()
+                                                            : "-"}
+                                                    </span>
+                                                    <span
+                                                        className="text-sky-600 dark:text-sky-400 flex items-center gap-0.5"
+                                                        title={
+                                                            order.invoice_count > 0
+                                                                ? `Linked Invoices: ${order.invoice_numbers?.join(", ") || order.invoice_count}`
+                                                                : "No active sales invoice"
+                                                        }
+                                                    >
+                                                        {order.invoice_count > 0 ? `${order.invoice_count} Inv` : "No Invoice"}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </td>
+
+                                        {/* Fulfillment Stage */}
                                         <td className="p-3" title={`Fulfillment Stage: ${order.stage}`}>
                                             <div className="flex flex-col gap-1 items-start">
                                                 {getStageBadge(order.stage)}

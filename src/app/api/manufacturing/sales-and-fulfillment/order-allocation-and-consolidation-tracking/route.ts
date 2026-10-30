@@ -139,10 +139,11 @@ export async function GET(req: NextRequest) {
         }
 
         const orderIds: number[] = soRows.map((o: { order_id: number }) => Number(o.order_id));
+        const orderNos: string[] = Array.from(new Set(soRows.map((o: { order_no?: string }) => o.order_no).filter(Boolean))) as string[];
         const customerCodes: string[] = Array.from(new Set(soRows.map((o: { customer_code?: string }) => o.customer_code).filter(Boolean)));
 
-        // 3. Batch fetch Customer names, Cancellation requests, and Order Details
-        const [custRes, cancelReqRes, sodRes] = await Promise.all([
+        // 3. Batch fetch Customer names, Cancellation requests, Order Details, and Sales Invoices
+        const [custRes, cancelReqRes, sodRes, invByIdRes, invByNoRes] = await Promise.all([
             customerCodes.length > 0
                 ? fetch(
                       `${DIRECTUS_URL}/items/customer?filter[customer_code][_in]=${customerCodes.map((c) => encodeURIComponent(c)).join(",")}&limit=-1&fields=customer_code,customer_name`,
@@ -157,6 +158,18 @@ export async function GET(req: NextRequest) {
                 `${DIRECTUS_URL}/items/sales_order_details?filter[order_id][_in]=${orderIds.join(",")}&limit=-1&fields=detail_id,order_id,product_id,ordered_quantity,allocated_quantity,served_quantity,remarks`,
                 { headers: directusHeaders, cache: "no-store" }
             ).catch(() => null),
+            orderIds.length > 0
+                ? fetch(
+                      `${DIRECTUS_URL}/items/sales_invoice?filter[order_id][_in]=${orderIds.join(",")}&filter[transaction_status][_neq]=Cancelled&limit=-1&fields=invoice_id,invoice_no,order_id,transaction_status`,
+                      { headers: directusHeaders, cache: "no-store" }
+                  ).catch(() => null)
+                : Promise.resolve(null),
+            orderNos.length > 0
+                ? fetch(
+                      `${DIRECTUS_URL}/items/sales_invoice?filter[order_id][_in]=${orderNos.map((no) => encodeURIComponent(no)).join(",")}&filter[transaction_status][_neq]=Cancelled&limit=-1&fields=invoice_id,invoice_no,order_id,transaction_status`,
+                      { headers: directusHeaders, cache: "no-store" }
+                  ).catch(() => null)
+                : Promise.resolve(null),
         ]);
 
         const customerMap = new Map<string, string>();
@@ -175,11 +188,51 @@ export async function GET(req: NextRequest) {
             }
         }
 
+        const invoiceMapByOrder = new Map<number, Array<{ invoice_id: number; invoice_no: string }>>();
+        const orderNoToIdMap = new Map<string, number>();
+        for (const so of soRows) {
+            if (so.order_no && so.order_id) {
+                orderNoToIdMap.set(String(so.order_no).trim().toLowerCase(), Number(so.order_id));
+            }
+        }
+
+        const allInvoiceIds = new Set<number>();
+        for (const res of [invByIdRes, invByNoRes]) {
+            if (res && res.ok) {
+                const j = await res.json().catch(() => ({ data: [] }));
+                for (const inv of j.data || []) {
+                    const invId = Number(inv.invoice_id);
+                    if (!invId) continue;
+                    allInvoiceIds.add(invId);
+
+                    let targetOrderId: number | null = null;
+                    if (typeof inv.order_id === "number" || (!isNaN(Number(inv.order_id)) && String(inv.order_id).trim() !== "")) {
+                        const numericId = Number(inv.order_id);
+                        if (orderIds.includes(numericId)) {
+                            targetOrderId = numericId;
+                        }
+                    }
+                    if (!targetOrderId && typeof inv.order_id === "string") {
+                        const matched = orderNoToIdMap.get(inv.order_id.trim().toLowerCase());
+                        if (matched) targetOrderId = matched;
+                    }
+
+                    if (targetOrderId) {
+                        const list = invoiceMapByOrder.get(targetOrderId) || [];
+                        if (!list.some((item) => item.invoice_id === invId)) {
+                            list.push({ invoice_id: invId, invoice_no: String(inv.invoice_no || invId) });
+                            invoiceMapByOrder.set(targetOrderId, list);
+                        }
+                    }
+                }
+            }
+        }
+
         const sodRows = sodRes && sodRes.ok ? (await sodRes.json()).data || [] : [];
         const detailIds: number[] = sodRows.map((d: { detail_id: number }) => Number(d.detail_id));
         const productIds: number[] = Array.from(new Set(sodRows.map((d: { product_id: number }) => Number(d.product_id))));
 
-        // 4. Batch fetch Products, Reservations, and Consolidator Details
+        // 4. Batch fetch Products, Reservations, Consolidator Details, and Sales Invoice Details
         const productMap = new Map<number, { product_id: number; product_code: string; product_name: string; uom: string }>();
         const reservationMap = new Map<number, LotReservationRef[]>();
         let consolidatorDetailRows: Array<{
@@ -194,121 +247,179 @@ export async function GET(req: NextRequest) {
             picked_by?: unknown;
         }> = [];
 
-        if (detailIds.length > 0) {
-            const [prodRes, resvRes, consolDetailRes] = await Promise.all([
-                productIds.length > 0
-                    ? fetch(
-                          `${DIRECTUS_URL}/items/products?filter[product_id][_in]=${productIds.join(",")}&limit=-1&fields=product_id,product_code,product_name,unit_of_measurement.unit_shortcut,unit_of_measurement.unit_name`,
-                          { headers: directusHeaders, cache: "no-store" }
-                      ).catch(() => null)
-                    : Promise.resolve(null),
-                fetch(
-                    `${DIRECTUS_URL}/items/sales_order_reservation?filter[sales_order_detail_id][_in]=${detailIds.join(",")}&limit=-1&fields=reservation_id,sales_order_detail_id,inventory_lot_id.inventory_lot_id,inventory_lot_id.batch_no,inventory_lot_id.expiry_date,inventory_lot_id.lot_id.lot_name,reserved_quantity,picked_quantity,status,created_at`,
-                    { headers: directusHeaders, cache: "no-store" }
-                ).catch(() => null),
-                fetch(
-                    `${DIRECTUS_URL}/items/consolidator_details?filter[sales_order_detail_id][_in]=${detailIds.join(",")}&limit=-1&fields=id,consolidator_id,sales_order_detail_id,product_id,ordered_quantity,applied_quantity,picked_quantity,picked_at,picked_by.user_fname,picked_by.user_lname`,
-                    { headers: directusHeaders, cache: "no-store" }
-                ).catch(() => null),
-            ]);
+        const invoiceIdArr = Array.from(allInvoiceIds);
+        const [prodRes, resvRes, consolDetailRes, sidByInvRes, sidByOrderRes] = await Promise.all([
+            productIds.length > 0
+                ? fetch(
+                      `${DIRECTUS_URL}/items/products?filter[product_id][_in]=${productIds.join(",")}&limit=-1&fields=product_id,product_code,product_name,unit_of_measurement.unit_shortcut,unit_of_measurement.unit_name`,
+                      { headers: directusHeaders, cache: "no-store" }
+                  ).catch(() => null)
+                : Promise.resolve(null),
+            detailIds.length > 0
+                ? fetch(
+                      `${DIRECTUS_URL}/items/sales_order_reservation?filter[sales_order_detail_id][_in]=${detailIds.join(",")}&limit=-1&fields=reservation_id,sales_order_detail_id,inventory_lot_id.inventory_lot_id,inventory_lot_id.batch_no,inventory_lot_id.expiry_date,inventory_lot_id.lot_id.lot_name,reserved_quantity,picked_quantity,status,created_at`,
+                      { headers: directusHeaders, cache: "no-store" }
+                  ).catch(() => null)
+                : Promise.resolve(null),
+            detailIds.length > 0
+                ? fetch(
+                      `${DIRECTUS_URL}/items/consolidator_details?filter[sales_order_detail_id][_in]=${detailIds.join(",")}&limit=-1&fields=id,consolidator_id,sales_order_detail_id,product_id,ordered_quantity,applied_quantity,picked_quantity,picked_at,picked_by.user_fname,picked_by.user_lname`,
+                      { headers: directusHeaders, cache: "no-store" }
+                  ).catch(() => null)
+                : Promise.resolve(null),
+            invoiceIdArr.length > 0
+                ? fetch(
+                      `${DIRECTUS_URL}/items/sales_invoice_details?filter[invoice_no][_in]=${invoiceIdArr.join(",")}&limit=-1&fields=detail_id,order_id,invoice_no,product_id,quantity`,
+                      { headers: directusHeaders, cache: "no-store" }
+                  ).catch(() => null)
+                : Promise.resolve(null),
+            orderIds.length > 0
+                ? fetch(
+                      `${DIRECTUS_URL}/items/sales_invoice_details?filter[order_id][_in]=${orderIds.join(",")}&limit=-1&fields=detail_id,order_id,invoice_no,product_id,quantity`,
+                      { headers: directusHeaders, cache: "no-store" }
+                  ).catch(() => null)
+                : Promise.resolve(null),
+        ]);
 
-            if (prodRes && prodRes.ok) {
-                const pJson = await prodRes.json();
-                for (const p of pJson.data || []) {
-                    const uom =
-                        typeof p.unit_of_measurement === "object" && p.unit_of_measurement
-                            ? p.unit_of_measurement.unit_shortcut || p.unit_of_measurement.unit_name || "pcs"
-                            : typeof p.unit_of_measurement === "string"
-                            ? p.unit_of_measurement
-                            : "pcs";
-                    productMap.set(Number(p.product_id), {
-                        product_id: Number(p.product_id),
-                        product_code: p.product_code || `PRD-${p.product_id}`,
-                        product_name: p.product_name || `Product #${p.product_id}`,
-                        uom,
-                    });
-                }
+        const orderLineInvoiceQtyMap = new Map<string, number>();
+        const orderTotalInvoiceQtyMap = new Map<number, number>();
+        const invIdToOrderMap = new Map<number, number>();
+        for (const [oId, invList] of invoiceMapByOrder.entries()) {
+            for (const inv of invList) {
+                invIdToOrderMap.set(inv.invoice_id, oId);
             }
+        }
 
-            if (resvRes && resvRes.ok) {
-                const rJson = await resvRes.json();
-                const rawRows: RawDirectusReservation[] = rJson.data || [];
+        const seenSidIds = new Set<number>();
+        for (const res of [sidByInvRes, sidByOrderRes]) {
+            if (res && res.ok) {
+                const sidJson = await res.json().catch(() => ({ data: [] }));
+                for (const sid of sidJson.data || []) {
+                    const sidId = Number(sid.detail_id);
+                    if (sidId && seenSidIds.has(sidId)) continue;
+                    if (sidId) seenSidIds.add(sidId);
 
-                // Group by sales_order_detail_id to evaluate initial planning vs added floor lots
-                const detailRowsMap = new Map<number, RawDirectusReservation[]>();
-                for (const r of rawRows) {
-                    const dId = Number(r.sales_order_detail_id);
-                    const arr = detailRowsMap.get(dId) || [];
-                    arr.push(r);
-                    detailRowsMap.set(dId, arr);
-                }
-
-                for (const [dId, dRows] of detailRowsMap.entries()) {
-                    // Sort by reservation_id ascending so earliest allocation comes first
-                    dRows.sort((a, b) => Number(a.reservation_id) - Number(b.reservation_id));
-                    const earliestTime = dRows[0]?.created_at ? new Date(dRows[0].created_at).getTime() : null;
-
-                    for (let i = 0; i < dRows.length; i++) {
-                        const r = dRows[i];
-                        const rawReserved = Number(r.reserved_quantity) || 0;
-                        const rawPicked = Number(r.picked_quantity) || 0;
-                        const rowTime = r.created_at ? new Date(r.created_at).getTime() : null;
-
-                        const isSubstitutedLot = rawReserved === 0 && rawPicked > 0;
-                        const isAddedLot = isSubstitutedLot || (i > 0 && (
-                            (rowTime && earliestTime && rowTime > earliestTime + 5000) ||
-                            (rawReserved === rawPicked && rawPicked > 0 && Number(dRows[0].picked_quantity || 0) < Number(dRows[0].reserved_quantity || 0))
-                        ));
-                        const isPickExceeds = rawReserved > 0 && rawPicked > rawReserved && !isAddedLot;
-                        const effectiveAlloc = isPickExceeds ? rawPicked : (isSubstitutedLot ? rawPicked : rawReserved);
-
-                        let lotNo = "-";
-                        let batchNo = "-";
-                        let expiryDate: string | null = null;
-                        let invLotId = 0;
-
-                        if (typeof r.inventory_lot_id === "object" && r.inventory_lot_id) {
-                            invLotId = Number(r.inventory_lot_id.inventory_lot_id || 0);
-                            batchNo = r.inventory_lot_id.batch_no || "-";
-                            expiryDate = r.inventory_lot_id.expiry_date || null;
-                            if (typeof r.inventory_lot_id.lot_id === "object" && r.inventory_lot_id.lot_id) {
-                                lotNo = r.inventory_lot_id.lot_id.lot_name || "-";
-                            } else if (r.inventory_lot_id.lot_id) {
-                                lotNo = `Lot #${r.inventory_lot_id.lot_id}`;
-                            }
-                        } else if (r.inventory_lot_id) {
-                            invLotId = Number(r.inventory_lot_id);
-                            lotNo = `Lot #${r.inventory_lot_id}`;
+                    let targetOrderId: number | null = null;
+                    if (sid.order_id) {
+                        const num = Number(sid.order_id);
+                        if (!isNaN(num) && orderIds.includes(num)) {
+                            targetOrderId = num;
+                        } else if (typeof sid.order_id === "string") {
+                            const matched = orderNoToIdMap.get(sid.order_id.trim().toLowerCase());
+                            if (matched) targetOrderId = matched;
                         }
+                    }
+                    if (!targetOrderId && sid.invoice_no) {
+                        targetOrderId = invIdToOrderMap.get(Number(sid.invoice_no)) || null;
+                    }
 
-                        const resvRef: LotReservationRef = {
-                            reservation_id: Number(r.reservation_id),
-                            sales_order_detail_id: dId,
-                            inventory_lot_id: invLotId,
-                            lot_number: lotNo,
-                            batch_no: batchNo,
-                            expiry_date: expiryDate,
-                            reserved_quantity: rawReserved,
-                            picked_quantity: rawPicked,
-                            effective_allocated_quantity: effectiveAlloc,
-                            status: r.status || "Reserved",
-                            is_pick_exceeds_reserve: isPickExceeds,
-                            is_substituted_lot: isSubstitutedLot,
-                            is_added_lot: isAddedLot,
-                            created_at: r.created_at || null,
-                        };
-
-                        const arr = reservationMap.get(dId) || [];
-                        arr.push(resvRef);
-                        reservationMap.set(dId, arr);
+                    if (targetOrderId) {
+                        const pId = Number(sid.product_id);
+                        const qty = Number(sid.quantity) || 0;
+                        const key = `${targetOrderId}:${pId}`;
+                        orderLineInvoiceQtyMap.set(key, (orderLineInvoiceQtyMap.get(key) || 0) + qty);
+                        orderTotalInvoiceQtyMap.set(targetOrderId, (orderTotalInvoiceQtyMap.get(targetOrderId) || 0) + qty);
                     }
                 }
             }
+        }
 
-            if (consolDetailRes && consolDetailRes.ok) {
-                const cJson = await consolDetailRes.json();
-                consolidatorDetailRows = cJson.data || [];
+        if (prodRes && prodRes.ok) {
+            const pJson = await prodRes.json();
+            for (const p of pJson.data || []) {
+                const uom =
+                    typeof p.unit_of_measurement === "object" && p.unit_of_measurement
+                        ? p.unit_of_measurement.unit_shortcut || p.unit_of_measurement.unit_name || "pcs"
+                        : typeof p.unit_of_measurement === "string"
+                        ? p.unit_of_measurement
+                        : "pcs";
+                productMap.set(Number(p.product_id), {
+                    product_id: Number(p.product_id),
+                    product_code: p.product_code || `PRD-${p.product_id}`,
+                    product_name: p.product_name || `Product #${p.product_id}`,
+                    uom,
+                });
             }
+        }
+
+        if (resvRes && resvRes.ok) {
+            const rJson = await resvRes.json();
+            const rawRows: RawDirectusReservation[] = rJson.data || [];
+
+            // Group by sales_order_detail_id to evaluate initial planning vs added floor lots
+            const detailRowsMap = new Map<number, RawDirectusReservation[]>();
+            for (const r of rawRows) {
+                const dId = Number(r.sales_order_detail_id);
+                const arr = detailRowsMap.get(dId) || [];
+                arr.push(r);
+                detailRowsMap.set(dId, arr);
+            }
+
+            for (const [dId, dRows] of detailRowsMap.entries()) {
+                // Sort by reservation_id ascending so earliest allocation comes first
+                dRows.sort((a, b) => Number(a.reservation_id) - Number(b.reservation_id));
+                const earliestTime = dRows[0]?.created_at ? new Date(dRows[0].created_at).getTime() : null;
+
+                for (let i = 0; i < dRows.length; i++) {
+                    const r = dRows[i];
+                    const rawReserved = Number(r.reserved_quantity) || 0;
+                    const rawPicked = Number(r.picked_quantity) || 0;
+                    const rowTime = r.created_at ? new Date(r.created_at).getTime() : null;
+
+                    const isSubstitutedLot = rawReserved === 0 && rawPicked > 0;
+                    const isAddedLot = isSubstitutedLot || (i > 0 && (
+                        (rowTime && earliestTime && rowTime > earliestTime + 5000) ||
+                        (rawReserved === rawPicked && rawPicked > 0 && Number(dRows[0].picked_quantity || 0) < Number(dRows[0].reserved_quantity || 0))
+                    ));
+                    const isPickExceeds = rawReserved > 0 && rawPicked > rawReserved && !isAddedLot;
+                    const effectiveAlloc = isPickExceeds ? rawPicked : (isSubstitutedLot ? rawPicked : rawReserved);
+
+                    let lotNo = "-";
+                    let batchNo = "-";
+                    let expiryDate: string | null = null;
+                    let invLotId = 0;
+
+                    if (typeof r.inventory_lot_id === "object" && r.inventory_lot_id) {
+                        invLotId = Number(r.inventory_lot_id.inventory_lot_id || 0);
+                        batchNo = r.inventory_lot_id.batch_no || "-";
+                        expiryDate = r.inventory_lot_id.expiry_date || null;
+                        if (typeof r.inventory_lot_id.lot_id === "object" && r.inventory_lot_id.lot_id) {
+                            lotNo = r.inventory_lot_id.lot_id.lot_name || "-";
+                        } else if (r.inventory_lot_id.lot_id) {
+                            lotNo = `Lot #${r.inventory_lot_id.lot_id}`;
+                        }
+                    } else if (r.inventory_lot_id) {
+                        invLotId = Number(r.inventory_lot_id);
+                        lotNo = `Lot #${r.inventory_lot_id}`;
+                    }
+
+                    const resvRef: LotReservationRef = {
+                        reservation_id: Number(r.reservation_id),
+                        sales_order_detail_id: dId,
+                        inventory_lot_id: invLotId,
+                        lot_number: lotNo,
+                        batch_no: batchNo,
+                        expiry_date: expiryDate,
+                        reserved_quantity: rawReserved,
+                        picked_quantity: rawPicked,
+                        effective_allocated_quantity: effectiveAlloc,
+                        status: r.status || "Reserved",
+                        is_pick_exceeds_reserve: isPickExceeds,
+                        is_substituted_lot: isSubstitutedLot,
+                        is_added_lot: isAddedLot,
+                        created_at: r.created_at || null,
+                    };
+
+                    const arr = reservationMap.get(dId) || [];
+                    arr.push(resvRef);
+                    reservationMap.set(dId, arr);
+                }
+            }
+        }
+
+        if (consolDetailRes && consolDetailRes.ok) {
+            const cJson = await consolDetailRes.json();
+            consolidatorDetailRows = cJson.data || [];
         }
 
         // 5. Fetch Parent Consolidation Batches
@@ -470,6 +581,9 @@ export async function GET(req: NextRequest) {
                 const isMissingReservations = storedAllocQty > 0 && activeReservations.length === 0;
                 const isZeroQuantity = orderedQty === 0;
 
+                const lineInvoicedQty = orderLineInvoiceQtyMap.get(`${oId}:${pId}`) || 0;
+                const lineServedQty = Number(sod.served_quantity) || 0;
+
                 lines.push({
                     detail_id: dId,
                     order_id: oId,
@@ -499,6 +613,8 @@ export async function GET(req: NextRequest) {
                     is_missing_reservations: isMissingReservations,
                     is_zero_quantity: isZeroQuantity,
                     is_cancelled: isOrderCancelled,
+                    invoiced_quantity: lineInvoicedQty,
+                    served_quantity: lineServedQty,
                     reservations,
                     consolidation_batches: batches,
                 });
@@ -515,6 +631,13 @@ export async function GET(req: NextRequest) {
             const totalAppliedQty = lines.reduce((sum, l) => sum + l.applied_consolidation_quantity, 0);
             const totalRemainingAlloc = lines.reduce((sum, l) => sum + l.remaining_to_allocate, 0);
             const totalRemainingConsol = lines.reduce((sum, l) => sum + l.remaining_to_consolidate_physical, 0);
+
+            const totalServedQty = lines.reduce((sum, l) => sum + l.served_quantity, 0);
+            const invList = invoiceMapByOrder.get(oId) || [];
+            const invoiceCount = invList.length;
+            const invoiceNumbers = invList.map((i) => i.invoice_no);
+            const totalInvoicedQty = orderTotalInvoiceQtyMap.get(oId) || lines.reduce((sum, l) => sum + l.invoiced_quantity, 0);
+            const invoicedServedRate = totalInvoicedQty > 0 ? (totalServedQty / totalInvoicedQty) * 100 : 0;
 
             // Quantity-weighted rates
             const allocRate = totalOrderedQty > 0 ? (totalAllocQty / totalOrderedQty) * 100 : 0;
@@ -599,6 +722,11 @@ export async function GET(req: NextRequest) {
                 total_planned_applied_quantity: totalAppliedQty,
                 total_remaining_to_allocate: totalRemainingAlloc,
                 total_remaining_to_consolidate: totalRemainingConsol,
+                total_invoiced_quantity: totalInvoicedQty,
+                total_served_quantity: totalServedQty,
+                invoiced_served_rate: invoicedServedRate,
+                invoice_count: invoiceCount,
+                invoice_numbers: invoiceNumbers,
                 allocation_rate: allocRate,
                 physical_consolidation_rate: physicalConsolRate,
                 planned_consolidation_rate: plannedConsolRate,
