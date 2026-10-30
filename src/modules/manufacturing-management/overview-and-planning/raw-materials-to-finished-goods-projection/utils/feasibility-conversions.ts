@@ -171,7 +171,7 @@ export function convertUomQuantity(
         if (!density || density <= 0) {
             return {
                 ok: false,
-                diagnostic: `Missing density factor to convert ${fromUom} to ${toUom} for "${componentName || "liquid component"}". Volumetric-to-mass conversions require a valid density factor.`
+                diagnostic: `Missing Density Factor: Cannot convert liquid volume (${fromUom}) to weight (${toUom}) for "${componentName || "liquid component"}". Please set up its density factor in Master Data.`
             };
         }
 
@@ -209,6 +209,6 @@ export function convertUomQuantity(
 
     return {
         ok: false,
-        diagnostic: `No valid conversion pathway from "${fromUom}" to "${toUom}" for component "${componentName || "Unknown"}".`
+        diagnostic: `Missing Unit Conversion: Cannot convert recipe unit "${fromUom}" to warehouse stock unit "${toUom}" for "${componentName || "Unknown"}". Please add a conversion rule in Unit Settings.`
     };
 }

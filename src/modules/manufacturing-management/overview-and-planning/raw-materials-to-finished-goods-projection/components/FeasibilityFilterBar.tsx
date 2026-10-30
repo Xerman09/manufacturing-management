@@ -124,7 +124,7 @@ export const FeasibilityFilterBar: React.FC<FeasibilityFilterBarProps> = ({
                     <div className="xl:col-span-3 space-y-1.5">
                         <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
                             <MapPin className="h-3.5 w-3.5 text-primary" />
-                            Production Branch <span className="text-destructive">*</span>
+                            Production Branch / Plant <span className="text-destructive">*</span>
                         </label>
                         <SearchableSelect
                             options={branchOptions}
@@ -141,7 +141,7 @@ export const FeasibilityFilterBar: React.FC<FeasibilityFilterBarProps> = ({
                     <div className="xl:col-span-3 space-y-1.5">
                         <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
                             <Package className="h-3.5 w-3.5 text-primary" />
-                            Finished Good <span className="text-destructive">*</span>
+                            Finished Good (Product) <span className="text-destructive">*</span>
                         </label>
                         <SearchableSelect
                             options={productOptions}
@@ -159,7 +159,7 @@ export const FeasibilityFilterBar: React.FC<FeasibilityFilterBarProps> = ({
                         <div className="flex items-center justify-between">
                             <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
                                 <Layers className="h-3.5 w-3.5 text-primary" />
-                                BOM Version
+                                Recipe / BOM Version
                             </label>
                             {isVersionsLoading && (
                                 <span className="flex items-center text-[10px] text-muted-foreground gap-1">
@@ -211,7 +211,7 @@ export const FeasibilityFilterBar: React.FC<FeasibilityFilterBarProps> = ({
                     <div className="xl:col-span-3 flex items-end gap-2">
                         <div className="flex-1 space-y-1.5 min-w-[130px]">
                             <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
-                                <Settings2 className="h-3 w-3" /> Mode
+                                <Settings2 className="h-3 w-3" /> Calculation Mode
                             </label>
                             <Select
                                 value={mode}
@@ -223,10 +223,10 @@ export const FeasibilityFilterBar: React.FC<FeasibilityFilterBarProps> = ({
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="WHOLE_UNITS" className="text-xs">
-                                        Allow Whole Units
+                                        Allow Partial Batches
                                     </SelectItem>
                                     <SelectItem value="FULL_BATCHES_ONLY" className="text-xs">
-                                        Enforce Full Batches
+                                        Full Batches Only
                                     </SelectItem>
                                 </SelectContent>
                             </Select>
@@ -247,7 +247,7 @@ export const FeasibilityFilterBar: React.FC<FeasibilityFilterBarProps> = ({
                                 ) : (
                                     <>
                                         <Calculator className="mr-1.5 h-3.5 w-3.5" />
-                                        Calculate
+                                        Calculate Projection
                                     </>
                                 )}
                             </Button>
