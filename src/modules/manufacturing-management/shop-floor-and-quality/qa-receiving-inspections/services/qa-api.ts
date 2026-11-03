@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { Shipment, ShipmentLineItem, Branch, StorageLot, StorageLotBatch, QaSpecification, ReceivingCommitPayload, ReceivingCommitResult, ReceivingPreview, QuarantineDisposition, QuarantineStock, ForceReceivedResult, SupplierDocumentType, QaReceiptOption, QaReceivingAttachmentRecord } from "../types";
 import {
     isReceivingErrorCode,
@@ -306,6 +307,14 @@ export async function fetchQuarantineDispositions(signal?: AbortSignal): Promise
     return body as QuarantineDispositionResponse;
 }
 
+function createQuarantineOperationKey(): string {
+    try {
+        return uuidv4();
+    } catch {
+        throw new Error("Unable to prepare this quarantine action in this browser. Please use an updated browser or open QA Receiving over HTTPS, then try again.");
+    }
+}
+
 export async function createQuarantineDisposition(payload: {
     sourceReceivingId: number;
     lotId: number;
@@ -315,10 +324,11 @@ export async function createQuarantineDisposition(payload: {
     reason: string;
     supplierReference: string | null;
 }): Promise<QuarantineDisposition> {
+    const idempotencyKey = createQuarantineOperationKey();
     const res = await fetch("/api/manufacturing/shop-floor-and-quality/qa-receiving-inspections/quarantine", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, idempotencyKey: crypto.randomUUID() })
+        body: JSON.stringify({ ...payload, idempotencyKey })
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || "Failed to create quarantine disposition.");
@@ -326,10 +336,11 @@ export async function createQuarantineDisposition(payload: {
 }
 
 export async function processQuarantineReturn(dispositionId: number, quantity: number): Promise<QuarantineDisposition> {
+    const operationKey = createQuarantineOperationKey();
     const res = await fetch(`/api/manufacturing/shop-floor-and-quality/qa-receiving-inspections/quarantine/${dispositionId}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({ action: "PROCESS_RETURN", quantity, operationKey: crypto.randomUUID() })
+        headers: { "Content-Type": "application/json", "Idempotency-Key": operationKey },
+        body: JSON.stringify({ action: "PROCESS_RETURN", quantity, operationKey })
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || "Failed to process the vendor return.");
