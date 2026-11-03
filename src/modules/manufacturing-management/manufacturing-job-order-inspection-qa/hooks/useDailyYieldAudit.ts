@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { v4 as uuidv4 } from "uuid";
 import {
     fetchQALogs,
     fetchQARejectionReasons,
@@ -8,6 +9,7 @@ import {
     registerRejectedOutputAllocation,
     type DailyQAOutputAllocationLine,
     type DailyQAInspectionRequest,
+    type DailyQAAuditEvidenceFiles,
 } from "../../manufacturing-qa/services/qa-api";
 import type { QARejectionReason } from "../../manufacturing-qa/types";
 import { fetchEligibleBadStockLots, fetchEligibleFinishedGoodsLots } from "../../shared/finished-goods-lots-api";
@@ -175,7 +177,11 @@ export function useDailyYieldAudit({ onSaved, inspectorName }: UseDailyYieldAudi
     const evidenceKeysFor = useCallback((files: File[]) => files.map((file) => {
         let key = evidenceKeysByFile.current.get(file);
         if (!key) {
-            key = crypto.randomUUID();
+            try {
+                key = uuidv4();
+            } catch {
+                throw new Error("Unable to prepare QA attachments in this browser. Please use an updated browser or open the terminal over HTTPS, then try saving again.");
+            }
             evidenceKeysByFile.current.set(file, key);
         }
         return key;
@@ -977,12 +983,20 @@ export function useDailyYieldAudit({ onSaved, inspectorName }: UseDailyYieldAudi
             rejectedAllocations,
             inspections
         };
-        const requestEvidence = {
-            acceptedFiles: evidenceRequirements.acceptedStock ? acceptedEvidenceFiles : [],
-            acceptedKeys: evidenceKeysFor(evidenceRequirements.acceptedStock ? acceptedEvidenceFiles : []),
-            rejectedFiles: evidenceRequirements.rejectedStock ? rejectedEvidenceFiles : [],
-            rejectedKeys: evidenceKeysFor(evidenceRequirements.rejectedStock ? rejectedEvidenceFiles : [])
-        };
+        let requestEvidence: DailyQAAuditEvidenceFiles;
+        try {
+            requestEvidence = {
+                acceptedFiles: evidenceRequirements.acceptedStock ? acceptedEvidenceFiles : [],
+                acceptedKeys: evidenceKeysFor(evidenceRequirements.acceptedStock ? acceptedEvidenceFiles : []),
+                rejectedFiles: evidenceRequirements.rejectedStock ? rejectedEvidenceFiles : [],
+                rejectedKeys: evidenceKeysFor(evidenceRequirements.rejectedStock ? rejectedEvidenceFiles : [])
+            };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Unable to prepare QA attachments. Please try again.";
+            setSaveError(message);
+            toast.error(message);
+            return;
+        }
 
         auditSubmitInFlight.current = true;
         setActionLoading(true);
