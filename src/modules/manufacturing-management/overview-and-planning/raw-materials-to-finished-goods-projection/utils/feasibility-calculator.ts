@@ -85,6 +85,11 @@ export function calculateProductionFeasibility(
     const mode = options.mode || "WHOLE_UNITS";
     const context = options.conversionContext || {};
     const diagnostics: string[] = [];
+    const addDiagnostic = (msg?: string) => {
+        if (msg && !diagnostics.includes(msg)) {
+            diagnostics.push(msg);
+        }
+    };
 
     // 1. Initial BOM validation
     if (!bom || !bom.productId || !Array.isArray(bom.components) || bom.components.length === 0) {
@@ -167,7 +172,7 @@ export function calculateProductionFeasibility(
         );
 
         if (!reqResult.ok || reqResult.requiredPerNetFgUnit === undefined) {
-            diagnostics.push(reqResult.diagnostic || `Failed calculating requirement for ${comp.productName}.`);
+            addDiagnostic(reqResult.diagnostic || `Failed calculating requirement for ${comp.productName}.`);
             continue;
         }
 
@@ -181,7 +186,10 @@ export function calculateProductionFeasibility(
         );
 
         if (!convResult.ok || convResult.convertedValue === undefined) {
-            diagnostics.push(convResult.diagnostic || `Cannot convert ${comp.unitOfMeasurement.name} to ${stockUomName} for ${comp.productName}.`);
+            addDiagnostic(
+                convResult.diagnostic ||
+                `Missing Unit Conversion: Cannot convert recipe unit "${comp.unitOfMeasurement.name}" to warehouse stock unit "${stockUomName}" for "${comp.productName}". Please add a conversion rule in Unit Settings.`
+            );
             continue;
         }
 
@@ -193,7 +201,7 @@ export function calculateProductionFeasibility(
             const netSubBatchOutput = subBom.baseQuantity * (subBom.expectedYieldPercentage / 100);
 
             if (netSubBatchOutput <= 0) {
-                diagnostics.push(`Sub-assembly "${comp.productName}" has invalid yield or base quantity.`);
+                addDiagnostic(`Sub-assembly "${comp.productName}" has invalid yield or base quantity.`);
                 continue;
             }
 
@@ -216,9 +224,9 @@ export function calculateProductionFeasibility(
                 );
 
                 if (!childConvResult.ok || childConvResult.convertedValue === undefined) {
-                    diagnostics.push(
+                    addDiagnostic(
                         childConvResult.diagnostic ||
-                        `Cannot convert UOM for sub-assembly component "${childComp.productName}" from ${childComp.unitOfMeasurement.name} to ${childStockUomName}.`
+                        `Missing Unit Conversion: Cannot convert recipe unit "${childComp.unitOfMeasurement.name}" to warehouse stock unit "${childStockUomName}" for sub-assembly component "${childComp.productName}". Please add a conversion rule in Unit Settings.`
                     );
                     subAssemblyValid = false;
                     break;

@@ -19,10 +19,10 @@ export const TrackingHeader: React.FC<TrackingHeaderProps> = ({ onRefresh, isRef
                     </div>
                     <div>
                         <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
-                            Order Allocation &amp; Consolidation Tracking
+                            Consolidation & Dispatch Tracking
                         </h1>
                         <p className="text-xs sm:text-sm text-muted-foreground">
-                            Independent tracking of reserved stock allocations vs. consolidation batch planning and physical warehouse picks.
+                          Tracking of order consolidation, warehouse dispatch, and delivery completion.
                         </p>
                     </div>
                 </div>

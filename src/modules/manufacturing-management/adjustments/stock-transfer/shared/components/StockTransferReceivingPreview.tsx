@@ -155,7 +155,7 @@ export function StockTransferReceivingPreview({
           )}
         </div>
 
-        <DialogFooter className="px-6 py-4 border-t border-border bg-card shrink-0 flex items-center justify-between sm:justify-between sm:gap-0">
+        <DialogFooter className="px-6 py-4 border-t border-border bg-card shrink-0 flex items-center justify-between sm:justify-between sm:gap-2">
           <Button
             variant="ghost"
             size="sm"

@@ -3,6 +3,7 @@ import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
 import { generateMmPiNo, extractId, parseBooleanFlag } from "./helper";
 import { getJwtSubFromReq } from "@/lib/directus";
 import { NextRequest } from "next/server";
+import { OffsetPairingError, readOffsetPairings } from "@/modules/manufacturing-management/physical-inventory-offsetting/utils/offset-pairings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,16 +59,11 @@ export async function GET(request: NextRequest) {
         const rawList: Array<Record<string, unknown>> = json.data || [];
 
         const enrichedList = rawList.map((item) => {
-            let offsetPairings = [];
-            if (item.remarks && typeof item.remarks === "string" && item.remarks.includes("__OFFSET_DATA__:")) {
-                try {
-                    const parts = item.remarks.split("__OFFSET_DATA__:");
-                    if (parts.length > 1) {
-                        offsetPairings = JSON.parse(parts[1].trim());
-                    }
-                } catch {
-                    offsetPairings = [];
-                }
+            let offsetPairings;
+            try {
+                offsetPairings = readOffsetPairings(item.remarks);
+            } catch (error) {
+                throw new OffsetPairingError(`Audit ${item.pi_no || item.physical_inventory_id}: ${error instanceof Error ? error.message : "Offset pairings could not be read."}`);
             }
             return {
                 ...item,
@@ -79,7 +75,7 @@ export async function GET(request: NextRequest) {
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : "Internal Server Error";
         console.error("GET /api/manufacturing/physical-inventory-manufacturing error:", error);
-        return NextResponse.json({ success: false, error: msg }, { status: 500 });
+        return NextResponse.json({ success: false, error: msg }, { status: error instanceof OffsetPairingError ? error.status : 500 });
     }
 }
 

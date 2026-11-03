@@ -144,8 +144,11 @@ export function useCustomerOrderLeadTimeTracker() {
         fetchLeadTimes();
     }, [fetchLeadTimes]);
 
+    const [timelineTarget, setTimelineTarget] = useState<string | undefined>();
+
     // Handle view timeline modal
-    const openTimelineModal = (order: CustomerOrderLeadTimeItem) => {
+    const openTimelineModal = (order: CustomerOrderLeadTimeItem, targetPair?: string) => {
+        setTimelineTarget(targetPair);
         setSelectedOrderForTimeline(order);
         setIsTimelineModalOpen(true);
     };
@@ -203,6 +206,7 @@ export function useCustomerOrderLeadTimeTracker() {
 
         // Timeline Modal
         isTimelineModalOpen,
+        timelineTarget,
         selectedOrderForTimeline,
         openTimelineModal,
         closeTimelineModal,

@@ -1,6 +1,6 @@
 /* eslint-disable */
-import React from "react";
-import { AlertTriangle, Layers } from "lucide-react";
+import React, { useState } from "react";
+import { AlertTriangle, ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { resolveJobOrderJourney } from "../../shared/job-order-journey";
@@ -8,6 +8,7 @@ import { JobOrderJourneyBar } from "../../shared/components/JobOrderJourneyBar";
 import { JobOrderStatusBadge } from "../../shared/components/JobOrderStatusBadge";
 import { displayJobOrderStatus, isCancelledJobOrderStatus, isJobOrderStatus, isTerminatedJobOrder, JOB_ORDER_STATUS, normalizeJobOrderStatus } from "../../job-order-status";
 import { calculateCumulativeRouteWorkloadHours, calculatePipelinedLineDurationHours, resolveProductionShiftHours } from "../utils/production-timing";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 import { getPlanningQueueWorkflowSummary } from "../utils/queue-workflow-summary";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -24,7 +25,35 @@ export interface JOTableProps {
     loadingJobs: boolean;
     handleOpenDetails: (jo: any) => void;
     handleEditDraft: (jo: any) => void;
+    emptyMessage?: string;
     readOnly?: boolean;
+}
+
+function FamilyDetailsToggle({
+    familyId,
+    expanded,
+    childCount,
+    onClick
+}: {
+    familyId: string;
+    expanded: boolean;
+    childCount: number;
+    onClick: () => void;
+}) {
+    return (
+        <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-label={`${expanded ? "Hide" : "Show"} sub-assembly Job Orders for ${familyId} (${childCount})`}
+            aria-expanded={expanded}
+            onClick={onClick}
+            className="min-h-8 whitespace-nowrap text-xs"
+        >
+            {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+            {expanded ? "Hide" : "Show"} sub-assembly Job Orders ({childCount})
+        </Button>
+    );
 }
 
 function ConnectedSalesOrderCell({ jobOrder }: { jobOrder: any }) {
@@ -119,14 +148,14 @@ function JobOrderResponsiveCard({
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <span className="break-words font-bold text-foreground">{jobOrder.product_name}</span>
                         <span className="rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                            {jobOrder.uom_name || jobOrder.unit_of_measurement || "Pieces"}
+                            {getUnitOfMeasureLabel(jobOrder)}
                         </span>
                     </div>
                 </div>
                 <div>
                     <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Target Qty</div>
-                    <div className="mt-1 font-semibold text-foreground">
-                        {jobOrder.quantity?.toLocaleString()} <span className="font-normal text-muted-foreground">{jobOrder.uom_name || jobOrder.uom_shortcut || "pcs"}</span>
+                    <div className="mt-1 text-right font-semibold tabular-nums text-foreground">
+                        {jobOrder.quantity?.toLocaleString()} <span className="font-normal text-muted-foreground">{getUnitOfMeasureLabel(jobOrder)}</span>
                     </div>
                 </div>
                 <div>
@@ -231,8 +260,20 @@ export function JOTable({
     loadingJobs,
     handleOpenDetails,
     handleEditDraft,
+    emptyMessage = "No Job Orders match the current queue view.",
     readOnly = false
 }: JOTableProps) {
+    const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(() => new Set());
+
+    const toggleFamily = (familyId: string) => {
+        setExpandedFamilies((previous) => {
+            const next = new Set(previous);
+            if (next.has(familyId)) next.delete(familyId);
+            else next.add(familyId);
+            return next;
+        });
+    };
+
     if (loadingJobs && unreleasedJobs.length === 0) {
         return (
             <div role="status" aria-busy="true" aria-label="Loading Job Orders" className="w-full overflow-hidden border rounded-lg">
@@ -290,7 +331,7 @@ export function JOTable({
             <div className="text-center py-12 text-sm text-muted-foreground border border-dashed rounded-lg bg-muted/20">
                 {readOnly
                     ? "No cancelled Job Orders found for this branch."
-                    : "No Job Orders in this branch yet. Release a Sales Order demand line above, or create a Buffer JO to start the workflow."}
+                    : emptyMessage}
             </div>
         );
     }
@@ -336,9 +377,17 @@ export function JOTable({
                                         </div>
                                     )}
                                 </div>
-                                <Button size="sm" onClick={() => handleOpenDetails(familyGroup.parentJo)} className="min-h-10 font-bold bg-sky-600 text-white hover:bg-sky-500">
-                                    {readOnly ? "View Details" : `Manage Entire Family (${1 + familyGroup.childJos.length} JOs)`}
-                                </Button>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <FamilyDetailsToggle
+                                        familyId={familyGroup.familyId}
+                                        expanded={expandedFamilies.has(familyGroup.familyId)}
+                                        childCount={familyGroup.childJos.length}
+                                        onClick={() => toggleFamily(familyGroup.familyId)}
+                                    />
+                                    <Button size="sm" onClick={() => handleOpenDetails(familyGroup.parentJo)} className="min-h-10 font-bold bg-sky-600 text-white hover:bg-sky-500">
+                                        {readOnly ? "View Details" : `Manage Entire Family (${1 + familyGroup.childJos.length} JOs)`}
+                                    </Button>
+                                </div>
                             </div>
                             <JobOrderResponsiveCard
                                 jobOrder={familyGroup.parentJo}
@@ -348,7 +397,7 @@ export function JOTable({
                                 roleLabel="Parent JO"
                                 detailActionLabel={readOnly || isJobOrderStatus(familyGroup.parentJo.status, JOB_ORDER_STATUS.DRAFT) ? "View Details" : "Manage Family"}
                             />
-                            {familyGroup.childJos.map((childJo: any) => (
+                            {expandedFamilies.has(familyGroup.familyId) && familyGroup.childJos.map((childJo: any) => (
                                 <JobOrderResponsiveCard
                                     key={childJo.jo_id}
                                     jobOrder={childJo}
@@ -399,12 +448,12 @@ export function JOTable({
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <span className="min-w-0 break-words font-bold text-foreground">{jo.product_name}</span>
                                             <span className="text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md shrink-0">
-                                                {jo.uom_name || jo.unit_of_measurement || "Pieces"}
+                                                {getUnitOfMeasureLabel(jo)}
                                             </span>
                                         </div>
                                     </td>
                                     <td className="px-2 py-3 break-all text-right font-semibold">
-                                        {jo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{jo.uom_name || jo.uom_shortcut || "pcs"}</span>
+                                        <span className="tabular-nums">{jo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{getUnitOfMeasureLabel(jo)}</span></span>
                                     </td>
                                     <td className="px-2 py-3 font-medium">
                                         {metrics.leadTimeHours > 0 ? (
@@ -500,13 +549,21 @@ export function JOTable({
                                                     </span>
                                                 )}
                                             </div>
-                                            <Button
-                                                size="sm"
-                                                onClick={() => handleOpenDetails(fg.parentJo)}
-                                                className="h-7 text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-sm px-3"
-                                            >
-                                                {readOnly ? "View Details" : `Manage Entire Family (${1 + fg.childJos.length} JOs)`}
-                                            </Button>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <FamilyDetailsToggle
+                                                    familyId={fg.familyId}
+                                                    expanded={expandedFamilies.has(fg.familyId)}
+                                                    childCount={fg.childJos.length}
+                                                    onClick={() => toggleFamily(fg.familyId)}
+                                                />
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() => handleOpenDetails(fg.parentJo)}
+                                                    className="h-7 text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-sm px-3"
+                                                >
+                                                    {readOnly ? "View Details" : `Manage Entire Family (${1 + fg.childJos.length} JOs)`}
+                                                </Button>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
@@ -524,12 +581,12 @@ export function JOTable({
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <span className="min-w-0 break-words font-bold text-foreground">{fg.parentJo.product_name}</span>
                                             <span className="text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md shrink-0">
-                                                {fg.parentJo.uom_name || fg.parentJo.unit_of_measurement || "Pieces"}
+                                                {getUnitOfMeasureLabel(fg.parentJo)}
                                             </span>
                                         </div>
                                     </td>
                                     <td className="px-2 py-3 break-all text-right font-semibold">
-                                        {fg.parentJo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{fg.parentJo.uom_name || fg.parentJo.uom_shortcut || "pcs"}</span>
+                                        <span className="tabular-nums">{fg.parentJo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{getUnitOfMeasureLabel(fg.parentJo)}</span></span>
                                     </td>
                                     <td className="px-2 py-3 font-medium">
                                         {pMetrics.leadTimeHours > 0 ? (
@@ -593,7 +650,7 @@ export function JOTable({
                                 </tr>
 
                                 {/* Child Sub-Assembly JO Rows */}
-                                {fg.childJos.map((cJo: any) => {
+                                {expandedFamilies.has(fg.familyId) && fg.childJos.map((cJo: any) => {
                                     const cMetrics = getJobOrderMetrics(cJo);
                                     return (
                                         <tr key={cJo.jo_id} className="hover:bg-sky-500/5 bg-sky-500/[0.02]">
@@ -609,12 +666,12 @@ export function JOTable({
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                     <span className="min-w-0 break-words font-medium text-foreground">{cJo.product_name}</span>
                                                     <span className="text-[10px] font-semibold text-sky-700 dark:text-sky-300 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-md shrink-0">
-                                                        {cJo.uom_name || cJo.unit_of_measurement || "Pieces"}
+                                                        {getUnitOfMeasureLabel(cJo)}
                                                     </span>
                                                 </div>
                                             </td>
                                             <td className="px-2 py-3 break-all text-right font-semibold">
-                                                {cJo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{cJo.uom_name || cJo.uom_shortcut || "pcs"}</span>
+                                                <span className="tabular-nums">{cJo.quantity?.toLocaleString()} <span className="text-xs text-muted-foreground font-normal">{getUnitOfMeasureLabel(cJo)}</span></span>
                                             </td>
                                             <td className="px-2 py-3 font-medium">
                                                 {cMetrics.leadTimeHours > 0 ? (

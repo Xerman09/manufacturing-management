@@ -1,5 +1,9 @@
 "use client";
 
+import { inversionDetails } from "../utils/inversions";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { AssessmentBadge } from "./AssessmentBadge";
+
 import React from "react";
 import {
     ChevronLeft,
@@ -22,7 +26,7 @@ interface LeadTimeGridTableProps {
     totalOrders: number;
     onPageChange: (page: number) => void;
     onPageSizeChange: (pageSize: number) => void;
-    onViewTimeline: (order: CustomerOrderLeadTimeItem) => void;
+    onViewTimeline: (order: CustomerOrderLeadTimeItem, targetPair?: string) => void;
     onRetry: () => void;
 }
 
@@ -215,20 +219,20 @@ export function LeadTimeGridTable({
                                     {/* Anomalies */}
                                     <td className="py-3 px-4 whitespace-nowrap">
                                         <div className="flex flex-col gap-1 items-start">
-                                            {order.hasNegativeDurations && (
-                                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded border border-destructive/20">
-                                                    <TrendingDown className="w-3 h-3" />
-                                                    Sequence Inverted
-                                                </span>
+                                            <AssessmentBadge assessment={order.assessment} />
+                                            {inversionDetails(order).length > 0 && (
+                                                <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                                                    <button type="button" onClick={() => onViewTimeline(order, inversionDetails(order)[0].key)} className="inline-flex items-center gap-1 rounded border border-destructive/20 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive focus-visible:outline-2 focus-visible:outline-ring">
+                                                        <TrendingDown className="size-3" />Sequence Inverted ({inversionDetails(order).length})
+                                                    </button>
+                                                </TooltipTrigger><TooltipContent className="max-w-sm">{inversionDetails(order).map(pair => <p key={pair.key} className="mb-2">{pair.explanation} {pair.timestamps}</p>)}</TooltipContent></Tooltip></TooltipProvider>
                                             )}
                                             {order.hasMissingMilestones && (
                                                 <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
                                                     {order.missingMilestonesList.length} Missing Event(s)
                                                 </span>
                                             )}
-                                            {!order.hasNegativeDurations && !order.hasMissingMilestones && (
-                                                <span className="text-[11px] text-muted-foreground">Normal</span>
-                                            )}
+
                                         </div>
                                     </td>
 

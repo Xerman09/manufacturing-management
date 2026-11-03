@@ -36,6 +36,9 @@ const initialMetrics: TrackingMetrics = {
     total_zero_quantity_lines: 0,
     total_mixed_uom_orders: 0,
     total_exceptions_count: 0,
+    delivered_orders_count: 0,
+    dispatched_orders_count: 0,
+    overall_delivery_rate: 0,
 };
 
 export function useOrderAllocationTracking() {

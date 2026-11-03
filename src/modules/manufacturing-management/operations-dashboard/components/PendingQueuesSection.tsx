@@ -279,6 +279,7 @@ export const PendingQueuesSection: React.FC<PendingQueuesSectionProps> = ({
                 {/* 2. Material Shortages */}
                 {activeTab === "shortages" && (
                     <table className="w-full text-left text-xs">
+                        <caption className="caption-top px-4 py-3 text-left text-muted-foreground">Threshold uses the product master maintaining quantity. Shortage = threshold minus on hand. Negative stock remains visible when the threshold is Not Set; its shortage is not calculated.</caption>
                         <thead className="bg-muted/40 border-b border-border/70 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
                             <tr>
                                 <th className="px-4 py-3">Component / Material</th>
@@ -302,10 +303,10 @@ export const PendingQueuesSection: React.FC<PendingQueuesSectionProps> = ({
                                         {shortage.onHandQty} {shortage.uom}
                                     </td>
                                     <td className="px-4 py-3 text-right text-muted-foreground">
-                                        {shortage.requiredQty} {shortage.uom}
+                                        {shortage.requiredQty === null ? <span title="Configure maintaining quantity in the product master">Not Set</span> : <>{shortage.requiredQty} {shortage.uom}</>}
                                     </td>
                                     <td className="px-4 py-3 text-right font-bold text-rose-600 dark:text-rose-400">
-                                        -{shortage.shortageQty} {shortage.uom}
+                                        {shortage.shortageQty === null ? "Not calculated" : <>-{shortage.shortageQty} {shortage.uom}</>}
                                     </td>
                                     <td className="px-4 py-3 text-right">
                                         <Link

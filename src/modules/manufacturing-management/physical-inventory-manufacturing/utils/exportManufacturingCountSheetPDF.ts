@@ -1,6 +1,6 @@
 import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 import { MmPhysicalInventorySheet, MmPhysicalInventoryDetail } from "../types";
+import { formatQty } from "./number-format";
 
 function formatDate(dateStr?: string | null): string {
     if (!dateStr) return "N/A";
@@ -10,13 +10,6 @@ function formatDate(dateStr?: string | null): string {
         return `${parts[0]} ${parts[1].slice(0, 5)}`;
     }
     return str;
-}
-
-function formatQty(val: number | string | null | undefined): string {
-    const num = Number(val || 0);
-    if (!Number.isFinite(num)) return "0";
-    if (Number.isInteger(num)) return num.toLocaleString("en-US");
-    return parseFloat(num.toFixed(4)).toString();
 }
 
 interface GroupedBatch {
@@ -229,120 +222,202 @@ export function generateManufacturingCountSheetPDF(
 
     currentY += 19;
 
-    // 3. Compact Grouped Lot & Batch Layout (Solid Black & Gray Neutral Styling)
+    // 3. Two-column compact grouped lot and batch panels.
     const details: MmPhysicalInventoryDetail[] = sheet.details || [];
     const filteredDetails = targetLot ? details.filter((item) => matchesLot(item, targetLot)) : details;
     const groupedLots = groupDetailsByLotAndBatch(filteredDetails);
+    const panelGap = 5;
+    const panelWidth = (pageWidth - (margin * 2) - panelGap) / 2;
+    const countWidth = 27;
+    const infoWidth = panelWidth - countWidth - 8;
+    const contentBottom = pageHeight - margin - 8;
+    let groupY = currentY;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tableBody: any[] = [];
-    let itemSeq = 1;
+    type CountEntry = {
+        item: MmPhysicalInventoryDetail;
+        nameLines: string[];
+        codeLines: string[];
+        detailLines: string[];
+        rowHeight: number;
+    };
+    type CountGroup = {
+        lotName: string;
+        batchNo: string;
+        mfgDate: string;
+        expDate: string;
+        items: CountEntry[];
+    };
 
-    const physColHeader = showPhysicalCount ? "RECORDED PHYSICAL COUNT" : "PHYSICAL COUNT (PEN ENTRY)";
-
-    for (const lotGroup of groupedLots) {
-        const totalLotSkus = lotGroup.batches.reduce((acc, b) => acc + b.items.length, 0);
-
-        // Lot Header Banner (Solid Pure Black #000000)
-        tableBody.push([
-            {
-                content: `STORAGE LOCATION / LOT: ${lotGroup.lotName.toUpperCase()}                                                                                                                                           ${totalLotSkus} SKU(s)`,
-                colSpan: 5,
-                styles: {
-                    fillColor: [0, 0, 0], // Pure Solid Black
-                    textColor: [255, 255, 255],
-                    fontStyle: "bold",
-                    fontSize: 7.5,
-                    halign: "left",
-                    cellPadding: 2,
-                },
-            },
-        ]);
-
-        for (const batchGroup of lotGroup.batches) {
-            // Batch Sub-Header Bar (Light Neutral Gray #F3F4F6)
-            tableBody.push([
-                {
-                    content: `BATCH NO: ${batchGroup.batchNo}                                                                                                                              MFG: ${batchGroup.mfgDate}    EXP: ${batchGroup.expDate}`,
-                    colSpan: 5,
-                    styles: {
-                        fillColor: [243, 244, 246], // Light Gray (gray-100)
-                        textColor: [31, 41, 55], // Dark Gray (gray-800)
-                        fontStyle: "bold",
-                        fontSize: 7,
-                        halign: "left",
-                        cellPadding: 1.5,
-                    },
-                },
-            ]);
-
-            // Per-Batch Column Header Row
-            tableBody.push([
-                { content: "#", styles: { fontStyle: "bold", fillColor: [255, 255, 255], textColor: [75, 85, 99], fontSize: 6.5, halign: "center" } },
-                { content: "SKU CODE & PRODUCT DESCRIPTION", styles: { fontStyle: "bold", fillColor: [255, 255, 255], textColor: [75, 85, 99], fontSize: 6.5, halign: "left" } },
-                { content: "UOM", styles: { fontStyle: "bold", fillColor: [255, 255, 255], textColor: [75, 85, 99], fontSize: 6.5, halign: "center" } },
-                { content: "SYSTEM QTY", styles: { fontStyle: "bold", fillColor: [255, 255, 255], textColor: [75, 85, 99], fontSize: 6.5, halign: "right" } },
-                { content: physColHeader, styles: { fontStyle: "bold", fillColor: [255, 255, 255], textColor: [75, 85, 99], fontSize: 6.5, halign: "center" } },
-            ]);
-
-            // Item Rows for this Batch
-            for (const item of batchGroup.items) {
+    let itemSequence = 1;
+    const countGroups: CountGroup[] = groupedLots.flatMap((lotGroup) =>
+        lotGroup.batches.map((batchGroup) => ({
+            lotName: lotGroup.lotName,
+            batchNo: batchGroup.batchNo,
+            mfgDate: batchGroup.mfgDate,
+            expDate: batchGroup.expDate,
+            items: batchGroup.items.map((item) => {
                 const pObj = typeof item.product_id === "object" && item.product_id !== null ? item.product_id : null;
                 const pName = pObj?.product_name || (item as unknown as { product_name?: string }).product_name || "Product";
                 const pCode = pObj?.product_code || (item as unknown as { product_code?: string }).product_code || "";
-
-                let desc = pName;
-                if (pCode) desc += `\nCODE: ${pCode}`;
-
                 const uObj = typeof item.unit_id === "object" && item.unit_id !== null ? item.unit_id : null;
                 const uom = uObj?.unit_shortcut || uObj?.unit_name || (item as unknown as { uom?: string }).uom || "PCS";
+                const sequence = itemSequence++;
 
-                let physValue = "........................................................................";
-                if (showPhysicalCount) {
-                    if (item.physical_count !== null && item.physical_count !== undefined) {
-                        physValue = formatQty(item.physical_count);
-                    } else {
-                        physValue = "—";
-                    }
-                }
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(6.2);
+                const nameLines = doc.splitTextToSize(`${sequence}. ${pName}`, infoWidth);
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(5.2);
+                const codeLines = pCode ? doc.splitTextToSize(`CODE: ${pCode}`, infoWidth) : [];
+                doc.setFontSize(5.4);
+                const detailLines = doc.splitTextToSize(`UOM: ${uom.toUpperCase()} | SYS: ${formatQty(item.system_count)}`, infoWidth);
+                const rowHeight = Math.max(11, 2 + (nameLines.length * 2.8) + (codeLines.length * 2.3) + (detailLines.length * 2.3));
 
-                tableBody.push([
-                    String(itemSeq++),
-                    desc,
-                    uom.toUpperCase(),
-                    formatQty(item.system_count),
-                    physValue,
-                ]);
+                return { item, nameLines, codeLines, detailLines, rowHeight };
+            }),
+        }))
+    );
+
+    const getGroupHeader = (group: CountGroup) => {
+        const textWidth = panelWidth - 5;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(6.1);
+        const lotLines = doc.splitTextToSize(`STORAGE LOT: ${group.lotName}`, textWidth);
+        const batchLines = doc.splitTextToSize(`BATCH: ${group.batchNo}`, textWidth);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(5.4);
+        const dateLines = doc.splitTextToSize(`MFG: ${group.mfgDate} | EXP: ${group.expDate} | ${group.items.length} SKU(s)`, textWidth);
+        const height = 2 + (lotLines.length * 2.7) + (batchLines.length * 2.7) + (dateLines.length * 2.4) + 1;
+        return { lotLines, batchLines, dateLines, height };
+    };
+
+    const drawGroupSegment = (group: CountGroup, itemStart: number, x: number, y: number, maxY: number) => {
+        const header = getGroupHeader(group);
+        let usedHeight = header.height;
+        const segmentItems: CountEntry[] = [];
+        for (let index = itemStart; index < group.items.length; index++) {
+            const entry = group.items[index];
+            if (y + usedHeight + entry.rowHeight > maxY) break;
+            segmentItems.push(entry);
+            usedHeight += entry.rowHeight;
+        }
+
+        if (segmentItems.length === 0) {
+            return { nextItem: itemStart, bottomY: y, progressed: false };
+        }
+
+        doc.setFillColor(250, 250, 250);
+        doc.rect(x, y, panelWidth, header.height, "F");
+        let headerY = y + 3.2;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(6.1);
+        doc.setTextColor(31, 41, 55);
+        doc.text(header.lotLines, x + 2.5, headerY);
+        headerY += header.lotLines.length * 2.7;
+        doc.text(header.batchLines, x + 2.5, headerY);
+        headerY += header.batchLines.length * 2.7;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(5.4);
+        doc.setTextColor(75, 85, 99);
+        doc.text(header.dateLines, x + 2.5, headerY);
+        doc.setDrawColor(209, 213, 219);
+        doc.setLineWidth(0.15);
+        doc.line(x, y + header.height, x + panelWidth, y + header.height);
+
+        let itemY = y + header.height;
+        for (const entry of segmentItems) {
+            let textY = itemY + 3;
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(6.2);
+            doc.setTextColor(0, 0, 0);
+            doc.text(entry.nameLines, x + 2.5, textY);
+            textY += entry.nameLines.length * 2.8;
+
+            if (entry.codeLines.length > 0) {
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(5.2);
+                doc.setTextColor(107, 114, 128);
+                doc.text(entry.codeLines, x + 2.5, textY);
+                textY += entry.codeLines.length * 2.3;
+            }
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(5.4);
+            doc.setTextColor(75, 85, 99);
+            doc.text(entry.detailLines, x + 2.5, textY);
+
+            const countX = x + panelWidth - countWidth - 1.5;
+            doc.setDrawColor(209, 213, 219);
+            doc.line(countX - 1.5, itemY + 1, countX - 1.5, itemY + entry.rowHeight - 1);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(5);
+            doc.setTextColor(107, 114, 128);
+            doc.text(showPhysicalCount ? "RECORDED" : "PHYSICAL COUNT", countX, itemY + 3.2);
+
+            if (showPhysicalCount && entry.item.physical_count !== null && entry.item.physical_count !== undefined) {
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(6.2);
+                doc.setTextColor(0, 0, 0);
+                doc.text(formatQty(entry.item.physical_count), x + panelWidth - 2, itemY + 7.2, { align: "right" });
+            } else if (!showPhysicalCount) {
+                doc.setDrawColor(107, 114, 128);
+                doc.line(countX, itemY + entry.rowHeight - 2.5, x + panelWidth - 2, itemY + entry.rowHeight - 2.5);
+            } else {
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(6);
+                doc.setTextColor(156, 163, 175);
+                doc.text("-", countX, itemY + 7.2);
+            }
+
+            itemY += entry.rowHeight;
+            doc.setDrawColor(229, 231, 235);
+            doc.line(x, itemY, x + panelWidth, itemY);
+        }
+
+        const bottomY = y + usedHeight;
+        doc.setDrawColor(209, 213, 219);
+        doc.setLineWidth(0.2);
+        doc.rect(x, y, panelWidth, usedHeight, "S");
+        return { nextItem: itemStart + segmentItems.length, bottomY, progressed: true };
+    };
+
+    for (let groupIndex = 0; groupIndex < countGroups.length; groupIndex += 2) {
+        const leftGroup = countGroups[groupIndex];
+        const rightGroup = countGroups[groupIndex + 1];
+        let leftItem = 0;
+        let rightItem = 0;
+        let pairComplete = false;
+
+        while (!pairComplete) {
+            const leftResult = leftItem < leftGroup.items.length
+                ? drawGroupSegment(leftGroup, leftItem, margin, groupY, contentBottom)
+                : { nextItem: leftItem, bottomY: groupY, progressed: false };
+            const rightResult = rightGroup && rightItem < rightGroup.items.length
+                ? drawGroupSegment(rightGroup, rightItem, margin + panelWidth + panelGap, groupY, contentBottom)
+                : { nextItem: rightItem, bottomY: groupY, progressed: false };
+
+            if (!leftResult.progressed && !rightResult.progressed) {
+                doc.addPage();
+                groupY = margin;
+                continue;
+            }
+
+            leftItem = leftResult.nextItem;
+            rightItem = rightResult.nextItem;
+            const leftDone = leftItem >= leftGroup.items.length;
+            const rightDone = !rightGroup || rightItem >= rightGroup.items.length;
+            pairComplete = leftDone && rightDone;
+
+            if (pairComplete) {
+                groupY = Math.max(leftResult.bottomY, rightResult.bottomY) + 3;
+            } else {
+                doc.addPage();
+                groupY = margin;
             }
         }
     }
-
-    autoTable(doc, {
-        body: tableBody,
-        startY: currentY,
-        margin: { left: margin, right: margin },
-        styles: {
-            fontSize: 7,
-            cellPadding: 1.5,
-            textColor: [0, 0, 0],
-            lineColor: [229, 231, 235], // gray-200 border
-            lineWidth: 0.1,
-        },
-        columnStyles: {
-            0: { cellWidth: 8, halign: "center" },
-            1: { cellWidth: 82 },
-            2: { cellWidth: 15, halign: "center" },
-            3: { cellWidth: 25, halign: "right", fontStyle: "bold" },
-            4: { cellWidth: 60, halign: showPhysicalCount ? "right" : "center", textColor: showPhysicalCount ? [0, 0, 0] : [156, 163, 175], fontStyle: showPhysicalCount ? "bold" : "normal" },
-        },
-        alternateRowStyles: {
-            fillColor: [255, 255, 255],
-        },
-    });
-
     // 4. Compact Neutral Sign-Off Authorization Block
-    // @ts-expect-error lastAutoTable injected by jspdf-autotable
-    const finalY = (doc.lastAutoTable?.finalY || 140) + 6;
+    const finalY = groupY + 3;
 
     let signY = finalY;
     if (signY > pageHeight - 24) {

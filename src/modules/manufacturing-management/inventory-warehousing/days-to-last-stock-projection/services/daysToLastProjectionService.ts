@@ -26,24 +26,10 @@ export async function fetchStockProjections(
     return data;
 }
 
-export async function fetchMaterialConsumptionBreakdown(
-    productId: number,
-    branchId?: number
-): Promise<VerifiedConsumptionDetail[]> {
-    try {
-        const params = new URLSearchParams({ product_id: String(productId) });
-        if (branchId) params.set("branch_id", String(branchId));
-
-        const res = await fetch(
-            `/api/manufacturing/inventory-warehousing/days-to-last-stock-projection/audit?${params.toString()}`,
-            { cache: "no-store" }
-        );
-        if (res.ok) {
-            const body = await res.json();
-            return body.data || [];
-        }
-    } catch {
-        // Return empty array
-    }
-    return [];
+export async function fetchMaterialConsumptionBreakdown(item: import("../types").StockProjectionItem): Promise<VerifiedConsumptionDetail[]> {
+    const params = new URLSearchParams({ product_id: String(item.product_id), branch_id: String(item.branch_id), assessment_start: item.assessment_start || "", assessment_end: item.assessment_end, unit_id: String(item.unit_id || "") });
+    const response = await fetch(`/api/manufacturing/inventory-warehousing/days-to-last-stock-projection/audit?${params}`, { cache: "no-store" });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "Verified consumption unavailable.");
+    return body.data;
 }

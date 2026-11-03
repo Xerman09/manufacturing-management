@@ -10,6 +10,7 @@ import { CreateBufferJODialog } from "./CreateBufferJODialog";
 import { ReleaseJODialog } from "./ReleaseJODialog";
 import { buildSalesOrderReleaseGroups } from "../utils/demand-groups";
 import { resolveProductionShiftHours } from "../utils/production-timing";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 
 interface DraftJobOrderEditorProps {
     jobOrder: any;
@@ -75,7 +76,7 @@ export function DraftJobOrderEditor({ jobOrder, branches, onBack, onSaved, onIni
                     product_id: productId,
                     product_name: String(jobOrder.product_name || `Product #${productId}`),
                     product_code: String(jobOrder.product_code || ""),
-                    uom: String(jobOrder.uom_name || jobOrder.uom_shortcut || jobOrder.unit_of_measurement || "units"),
+                    uom: getUnitOfMeasureLabel(jobOrder),
                     uom_id: Number(jobOrder.uom_id || 0) || null,
                     uom_count: Number(jobOrder.unit_of_measurement_count || 1)
                 },
@@ -83,7 +84,7 @@ export function DraftJobOrderEditor({ jobOrder, branches, onBack, onSaved, onIni
                 ordered_quantity: allocated,
                 net_amount: 0,
                 uom_id: Number(jobOrder.uom_id || 0) || null,
-                unit_of_measurement: String(jobOrder.uom_name || jobOrder.uom_shortcut || jobOrder.unit_of_measurement || "units"),
+                unit_of_measurement: getUnitOfMeasureLabel(jobOrder),
                 bom_version_id: versionId,
                 bom_version_name: String(jobOrder.version_name || jobOrder.recipe_version_name || `Version #${versionId}`),
                 allocated_quantity: allocated,

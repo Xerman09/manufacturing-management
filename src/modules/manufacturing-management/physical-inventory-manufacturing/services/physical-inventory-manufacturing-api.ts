@@ -4,6 +4,7 @@ import {
     MmOffsetPairing,
     MmLot,
     MmInventoryLot,
+    MmInventoryBatchOption,
     Branch,
     Product,
     ProductType,
@@ -11,6 +12,7 @@ import {
     Unit,
     PhysicalInventoryFilters,
 } from "../types";
+import { saveOffsettingPairings } from "../../physical-inventory-offsetting/services/offsetting-api";
 
 const API_BASE = "/api/manufacturing/physical-inventory-manufacturing";
 
@@ -62,7 +64,7 @@ export async function createPhysicalInventoryHeader(payload: {
 
 export async function updatePhysicalInventoryHeader(
     id: number,
-    payload: { starting_date?: string; cutoff_date?: string; remarks?: string; stock_type?: "OPENING" | "REGULAR"; product_type_id?: number | null; price_type_id?: number | null }
+    payload: { branch_id?: number; starting_date?: string; cutoff_date?: string; remarks?: string; stock_type?: "OPENING" | "REGULAR"; product_type_id?: number | null; price_type_id?: number | null }
 ): Promise<MmPhysicalInventorySheet> {
     const res = await fetch(`${API_BASE}/${id}`, {
         method: "PATCH",
@@ -79,11 +81,10 @@ export async function updatePhysicalInventoryHeader(
 export async function addPhysicalInventoryDetail(
     sheetId: number,
     payload: {
-        inventory_lot_id: number;
+        inventory_lot_id?: number;
+        draft_batch_id?: number;
         lot_id: number;
         product_id: number;
-        is_draft?: boolean;
-        draft_batch_id?: number;
         physical_count?: number | null;
         inventory_condition: string;
         remarks?: string;
@@ -131,19 +132,6 @@ export async function removePhysicalInventoryDetail(sheetId: number, detailId: n
     if (!res.ok || !json.success) {
         throw new Error(json.error || "Failed to remove detail row");
     }
-}
-
-export async function populatePhysicalInventorySheet(id: number, productTypeId?: number | null): Promise<{ message?: string; count?: number }> {
-    const res = await fetch(`${API_BASE}/${id}/populate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ product_type_id: productTypeId }),
-    });
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-        throw new Error(json.error || "Failed to populate physical inventory items");
-    }
-    return json;
 }
 
 export async function submitPhysicalInventorySheet(id: number): Promise<MmPhysicalInventorySheet> {
@@ -214,8 +202,8 @@ export async function createMmLot(payload: {
     return json.data;
 }
 
-export async function fetchBatchesByLotAndProduct(lotId: number, productId: number): Promise<MmInventoryLot[]> {
-    const res = await fetch(`${API_BASE}/batches?lot_id=${lotId}&product_id=${productId}`, { cache: "no-store" });
+export async function fetchBatchesByLotAndProduct(lotId: number, productId: number, physicalInventoryId: number): Promise<MmInventoryBatchOption[]> {
+    const res = await fetch(`${API_BASE}/batches?lot_id=${lotId}&product_id=${productId}&physical_inventory_id=${physicalInventoryId}`, { cache: "no-store" });
     const json = await res.json();
     if (!res.ok || !json.success) {
         throw new Error(json.error || "Failed to fetch batches");
@@ -224,7 +212,7 @@ export async function fetchBatchesByLotAndProduct(lotId: number, productId: numb
 }
 
 export async function createMmDraftBatch(payload: {
-    physical_inventory_id?: number;
+    physical_inventory_id: number;
     lot_id: number;
     branch_id: number;
     product_id: number;
@@ -232,8 +220,7 @@ export async function createMmDraftBatch(payload: {
     manufacturing_date?: string;
     expiry_date?: string;
     unit_cost?: number;
-    source_reference?: string;
-}): Promise<MmInventoryLot> {
+}): Promise<MmInventoryBatchOption> {
     const res = await fetch(`${API_BASE}/batches/draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -394,20 +381,6 @@ export async function savePhysicalInventoryOffsetPairings(
     piId: number,
     pairings: MmOffsetPairing[]
 ): Promise<MmOffsetPairing[]> {
-    try {
-        const res = await fetch(`${API_BASE}/${piId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ offset_pairings: pairings }),
-        });
-        if (res.ok) {
-            const json = await res.json();
-            return json.data?.offset_pairings || pairings;
-        }
-        return pairings;
-    } catch (e) {
-        console.error("Failed to save offset pairings to backend:", e);
-        return pairings;
-    }
+    return saveOffsettingPairings(piId, pairings);
 }
 

@@ -5,6 +5,7 @@ import {
     OffsettingFilters,
     Branch,
 } from "../types";
+import { normalizeOffsetPairings, offsetFlag, readOffsetPairings } from "../utils/offset-pairings";
 
 const API_BASE = "/api/manufacturing/physical-inventory-manufacturing";
 
@@ -34,20 +35,10 @@ export function parseOffsettingSheetData(item: Record<string, unknown>): Offsett
         }
     }
 
-    let pairings: OffsettingPairing[] = Array.isArray(item.offset_pairings)
+    const storedPairings: OffsettingPairing[] = Array.isArray(item.offset_pairings)
         ? (item.offset_pairings as OffsettingPairing[])
-        : [];
-
-    if (pairings.length === 0 && item.remarks && typeof item.remarks === "string" && item.remarks.includes("__OFFSET_DATA__:")) {
-        try {
-            const parts = item.remarks.split("__OFFSET_DATA__:");
-            if (parts.length > 1) {
-                pairings = JSON.parse(parts[1].trim());
-            }
-        } catch {
-            pairings = [];
-        }
-    }
+        : readOffsetPairings(item.remarks);
+    const pairings = details.length ? normalizeOffsetPairings(storedPairings, details, false) : storedPairings;
 
     let totalOffsetQty = 0;
     let netFinancialImpact = 0;
@@ -57,8 +48,7 @@ export function parseOffsettingSheetData(item: Record<string, unknown>): Offsett
     }
 
     const isCommitted =
-        item.isCommitted === true ||
-        item.isCommitted === 1 ||
+        offsetFlag(item.isCommitted) ||
         String(item.status) === "COMMITTED" ||
         String(item.status) === "POSTED";
 
@@ -95,6 +85,7 @@ export function parseOffsettingSheetData(item: Record<string, unknown>): Offsett
         total_offset_qty: totalOffsetQty,
         net_financial_offset_impact: netFinancialImpact,
         isCommitted,
+        isCancelled: offsetFlag(item.isCancelled) || String(item.status).toUpperCase() === "CANCELLED",
         committed_at: item.committed_at ? String(item.committed_at) : null,
         details,
         offset_pairings: pairings,
@@ -112,17 +103,16 @@ export async function fetchOffsettingQueueSheets(filters?: OffsettingFilters): P
         params.append("status", statusParam);
 
         const res = await fetch(`${API_BASE}?${params.toString()}`, { cache: "no-store" });
-        if (!res.ok) throw new Error("Failed to fetch physical inventory sheets");
-
         const json = await res.json();
+        if (!res.ok || json.success === false) throw new Error(json.error || "Failed to fetch physical inventory sheets");
         const rawList: Array<Record<string, unknown>> = json.data || [];
 
         // Only show PENDING_REVIEW and COMMITTED sheets for Offsetting (filter out DRAFT and CANCELLED)
         const list = rawList.filter(item => {
             const s = String(item.status || "").toUpperCase();
-            const isCommitted = item.isCommitted === true || item.isCommitted === 1 || s === "COMMITTED" || s === "POSTED";
+            const isCommitted = offsetFlag(item.isCommitted) || s === "COMMITTED" || s === "POSTED";
             const isPendingReview = s === "PENDING_REVIEW";
-            const isCancelled = item.isCancelled === true || item.isCancelled === 1 || s === "CANCELLED";
+            const isCancelled = offsetFlag(item.isCancelled) || s === "CANCELLED";
 
             return (isPendingReview || isCommitted) && !isCancelled;
         });
@@ -131,15 +121,8 @@ export async function fetchOffsettingQueueSheets(filters?: OffsettingFilters): P
             list.map(async (item) => {
                 const sheetId = Number(item.physical_inventory_id || item.id || 0);
                 if (sheetId > 0 && (!item.details || !Array.isArray(item.details) || item.details.length === 0)) {
-                    try {
-                        const detailRes = await fetch(`${API_BASE}/${sheetId}`, { cache: "no-store" });
-                        if (detailRes.ok) {
-                            const dJson = await detailRes.json();
-                            if (dJson.data) return parseOffsettingSheetData(dJson.data);
-                        }
-                    } catch {
-                        // fallback
-                    }
+                    const full = await fetchOffsettingSheetById(sheetId);
+                    if (full) return full;
                 }
                 return parseOffsettingSheetData(item);
             })
@@ -148,22 +131,22 @@ export async function fetchOffsettingQueueSheets(filters?: OffsettingFilters): P
         return fullSheets;
     } catch (e) {
         console.error("Error fetching offsetting queue sheets:", e);
-        return [];
+        throw e;
     }
 }
 
-export async function fetchOffsettingSheetById(id: number): Promise<OffsettingSheetQueueItem | null> {
+export async function fetchOffsettingSheetById(id: number): Promise<OffsettingSheetQueueItem> {
     try {
         const res = await fetch(`${API_BASE}/${id}`, { cache: "no-store" });
-        if (!res.ok) return null;
         const json = await res.json();
+        if (!res.ok || json.success === false) throw new Error(json.error || "Failed to load the audit record. Retry loading.");
         const item = json.data;
-        if (!item) return null;
+        if (!item) throw new Error("The audit record response is incomplete. Retry loading.");
 
         return parseOffsettingSheetData(item);
     } catch (e) {
         console.error("Error fetching offsetting sheet by ID:", e);
-        return null;
+        throw e;
     }
 }
 
@@ -171,21 +154,15 @@ export async function saveOffsettingPairings(
     sheetId: number,
     pairings: OffsettingPairing[]
 ): Promise<OffsettingPairing[]> {
-    try {
-        const res = await fetch(`${API_BASE}/${sheetId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ offset_pairings: pairings }),
-        });
-        if (res.ok) {
-            const json = await res.json();
-            return json.data?.offset_pairings || pairings;
-        }
-        return pairings;
-    } catch (e) {
-        console.error("Failed to save offset pairings to backend:", e);
-        return pairings;
-    }
+    const res = await fetch(`${API_BASE}/${sheetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offset_pairings: pairings }),
+    });
+    const json = await res.json();
+    if (!res.ok || json.success !== true) throw new Error(json.error || "Failed to save offset pairs. Your changes have been retained; retry saving.");
+    if (!Array.isArray(json.data?.offset_pairings)) throw new Error("The saved offset pairs could not be verified. Retry saving or reload the record.");
+    return json.data.offset_pairings;
 }
 
 export async function commitOffsettingSheet(sheetId: number, auditNotes?: string): Promise<boolean> {
@@ -195,8 +172,8 @@ export async function commitOffsettingSheet(sheetId: number, auditNotes?: string
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ remarks: auditNotes || "Audited and committed via Offsetting Module" }),
         });
-        if (!res.ok) {
-            const json = await res.json();
+        const json = await res.json();
+        if (!res.ok || json.success !== true) {
             throw new Error(json.error || "Failed to commit offsetting sheet");
         }
         return true;

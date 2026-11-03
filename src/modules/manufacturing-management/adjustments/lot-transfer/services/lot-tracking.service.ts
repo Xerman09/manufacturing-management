@@ -160,7 +160,7 @@ export async function fetchLotsByBranch(branchId?: number): Promise<MMLot[]> {
       .map((r) => {
         const lotId = Number(r.lotId ?? r.lot_id ?? r.id ?? 0);
         const rawName = r.lotName ?? r.lot_name ?? r.name;
-        const lotName = rawName ? String(rawName).trim() : (lotId > 0 ? `Lot #${lotId}` : "-");
+        const lotName = rawName ? String(rawName).trim() : "-";
 
         const rawBranch = r.branchId ?? r.branch_id;
         const bId =

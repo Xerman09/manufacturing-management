@@ -15,18 +15,40 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url);
         const lotId = searchParams.get("lot_id");
         const productId = searchParams.get("product_id");
+        const physicalInventoryId = searchParams.get("physical_inventory_id");
 
-        if (!lotId || !productId) {
-            return NextResponse.json({ success: false, error: "lot_id and product_id are required." }, { status: 400 });
+        if (!lotId || !productId || !physicalInventoryId) {
+            return NextResponse.json({ success: false, error: "lot_id, product_id, and physical_inventory_id are required." }, { status: 400 });
         }
+
+        const sheetId = Number(physicalInventoryId);
+        if (!Number.isInteger(sheetId) || sheetId <= 0) {
+            return NextResponse.json({ success: false, error: "physical_inventory_id must be a positive integer." }, { status: 400 });
+        }
+
+        const sheetRes = await fetch(`${DIRECTUS_URL}/items/mm_physical_inventory/${sheetId}?fields=pi_no`, { headers, cache: "no-store" });
+        if (!sheetRes.ok) {
+            return NextResponse.json({ success: false, error: "Physical Inventory sheet not found." }, { status: 404 });
+        }
+        const sheetNo = String((await sheetRes.json()).data?.pi_no || "").trim();
 
         const masterUrl = `${DIRECTUS_URL}/items/mm_inventory_lots?filter[lot_id][_eq]=${encodeURIComponent(lotId)}&filter[product_id][_eq]=${encodeURIComponent(productId)}&sort=-inventory_lot_id&limit=-1&fields=*,lot_id.*,product_id.*`;
         const masterRes = await fetch(masterUrl, { headers, cache: "no-store" });
-        const masterBatches = masterRes.ok ? (await masterRes.json()).data || [] : [];
+        const masterBatches = masterRes.ok
+            ? ((await masterRes.json()).data || [])
+                .filter((batch: Record<string, unknown>) => {
+                    const isUncommittedDraft = String(batch.source_type || "").toUpperCase() === "PHYSICAL_INVENTORY_DRAFT"
+                        && String(batch.status || "").toUpperCase() !== "ACTIVE";
+                    if (!isUncommittedDraft) return true;
+                    const sourceReference = String(batch.source_reference || "").trim();
+                    return sourceReference === `PI-#${sheetId}` || (sheetNo && sourceReference === sheetNo);
+                })
+                .map((batch: Record<string, unknown>) => ({ ...batch, batch_kind: "MASTER" as const }))
+            : [];
 
-        // Check if there are draft batches in mm_physical_inventory_draft_batches
+        // Draft-batch IDs are kept separate from inventory_lot_id, which references mm_inventory_lots.
         let draftBatches: unknown[] = [];
-        const draftUrl = `${DIRECTUS_URL}/items/mm_physical_inventory_draft_batches?filter[lot_id][_eq]=${encodeURIComponent(lotId)}&filter[product_id][_eq]=${encodeURIComponent(productId)}&limit=-1&fields=*,lot_id.*,product_id.*`;
+        const draftUrl = `${DIRECTUS_URL}/items/mm_physical_inventory_draft_batches?filter[physical_inventory_id][_eq]=${encodeURIComponent(physicalInventoryId)}&filter[lot_id][_eq]=${encodeURIComponent(lotId)}&filter[product_id][_eq]=${encodeURIComponent(productId)}&filter[status][_eq]=DRAFT&limit=-1&fields=*,lot_id.*,product_id.*`;
         const draftRes = await fetch(draftUrl, { headers, cache: "no-store" });
         if (draftRes.ok) {
             const draftJson = await draftRes.json();
@@ -34,16 +56,15 @@ export async function GET(request: NextRequest) {
                 const dbId = extractId(d.draft_batch_id || d.id);
                 return {
                     ...d,
-                    inventory_lot_id: dbId,
-                    id: dbId,
                     draft_batch_id: dbId,
+                    batch_kind: "DRAFT",
                     is_draft: true,
                 };
             });
         }
 
-        // Combine and dedup by batch_no
-        const combined = [...draftBatches, ...masterBatches];
+        // Prefer a master batch when a legacy draft has already been materialized.
+        const combined = [...masterBatches, ...draftBatches];
         const seenBatchNos = new Set();
         const merged = combined.filter((b) => {
             const bObj = b as Record<string, unknown>;

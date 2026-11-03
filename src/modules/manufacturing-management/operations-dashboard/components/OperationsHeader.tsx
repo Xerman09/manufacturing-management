@@ -3,6 +3,7 @@
 import React, { useMemo } from "react";
 import { RefreshCw, Building2, ShieldCheck } from "lucide-react";
 import { DashboardBranch } from "../types/operations-dashboard.types";
+import { dashboardBranchOptions } from "../utils/branches";
 import {
     SearchableSelect,
     SearchableSelectOption,
@@ -27,12 +28,7 @@ export const OperationsHeader: React.FC<OperationsHeaderProps> = ({
         const list: SearchableSelectOption[] = [
             { value: "all", label: "All Branches" },
         ];
-        branches.forEach((b) => {
-            list.push({
-                value: String(b.id),
-                label: b.branch_name,
-            });
-        });
+        list.push(...dashboardBranchOptions(branches));
         return list;
     }, [branches]);
 
@@ -63,7 +59,8 @@ export const OperationsHeader: React.FC<OperationsHeaderProps> = ({
                             value={selectedBranchId}
                             onValueChange={onBranchChange}
                             placeholder="Select Branch..."
-                            searchPlaceholder="Search branch name..."
+                            searchPlaceholder="Search branch name or code..."
+                            emptyMessage="No active operational branches found."
                             className="h-8 text-xs bg-muted/30 border-border"
                         />
                     </div>

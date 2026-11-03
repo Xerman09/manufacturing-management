@@ -1,6 +1,7 @@
 export interface DashboardBranch {
     id: number;
     branch_name: string;
+    branch_code: string;
 }
 
 export interface KpiTotals {
@@ -30,9 +31,9 @@ export interface MaterialShortageItem {
     productName: string;
     componentName: string;
     componentCode: string;
-    requiredQty: number;
+    requiredQty: number | null;
     onHandQty: number;
-    shortageQty: number;
+    shortageQty: number | null;
     uom: string;
     actionUrl: string;
 }

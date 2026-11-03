@@ -463,15 +463,23 @@ export async function fetchJobOrders(): Promise<DirectusJobOrder[]> {
 
             const matchedProduct = productsList.find((p: any) => Number(p.product_id) === Number(jo.product_id));
             const productName = matchedProduct?.product_name || `Product #${jo.product_id}`;
-            const uomId = Number(matchedProduct?.unit_of_measurement?.unit_id || matchedProduct?.unit_of_measurement || 0);
+            const savedUomId = getRelationId(jo.uom_id, ["unit_id"]);
+            const hasSavedUom = savedUomId > 0;
+            const productUomId = getRelationId(matchedProduct?.unit_of_measurement, ["unit_id"]);
+            const uomId = hasSavedUom ? savedUomId : productUomId;
             const recipeVersion = versionById.get(Number(jo.version_id));
             // Queue reads must remain tolerant of existing packaging/legacy UOM
             // mappings. Compatibility is enforced when a JO is created or moved
             // through a workflow transition; rejecting one row here would cause
             // the entire terminal queue to be returned as an empty list.
-            const unitObj = unitsMap.get(uomId) || (typeof matchedProduct?.unit_of_measurement === "object" ? matchedProduct.unit_of_measurement : null);
-            const uomName = unitObj?.unit_name || unitObj?.unit_shortcut || "Pieces";
-            const uomShortcut = unitObj?.unit_shortcut || unitObj?.unit_name || "PCS";
+            const savedUnitObj = jo.uom_id && typeof jo.uom_id === "object" ? jo.uom_id : null;
+            const productUnitObj = matchedProduct?.unit_of_measurement && typeof matchedProduct.unit_of_measurement === "object"
+                ? matchedProduct.unit_of_measurement
+                : null;
+            const unitObj = unitsMap.get(uomId) || (hasSavedUom ? savedUnitObj : productUnitObj);
+            const uomName = unitObj?.unit_name || null;
+            const uomShortcut = unitObj?.unit_shortcut || null;
+            const uomLabel = uomName || uomShortcut || null;
 
             const salesOrders = josos
                 .filter((s: any) => s.job_order_id ? getObjId(s.job_order_id) === joIdInt : s.jo_id === joNo)
@@ -700,7 +708,7 @@ export async function fetchJobOrders(): Promise<DirectusJobOrder[]> {
                 jo_id: joNo,
                 product_id: jo.product_id,
                 product_name: productName,
-                unit_of_measurement: uomName,
+                unit_of_measurement: uomLabel,
                 uom_name: uomName,
                 uom_shortcut: uomShortcut,
                 quantity: targetQuantity,
@@ -714,7 +722,8 @@ export async function fetchJobOrders(): Promise<DirectusJobOrder[]> {
                 ...jo,
                 product_id: jo.product_id,
                 product_name: productName,
-                unit_of_measurement: uomName,
+                unit_of_measurement: uomLabel,
+                uom_id: uomId || null,
                 uom_name: uomName,
                 uom_shortcut: uomShortcut,
                 quantity: targetQuantity,

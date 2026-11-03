@@ -63,7 +63,6 @@ export const LotBatchSelectionModal: React.FC<LotBatchSelectionModalProps> = ({
   productTypeName,
   sourceLotId,
   sourceLotName,
-  targetLotId,
   targetLotName,
   targetMaxCapacity,
   targetCurrentStock = 0,
@@ -82,7 +81,6 @@ export const LotBatchSelectionModal: React.FC<LotBatchSelectionModalProps> = ({
 
   const [userSelectedProductId, setUserSelectedProductId] = useState<number | null>(null);
   const [userSelectedBatchId, setUserSelectedBatchId] = useState<number | null>(null);
-  const [customTargetBatchNo, setCustomTargetBatchNo] = useState<string | null>(null);
 
   // Target Lot Capacity Calculations
   const hasCapacityLimit = typeof targetMaxCapacity === "number" && targetMaxCapacity > 0;
@@ -229,58 +227,36 @@ export const LotBatchSelectionModal: React.FC<LotBatchSelectionModalProps> = ({
     return evaluatedBatches.filter((b) => b.batch_no.toLowerCase().includes(q));
   }, [evaluatedBatches, batchSearch]);
 
-  const formatDefaultTargetBatchNo = (batchNo: string | null | undefined): string => {
-    const clean = String(batchNo ?? "").trim();
-    if (!clean) return "";
-    return clean.endsWith("-LT") ? clean : `${clean}-LT`;
-  };
-
   const selectedBatch = useMemo(() => {
     if (!selectedProduct || evaluatedBatches.length === 0) return null;
     if (userSelectedBatchId) {
       const found = availableBatches.find((b) => b.inventory_lot_id === userSelectedBatchId);
-      if (found) return found;
+      const evaluated = evaluatedBatches.find((eb) => eb.inventory_lot_id === userSelectedBatchId);
+      if (found && evaluated && evaluated.eligibility.isEligible && !evaluated.isAlreadyAdded) {
+        return found;
+      }
     }
     const unaddedEligible = evaluatedBatches.find((b) => !b.isAlreadyAdded && b.eligibility.isEligible);
-    const fallbackUnadded = evaluatedBatches.find((b) => !b.isAlreadyAdded);
-    const chosen = unaddedEligible || fallbackUnadded || null;
-    if (chosen) {
-      return availableBatches.find((b) => b.inventory_lot_id === chosen.inventory_lot_id) || null;
+    if (unaddedEligible) {
+      return availableBatches.find((b) => b.inventory_lot_id === unaddedEligible.inventory_lot_id) || null;
     }
     return null;
   }, [selectedProduct, evaluatedBatches, userSelectedBatchId, availableBatches]);
 
   const maxAllowedQty = useMemo(() => {
-    const batchAvailable = selectedBatch?.available_quantity || 0;
+    const rawBatchAvailable = selectedBatch?.available_quantity || 0;
+    const batchAvailable = parseFloat(Number(rawBatchAvailable).toFixed(8));
     if (!hasCapacityLimit) return batchAvailable;
     return Math.min(batchAvailable, remainingTargetCapacity);
   }, [selectedBatch, hasCapacityLimit, remainingTargetCapacity]);
 
-  const isDiscreteUnit = useMemo(() => {
-    const uom = String(selectedProduct?.uomName || targetUomName || "").toLowerCase();
-    return (
-      uom.includes("pc") ||
-      uom.includes("piece") ||
-      uom.includes("bag") ||
-      uom.includes("box") ||
-      uom.includes("can") ||
-      uom.includes("btl") ||
-      uom.includes("bottle")
-    );
-  }, [selectedProduct?.uomName, targetUomName]);
+  const minAllowedQty = 0.0001;
 
-  const minAllowedQty = isDiscreteUnit ? 1 : 0.0001;
-
-  const targetBatchNo = customTargetBatchNo !== null
-    ? customTargetBatchNo
-    : selectedBatch
-    ? formatDefaultTargetBatchNo(selectedBatch.batch_no)
-    : "";
+  const targetBatchNo = selectedBatch ? selectedBatch.batch_no : "";
 
   const handleSelectProduct = (productId: number) => {
     setUserSelectedProductId(productId);
     setUserSelectedBatchId(null);
-    setCustomTargetBatchNo(null);
     setTransferQty(0);
     setBatchSearch("");
   };
@@ -290,10 +266,13 @@ export const LotBatchSelectionModal: React.FC<LotBatchSelectionModalProps> = ({
       toast.warning(`Batch ${candidate.batch_no} is already added to this transfer.`);
       return;
     }
+    if (!candidate.eligibility.isEligible) {
+      toast.error(candidate.eligibility.reason || `Batch ${candidate.batch_no} is ineligible for transfer.`);
+      return;
+    }
     const found = availableBatches.find((b) => b.inventory_lot_id === candidate.inventory_lot_id);
     if (found) {
       setUserSelectedBatchId(found.inventory_lot_id);
-      setCustomTargetBatchNo(null);
       setTransferQty(0);
     }
   };
@@ -302,7 +281,6 @@ export const LotBatchSelectionModal: React.FC<LotBatchSelectionModalProps> = ({
     if (!isOpen) {
       setUserSelectedProductId(null);
       setUserSelectedBatchId(null);
-      setCustomTargetBatchNo(null);
       setTransferQty(0);
       setLineRemarks("");
       setProductSearch("");
@@ -318,11 +296,11 @@ export const LotBatchSelectionModal: React.FC<LotBatchSelectionModalProps> = ({
     }
 
     if (transferQty < minAllowedQty) {
-      toast.error(`Transfer quantity must be at least ${minAllowedQty} ${selectedProduct.uomName || ""}.`);
+      toast.error(`Transfer quantity must be greater than zero.`);
       return;
     }
 
-    const available = selectedBatch.available_quantity || 0;
+    const available = parseFloat(Number(selectedBatch.available_quantity || 0).toFixed(8));
     if (transferQty > available) {
       toast.error(
         `Quantity (${transferQty}) exceeds available stock (${available}) for batch ${selectedBatch.batch_no}.`
@@ -423,9 +401,9 @@ export const LotBatchSelectionModal: React.FC<LotBatchSelectionModalProps> = ({
                 </Badge>
               </div>
               <DialogDescription className="text-xs flex items-center gap-1.5 text-muted-foreground">
-                <span>Transfer from: <strong className="text-foreground">{sourceLotName || `Lot #${sourceLotId}`}</strong></span>
+                <span>Transfer from: <strong className="text-foreground">{sourceLotName || "-"}</strong></span>
                 <ArrowRight className="w-3 h-3 shrink-0 text-muted-foreground" />
-                <span>To: <strong className="text-foreground">{targetLotName || `Lot #${targetLotId}`}</strong></span>
+                <span>To: <strong className="text-foreground">{targetLotName || "-"}</strong></span>
                 {productTypeName && (
                   <>
                     <span className="text-muted-foreground/50">•</span>
@@ -755,7 +733,7 @@ export const LotBatchSelectionModal: React.FC<LotBatchSelectionModalProps> = ({
 
             {/* Bottom: Docked / Persistent "Configure Line Item" Section */}
             <AnimatePresence>
-              {selectedBatch && (
+              {selectedBatch ? (
                 <motion.div
                   key={selectedBatch.inventory_lot_id}
                   initial={{ opacity: 0, y: 12 }}
@@ -813,15 +791,16 @@ export const LotBatchSelectionModal: React.FC<LotBatchSelectionModalProps> = ({
                           Target Batch Number *
                         </label>
                         <span className="text-[11px] text-muted-foreground/70 font-mono">
-                          Format: [batch]-LT
+                          Retains source batch
                         </span>
                       </div>
                       <Input
                         value={targetBatchNo}
-                        onChange={(e) => setCustomTargetBatchNo(e.target.value)}
+                        readOnly
+                        disabled
                         placeholder="Destination batch #"
-                        className="h-8 font-mono text-sm bg-card"
-                        disabled={isTargetLotFull}
+                        className="h-8 font-mono text-sm bg-muted/50 cursor-not-allowed opacity-80"
+                        title="Target batch number is retained from source batch."
                       />
                     </div>
                   </div>
@@ -841,6 +820,11 @@ export const LotBatchSelectionModal: React.FC<LotBatchSelectionModalProps> = ({
                     />
                   </div>
                 </motion.div>
+              ) : (
+                <div className="shrink-0 border-t bg-muted/10 p-4 text-center text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">No eligible batch selected</p>
+                  <p className="text-[11px] mt-0.5">Please select an available, non-expired batch above to configure transfer quantity.</p>
+                </div>
               )}
             </AnimatePresence>
           </div>

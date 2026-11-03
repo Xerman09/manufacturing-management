@@ -11,6 +11,7 @@ import {
     getFactoryOverheadBasisLabel
 } from "../../utils/cogs-helper";
 import { calculateAggregateRunHours, calculateMaterialRequirementPlan, calculatePerUnitMaterialRequirement, formatProductionValue, resolveProductionShiftHours } from "../../utils/production-timing";
+import { getUnitOfMeasureLabel } from "../../utils/unit-of-measure";
 
 export interface Step2BOMReviewProps {
     loadingDetails: boolean;
@@ -324,7 +325,7 @@ export function Step2BOMReview({
                                     const available = compProductId ? (inventories[Number(compProductId)]?.main_store_on_hand || 0) : 0;
                                     const shortfall = Math.max(0, needed - available);
                                     const isSufficient = shortfall === 0;
-                                    const uom = comp.unit_of_measurement || "pcs";
+                                    const uom = getUnitOfMeasureLabel(comp);
                                     const kilogramsPerUnit = comp.component_product_id?.kilograms_per_inventory_unit;
                                     const neededDisplay = formatInventoryQuantity(needed, uom, kilogramsPerUnit);
                                     const demandDisplay = formatInventoryQuantity(materialPlan.demandRequired, uom, kilogramsPerUnit);
@@ -454,7 +455,7 @@ export function Step2BOMReview({
                                                 );
                                                 const ccAvailable = ccId ? (inventories[Number(ccId)]?.main_store_on_hand || 0) : 0;
                                                 const ccShortfall = Math.max(0, ccNeeded - ccAvailable);
-                                                const ccUom = cc.unit_of_measurement || "pcs";
+                                                const ccUom = getUnitOfMeasureLabel(cc);
                                                 const ccKilogramsPerUnit = cc.component_product_id?.kilograms_per_inventory_unit;
                                                 const ccNeededDisplay = formatInventoryQuantity(ccNeeded, ccUom, ccKilogramsPerUnit);
                                                 const ccShortfallDisplay = formatInventoryQuantity(ccShortfall, ccUom, ccKilogramsPerUnit);

@@ -15,6 +15,18 @@ export function remainingQuantity(line: SalesOrderDetail): number {
     return Math.max(0, ordered - Math.max(allocated, served) - Math.max(0, planned));
 }
 
+export function linkedJobOrderQuantityTotals(line: SalesOrderDetail) {
+    return (line.linkedJobOrders || []).reduce(
+        (totals, jobOrder) => ({
+            producedQuantity: totals.producedQuantity + Number(jobOrder.producedQuantity || 0),
+            qaAcceptedQuantity: totals.qaAcceptedQuantity + Number(jobOrder.qaAcceptedQuantity || 0)
+        }),
+        { producedQuantity: 0, qaAcceptedQuantity: 0 }
+    );
+}
+
+export const SALES_ORDER_QUANTITY_GUIDANCE = "Active planned counts allocations on non-terminal Job Orders. Produced is committed good yield attributed to each linked Sales Order allocation; QA accepted is its passed-QA portion. Remaining to plan subtracts active plans, the greater of Sales Order allocated or served quantity, and eligible replacement credits. QA acceptance alone does not reduce it; output counts after it is applied to the Sales Order through allocation or receipt.";
+
 export function isPlanningDemandSalesOrder(order: Pick<SalesOrder, "order_status">): boolean {
     return order.order_status === "For Production";
 }

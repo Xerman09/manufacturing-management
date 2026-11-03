@@ -1,10 +1,10 @@
-import LotTransferPageShell from "../LotTransferPageShell";
+import { redirect } from "next/navigation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export default function LotTransferApprovalPage() {
-    return <LotTransferPageShell mode="approval" title="Lot Transfer QA Approval" />;
+    redirect("/mm/inventory-warehousing/adjustments/lot-transfer/lot-transfer-posting");
 }
 export const metadata = {
     title: "Lot Transfer Approval | Manufacturing Management",

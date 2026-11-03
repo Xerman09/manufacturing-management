@@ -1,16 +1,17 @@
 "use client";
 
-import React, { useSyncExternalStore, useEffect, useCallback } from "react";
-import { createPortal } from "react-dom";
+import React from "react";
 import {
   Printer,
   X,
-  ArrowRight,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { LotTransfer } from "../types";
-
-const emptySubscribe = () => () => {};
 
 interface LotTransferPrintModalProps {
   open: boolean;
@@ -46,28 +47,7 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
   onClose,
   transfer,
 }) => {
-  const mounted = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  );
-
-  // Handle escape key
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape" && open) {
-        onClose();
-      }
-    },
-    [open, onClose]
-  );
-
-  useEffect(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
-
-  if (!mounted || !open || !transfer) return null;
+  if (!open || !transfer) return null;
 
   const handlePrint = () => {
     window.print();
@@ -81,10 +61,10 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
       : "-";
 
   const sourceLotDisplay =
-    transfer.sourceLotName || (transfer.sourceLotId ? `Lot #${transfer.sourceLotId}` : "-");
+    transfer.sourceLotName && transfer.sourceLotName !== "-" ? transfer.sourceLotName : "-";
 
   const targetLotDisplay =
-    transfer.targetLotName || (transfer.targetLotId ? `Lot #${transfer.targetLotId}` : "-");
+    transfer.targetLotName && transfer.targetLotName !== "-" ? transfer.targetLotName : "-";
 
   const lineItems = transfer.details || [];
   const totalUnits =
@@ -94,86 +74,114 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
 
   const printedAtStr = formatDateTime(new Date().toISOString());
 
-  const modalContent = (
-    <div
-      id="printable-lot-transfer-root"
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs overflow-y-auto print:p-0 print:m-0 print:bg-white print:static print:block print:overflow-visible"
-    >
-      <style jsx global>{`
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 8mm;
-          }
-          html,
-          body {
-            background: white !important;
-            color: black !important;
-            height: auto !important;
-            overflow: visible !important;
-          }
-          body > *:not(#printable-lot-transfer-root) {
-            display: none !important;
-          }
-          #printable-lot-transfer-root {
-            position: static !important;
-            display: block !important;
-            width: 100% !important;
-            height: auto !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: white !important;
-            overflow: visible !important;
-          }
-          #printable-lot-transfer-paper {
-            position: static !important;
-            display: block !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            box-shadow: none !important;
-            border: none !important;
-            background: white !important;
-            color: black !important;
-            overflow: visible !important;
-          }
-          .print-hidden-bar {
-            display: none !important;
-          }
-          tr,
-          table,
-          .page-break-avoid {
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-          }
-        }
-      `}</style>
-
-      {/* Floating Action Toolbar (Hidden during print) */}
-      <div className="fixed top-4 right-4 z-50 flex items-center gap-2 print-hidden-bar">
-        <Button
-          onClick={handlePrint}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-semibold text-xs rounded-lg shadow-lg hover:opacity-90 transition-all cursor-pointer"
-        >
-          <Printer className="h-4 w-4" />
-          Print Transfer Slip
-        </Button>
-        <Button
-          variant="outline"
-          onClick={onClose}
-          className="p-2 rounded-lg bg-card border border-border text-foreground hover:bg-muted shadow-lg transition-all cursor-pointer"
-          title="Close Preview (Esc)"
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-
-      {/* Paper Document Container (A4 portrait proportion on screen, full printable page in print) */}
-      <div
-        id="printable-lot-transfer-paper"
-        className="bg-white text-black w-full max-w-4xl p-8 rounded-xl shadow-2xl print:shadow-none print:p-0 print:m-0 my-auto text-xs font-sans border border-neutral-200 print:border-none"
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent
+        showCloseButton={false}
+        className="flex flex-col p-0 overflow-hidden bg-background border border-border shadow-2xl h-[92vh] max-h-[92vh] !max-w-4xl w-full z-[100]"
       >
+        <DialogTitle className="sr-only">
+          Lot Transfer Slip - {transfer.requestNo || "Preview"}
+        </DialogTitle>
+
+        <style jsx global>{`
+          @media print {
+            @page {
+              size: A4 portrait;
+              margin: 8mm;
+            }
+            html,
+            body {
+              background: white !important;
+              color: black !important;
+              height: auto !important;
+              overflow: visible !important;
+            }
+            body > *:not([data-slot="dialog-portal"]) {
+              display: none !important;
+            }
+            [data-slot="dialog-overlay"],
+            .print-hidden-bar {
+              display: none !important;
+            }
+            [data-slot="dialog-content"] {
+              position: static !important;
+              display: block !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              height: auto !important;
+              max-height: none !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              box-shadow: none !important;
+              border: none !important;
+              background: white !important;
+              color: black !important;
+              overflow: visible !important;
+              transform: none !important;
+            }
+            #printable-lot-transfer-paper {
+              position: static !important;
+              display: block !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              box-shadow: none !important;
+              border: none !important;
+              background: white !important;
+              color: black !important;
+              overflow: visible !important;
+            }
+            tr,
+            table,
+            .page-break-avoid {
+              break-inside: avoid !important;
+              page-break-inside: avoid !important;
+            }
+          }
+        `}</style>
+
+        {/* Modal Header Action Toolbar (Hidden during print) */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-card shrink-0 print-hidden-bar">
+          <div className="flex items-center gap-2">
+            <Printer className="w-4 h-4 text-primary" />
+            <span className="text-sm font-bold text-foreground">
+              Transfer Slip Preview
+            </span>
+            <span className="font-mono text-xs text-muted-foreground ml-1">
+              ({transfer.requestNo || "-"})
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handlePrint}
+              className="gap-1.5 text-xs font-semibold cursor-pointer"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              Print Slip
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClose}
+              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+              title="Close Preview (Esc)"
+            >
+              <X className="w-4 h-4" />
+              <span className="sr-only">Close Preview</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Scrollable Paper Container */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-muted/30 flex justify-center">
+          <div
+            id="printable-lot-transfer-paper"
+            className="bg-white text-black w-full max-w-3xl p-8 rounded-xl shadow-md print:shadow-none print:p-0 print:m-0 my-auto text-xs font-sans border border-neutral-200 print:border-none"
+          >
         {/* Company & Document Header */}
         <div className="border-b-2 border-black pb-4 mb-4 flex items-start justify-between">
           <div>
@@ -197,7 +205,7 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
         </div>
 
         {/* Transfer Routing & Details Grid */}
-        <div className="grid grid-cols-3 gap-3 border border-neutral-300 rounded-lg p-3 mb-4 text-[11px] bg-neutral-50/80 print:bg-transparent">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 border border-neutral-300 rounded-lg p-3 mb-4 text-[11px] bg-neutral-50/80 print:bg-transparent">
           <div>
             <span className="font-bold text-neutral-500 block uppercase text-[9px]">
               Facility / Branch
@@ -216,27 +224,30 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
 
           <div>
             <span className="font-bold text-neutral-500 block uppercase text-[9px]">
+              Source Lot
+            </span>
+            <span className="font-bold font-mono text-black block truncate">
+              {sourceLotDisplay}
+            </span>
+          </div>
+
+          <div>
+            <span className="font-bold text-neutral-500 block uppercase text-[9px]">
+              Destination Lot
+            </span>
+            <span className="font-bold font-mono text-black block truncate">
+              {targetLotDisplay}
+            </span>
+          </div>
+
+          <div>
+            <span className="font-bold text-neutral-500 block uppercase text-[9px]">
               Total Volume / Units
             </span>
             <span className="font-extrabold font-mono text-black">
               {totalUnits.toLocaleString()}
               {transfer.unitName ? ` ${transfer.unitName}` : " PCS"}
             </span>
-          </div>
-
-          <div className="col-span-2">
-            <span className="font-bold text-neutral-500 block uppercase text-[9px]">
-              Transfer Route (Source → Target Lot)
-            </span>
-            <div className="flex items-center gap-2 font-bold text-black mt-0.5">
-              <span className="bg-neutral-200/80 px-2 py-0.5 rounded text-[10px] font-mono">
-                {sourceLotDisplay}
-              </span>
-              <ArrowRight className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
-              <span className="bg-neutral-200/80 px-2 py-0.5 rounded text-[10px] font-mono">
-                {targetLotDisplay}
-              </span>
-            </div>
           </div>
 
           <div>
@@ -248,7 +259,7 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
             </span>
           </div>
 
-          <div className="col-span-3 border-t border-neutral-200 pt-2 mt-1">
+          <div className="col-span-2">
             <span className="font-bold text-neutral-500 block uppercase text-[9px]">
               Operational Justification / Reason
             </span>
@@ -272,8 +283,7 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
               <tr className="bg-neutral-100 text-neutral-800 font-bold uppercase border-b border-neutral-300 text-[9px]">
                 <th className="py-1.5 px-2 text-center w-8 border-r border-neutral-300">#</th>
                 <th className="py-1.5 px-2 text-left border-r border-neutral-300 min-w-[170px]">Product SKU &amp; Description</th>
-                <th className="py-1.5 px-2 text-left border-r border-neutral-300 w-24">Source Batch</th>
-                <th className="py-1.5 px-2 text-left border-r border-neutral-300 w-24">Target Batch</th>
+                <th className="py-1.5 px-2 text-left border-r border-neutral-300 w-28">Batch #</th>
                 <th className="py-1.5 px-2 text-center border-r border-neutral-300 w-20">Mfg Date</th>
                 <th className="py-1.5 px-2 text-center border-r border-neutral-300 w-20">Expiry Date</th>
                 <th className="py-1.5 px-2 text-right border-r border-neutral-300 w-15">Qty</th>
@@ -283,7 +293,7 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
             <tbody>
               {lineItems.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-6 text-center text-neutral-500 italic">
+                  <td colSpan={7} className="py-6 text-center text-neutral-500 italic">
                     No individual batch lines recorded for this transfer.
                   </td>
                 </tr>
@@ -313,10 +323,7 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
                         </div>
                       </td>
                       <td className="py-1.5 px-2 font-mono font-semibold border-r border-neutral-200">
-                        {item.sourceBatchNo || "-"}
-                      </td>
-                      <td className="py-1.5 px-2 font-mono font-semibold border-r border-neutral-200">
-                        {item.targetBatchNo || "-"}
+                        {item.targetBatchNo || item.sourceBatchNo || "-"}
                       </td>
                       <td className="py-1.5 px-2 text-center font-mono text-neutral-700 border-r border-neutral-200">
                         {mfgDate}
@@ -339,7 +346,7 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
             {lineItems.length > 0 && (
               <tfoot>
                 <tr className="bg-neutral-100 font-bold border-t-2 border-neutral-400">
-                  <td colSpan={6} className="py-1.5 px-2 text-right uppercase text-[9px] border-r border-neutral-300">
+                  <td colSpan={5} className="py-1.5 px-2 text-right uppercase text-[9px] border-r border-neutral-300">
                     Grand Total Transferred:
                   </td>
                   <td className="py-1.5 px-2 text-right font-mono font-black text-black border-r border-neutral-300">
@@ -356,14 +363,14 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
         </div>
 
         {/* 3-Party Verification & Sign-Off Matrix */}
-        <div className="grid grid-cols-3 gap-4 pt-3 border-t-2 border-black page-break-avoid text-[10px]">
+        <div className="grid grid-cols-2 gap-4 pt-3 border-t-2 border-black page-break-avoid text-[10px]">
           {/* Box 1: Requested By */}
-          <div className="space-y-4 border border-neutral-300 rounded-lg p-2.5">
-            <div>
-              <span className="font-bold text-neutral-600 block uppercase text-[8px] tracking-wider">
-                1. Requested By
-              </span>
-              <div className="font-bold text-black mt-0.5">
+          <div className="border border-neutral-300 rounded-lg p-3 flex flex-col justify-between min-h-[72px]">
+            <span className="font-bold text-neutral-600 block uppercase text-[8px] tracking-wider">
+              1. Requested By
+            </span>
+            <div className="my-auto py-1">
+              <div className="font-bold text-black text-[11px]">
                 {transfer.requestedByName || "—"}
               </div>
               <div className="text-[9px] text-neutral-500 font-mono">
@@ -372,41 +379,16 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
                   : formatDate(transfer.transferDate)}
               </div>
             </div>
-            <div className="pt-4 border-b border-dashed border-neutral-400"></div>
-            <div className="text-[8px] text-center text-neutral-400 uppercase">
-              Signature &amp; Date
-            </div>
           </div>
-
-          {/* Box 2: QA Approved By */}
-          <div className="space-y-4 border border-neutral-300 rounded-lg p-2.5">
-            <div>
-              <span className="font-bold text-neutral-600 block uppercase text-[8px] tracking-wider">
-                2. QA Approved By
-              </span>
-              <div className="font-bold text-black mt-0.5">
-                {transfer.approvedByName ||
-                  (transfer.status === "Approved" || transfer.status === "Posted"
-                    ? "-"
-                    : "Pending QA Inspection")}
-              </div>
-              <div className="text-[9px] text-neutral-500 font-mono">
-                {transfer.approvedAt ? formatDateTime(transfer.approvedAt) : "-"}
-              </div>
-            </div>
-            <div className="pt-4 border-b border-dashed border-neutral-400"></div>
-            <div className="text-[8px] text-center text-neutral-400 uppercase">
-              Signature &amp; Date
-            </div>
-          </div>
+ 
 
           {/* Box 3: Posted By */}
-          <div className="space-y-4 border border-neutral-300 rounded-lg p-2.5">
-            <div>
-              <span className="font-bold text-neutral-600 block uppercase text-[8px] tracking-wider">
-                3. Posted By
-              </span>
-              <div className="font-bold text-black mt-0.5">
+          <div className="border border-neutral-300 rounded-lg p-3 flex flex-col justify-between min-h-[72px]">
+            <span className="font-bold text-neutral-600 block uppercase text-[8px] tracking-wider">
+              3. Posted By
+            </span>
+            <div className="my-auto py-1">
+              <div className="font-bold text-black text-[11px]">
                 {transfer.postedByName ||
                   (transfer.status === "Posted"
                     ? "-"
@@ -415,10 +397,6 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
               <div className="text-[9px] text-neutral-500 font-mono">
                 {transfer.postedAt ? formatDateTime(transfer.postedAt) : "-"}
               </div>
-            </div>
-            <div className="pt-4 border-b border-dashed border-neutral-400"></div>
-            <div className="text-[8px] text-center text-neutral-400 uppercase">
-              Signature &amp; Date
             </div>
           </div>
         </div>
@@ -434,7 +412,7 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
         </div>
       </div>
     </div>
-  );
-
-  return createPortal(modalContent, document.body);
+  </DialogContent>
+</Dialog>
+);
 };

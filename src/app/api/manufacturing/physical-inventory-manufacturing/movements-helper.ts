@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { DIRECTUS_URL, headers as directusHeaders } from "@/app/api/manufacturing/directus-api";
-import { roundQty, roundMoney } from "./helper";
+import { roundQty } from "./helper";
 
 const SPRING_API_BASE = process.env.SPRING_API_BASE_URL  ;
 
@@ -35,24 +35,6 @@ export interface SpringMovement {
     remarks?: string | null;
     stockType?: string;
     sourceStatus?: string;
-}
-
-export interface AggregatedMovementItem {
-    branchId: number;
-    inventoryLotId: number;
-    lotId: number;
-    productId: number;
-    productCode: string;
-    productName: string;
-    productTypeId?: number;
-    productTypeName?: string;
-    unitId: number;
-    batchNo: string;
-    manufacturingDate?: string | null;
-    expirationDate?: string | null;
-    inventoryCondition: string;
-    systemCount: number;
-    unitCost: number;
 }
 
 /**
@@ -130,63 +112,6 @@ export async function fetchSpringMovements(branchId: number, productTypeId?: num
         console.error("[Spring Movements API] Fetch error:", err);
         return [];
     }
-}
-
-/**
- * Aggregates a raw array of Spring movements into net on-hand item balances.
- * SUM(quantityIn - quantityOut) grouped per batch & lot.
- */
-export function aggregateMovementsToItems(movements: SpringMovement[]): AggregatedMovementItem[] {
-    const groupMap = new Map<string, AggregatedMovementItem>();
-
-    for (const m of movements) {
-        const bId = Number(m.branchId || 0);
-        const invLotId = Number(m.inventoryLotId || 0);
-        const lId = Number(m.mmLotId || (m as Record<string, unknown>).mm_lot_id || (m as Record<string, unknown>).lotId || (m as Record<string, unknown>).lot_id || 0);
-        const pId = Number(m.productId || 0);
-        const batchNo = (m.batchNo || "").trim();
-        const cond = (m.inventoryCondition || "GOOD").trim().toUpperCase();
-
-        if (!pId) continue;
-
-        const key = invLotId > 0 ? `${bId}:${invLotId}:${cond}` : `${bId}:${pId}:${lId}:${batchNo}:${cond}`;
-
-        const qIn = Number(m.quantityIn || 0);
-        const qOut = Number(m.quantityOut || 0);
-        const netQty = qIn - qOut;
-
-        const existing = groupMap.get(key);
-        if (existing) {
-            existing.systemCount += netQty;
-            if (Number(m.unitCost || 0) > 0) existing.unitCost = Number(m.unitCost);
-        } else {
-            groupMap.set(key, {
-                branchId: bId,
-                inventoryLotId: invLotId,
-                lotId: lId,
-                productId: pId,
-                productCode: m.productCode || `PROD-${pId}`,
-                productName: m.productName || `Product #${pId}`,
-                productTypeId: m.productTypeId,
-                productTypeName: m.productTypeName,
-                unitId: Number(m.unitId || 1),
-                batchNo: batchNo || `BATCH-${invLotId || pId}`,
-                manufacturingDate: m.manufacturingDate || null,
-                expirationDate: m.expirationDate || null,
-                inventoryCondition: cond,
-                systemCount: netQty,
-                unitCost: Number(m.unitCost || 0),
-            });
-        }
-    }
-
-    const items: AggregatedMovementItem[] = [];
-    for (const item of groupMap.values()) {
-        item.systemCount = roundQty(item.systemCount);
-        item.unitCost = roundMoney(item.unitCost);
-        items.push(item);
-    }
-    return items;
 }
 
 /**

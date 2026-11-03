@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
     OperationsDashboardData,
     PeriodFilter,
@@ -24,8 +24,10 @@ export function useOperationsDashboard() {
     const [searchQuery, setSearchQuery] = useState<string>("");
 
     const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+    const generation = useRef(0);
 
     const loadData = useCallback(async () => {
+        const requestGeneration = ++generation.current;
         setIsRefreshing(true);
         try {
             const result = await fetchOperationsDashboard({
@@ -34,21 +36,28 @@ export function useOperationsDashboard() {
                 endDate: endDate || null,
                 period: selectedPeriod,
             });
+            if (requestGeneration !== generation.current) return;
             setData(result);
             setError(null);
         } catch (err: unknown) {
+            if (requestGeneration !== generation.current) return;
             console.error("Failed to load operations dashboard:", err);
             const message = err instanceof Error ? err.message : "Failed to load dashboard data";
             setError(message);
+            setData(null);
         } finally {
-            setLoading(false);
-            setIsRefreshing(false);
+            if (requestGeneration === generation.current) {
+                setLoading(false);
+                setIsRefreshing(false);
+            }
         }
     }, [selectedBranchId, startDate, endDate, selectedPeriod]);
 
     // Initial and filter change trigger
     useEffect(() => {
         loadData();
+        const invalidate = () => { generation.current++; };
+        return invalidate;
     }, [loadData]);
 
     return {

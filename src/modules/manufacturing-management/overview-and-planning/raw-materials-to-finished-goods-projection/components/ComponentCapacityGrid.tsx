@@ -40,10 +40,10 @@ interface ComponentCapacityGridProps {
 type TabFilter = "ALL" | "SHORTAGES" | "RAW_MATERIAL" | "PACKAGING" | "SUB_ASSEMBLY";
 
 const tabOptions: { id: TabFilter; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: "ALL", label: "All Components", icon: Filter },
+    { id: "ALL", label: "All Materials", icon: Filter },
     { id: "SHORTAGES", label: "Shortages & Bottlenecks", icon: AlertTriangle },
     { id: "RAW_MATERIAL", label: "Raw Materials", icon: Boxes },
-    { id: "PACKAGING", label: "Packaging", icon: Package },
+    { id: "PACKAGING", label: "Packaging Materials", icon: Package },
     { id: "SUB_ASSEMBLY", label: "Sub-Assemblies", icon: FolderKanban },
 ];
 
@@ -110,13 +110,13 @@ export const ComponentCapacityGrid: React.FC<ComponentCapacityGridProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                         <CardTitle className="text-base font-semibold flex items-center gap-2">
-                            <span>Component Feasibility Breakdown</span>
+                            <span>Material Capacity &amp; Stock Breakdown</span>
                             <Badge variant="secondary" className="text-xs font-normal">
                                 {components.length} Items
                             </Badge>
                         </CardTitle>
                         <CardDescription className="text-xs text-muted-foreground mt-0.5">
-                            Individual capacity, live stock, active reservations, and recipe consumption per unit.
+                            Individual material requirements, live stock, active reservations, and maximum output capacity.
                         </CardDescription>
                     </div>
 
@@ -220,15 +220,60 @@ export const ComponentCapacityGrid: React.FC<ComponentCapacityGridProps> = ({
                         <Table>
                             <TableHeader className="bg-muted/40">
                                 <TableRow className="text-[11px] font-semibold text-muted-foreground hover:bg-transparent">
-                                    <TableHead className="min-w-[280px] w-[320px] lg:w-[380px] pl-4">Component</TableHead>
-                                    <TableHead className="w-[110px]">Type</TableHead>
-                                    <TableHead className="text-right">Req. / Net FG Unit</TableHead>
-                                    <TableHead className="text-right">Eligible On-Hand</TableHead>
-                                    <TableHead className="text-right">Reservations</TableHead>
-                                    <TableHead className="text-right">Net Available</TableHead>
-                                    <TableHead className="text-right font-bold text-foreground min-w-[140px]">Feasible Batches</TableHead>
-                                    <TableHead className="text-right font-bold text-foreground min-w-[130px]">Feasible Output ({fgUomName})</TableHead>
-                                    <TableHead className="text-center w-[120px] pr-4">Actions</TableHead>
+                                    <TableHead
+                                        className="min-w-[280px] w-[320px] lg:w-[380px] pl-4 cursor-help"
+                                        title="The raw material, packaging item, or sub-assembly required by the approved recipe."
+                                    >
+                                        Material / Component
+                                    </TableHead>
+                                    <TableHead
+                                        className="w-[110px] cursor-help"
+                                        title="Classification of the item (Raw Material, Packaging, or Sub-Assembly)."
+                                    >
+                                        Category
+                                    </TableHead>
+                                    <TableHead
+                                        className="text-right cursor-help"
+                                        title="Recipe quantity needed to produce 1 unit of finished product, including scrap and wastage allowances."
+                                    >
+                                        Required per Unit
+                                    </TableHead>
+                                    <TableHead
+                                        className="text-right cursor-help"
+                                        title="Total physical stock currently stored in approved warehouse locations that has passed QA."
+                                    >
+                                        Usable Stock On-Hand
+                                    </TableHead>
+                                    <TableHead
+                                        className="text-right cursor-help"
+                                        title="Stock currently allocated/reserved for other active or planned job orders, unavailable for new batches."
+                                    >
+                                        Reserved Stock
+                                    </TableHead>
+                                    <TableHead
+                                        className="text-right cursor-help"
+                                        title="Stock free and ready for new production (Usable Stock On-Hand minus Reserved Stock)."
+                                    >
+                                        Available to Use
+                                    </TableHead>
+                                    <TableHead
+                                        className="text-right font-bold text-foreground min-w-[140px] cursor-help"
+                                        title="Maximum number of standard batches this specific material can supply before running out."
+                                    >
+                                        Batches Supported
+                                    </TableHead>
+                                    <TableHead
+                                        className="text-right font-bold text-foreground min-w-[130px] cursor-help"
+                                        title="Maximum finished product units that can be made with this material's available stock."
+                                    >
+                                        Projected Output ({fgUomName})
+                                    </TableHead>
+                                    <TableHead
+                                        className="text-center w-[120px] pr-4 cursor-help"
+                                        title="Inspect lot-level quantities, expiration dates, and QA status for this material."
+                                    >
+                                        Actions
+                                    </TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>

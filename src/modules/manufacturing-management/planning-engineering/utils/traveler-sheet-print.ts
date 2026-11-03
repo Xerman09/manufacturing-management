@@ -9,6 +9,7 @@ import type {
 import { displayJobOrderStatus } from "../../job-order-status";
 import { formatPhtTimestamp } from "../../shared/pht-date";
 import { resolveProductionShiftHours } from "./production-timing";
+import { getUnitOfMeasureLabel } from "./unit-of-measure";
 
 export interface TravelerSheetPrintSheet {
     jobOrder: JobOrder;
@@ -170,7 +171,7 @@ function resolveSheet(sheet: TravelerSheetPrintSheet): ResolvedSheet {
         productName: currentJo.product_name || `Product #${currentJo.product_id}`,
         productCode,
         targetQty,
-        uom: currentJo.unit_of_measurement || "PCS",
+        uom: getUnitOfMeasureLabel(currentJo),
         batchNo: `LOT-${joNo}`,
         shiftHours: String(resolveProductionShiftHours(currentJo.shift_option)),
         status: displayJobOrderStatus(currentJo.status || "Planned"),
@@ -191,7 +192,7 @@ function materialRows(materials: JobOrderMaterial[]): string {
         const resQty = Number(mat.reserved_quantity || reqQty);
         const matName = mat.product_name || `Component #${mat.product_id}`;
         const matCode = mat.product_code || `SKU-${mat.product_id}`;
-        const matUom = mat.unit_of_measurement || "pcs";
+        const matUom = getUnitOfMeasureLabel(mat);
         const lotAllocations = mat.allocations || [];
         const lotText = lotAllocations.length > 0
             ? lotAllocations.map((a: JobOrderAllocation) => a.batch_no || `LOT-${a.lot_id}`).join(", ")

@@ -25,7 +25,7 @@ interface ManufacturingOffsettingModalProps {
     onClose: () => void;
     lineItems: MmPhysicalInventoryDetail[];
     initialPairings?: MmOffsetPairing[];
-    onApplyOffsetting: (pairings: MmOffsetPairing[]) => void;
+    onApplyOffsetting: (pairings: MmOffsetPairing[]) => Promise<void>;
     isReadOnly?: boolean;
 }
 
@@ -60,6 +60,8 @@ export default function ManufacturingOffsettingModal({
     const [linkQty, setLinkQty] = useState<string>("");
     const [linkReason, setLinkReason] = useState<string>(REASON_CODES[0]);
     const [linkNotes, setLinkNotes] = useState<string>("");
+    const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
 
     // Calculate allocated offset quantity per detail line item from active pairings
     // Calculate allocated offset quantity per detail line item from active pairings in BASE PIECES
@@ -420,10 +422,19 @@ export default function ManufacturingOffsettingModal({
         }
     }, [lineItems, activePairings]);
 
-    const handleSaveAndClose = useCallback(() => {
-        onApplyOffsetting(activePairings);
-        onClose();
-    }, [onApplyOffsetting, activePairings, onClose]);
+    const handleSaveAndClose = async () => {
+        if (saving || isReadOnly) return;
+        try {
+            setSaving(true);
+            setSaveError(null);
+            await onApplyOffsetting(activePairings);
+            onClose();
+        } catch (error) {
+            setSaveError(error instanceof Error ? error.message : "Offset pairs could not be saved. Your changes have been retained; retry saving.");
+        } finally {
+            setSaving(false);
+        }
+    };
 
     if (!isOpen) return null;
 
@@ -772,6 +783,7 @@ export default function ManufacturingOffsettingModal({
                 </div>
 
                 {/* Modal Footer */}
+                {saveError && <p role="alert" className="px-6 py-3 text-sm text-rose-700">{saveError}</p>}
                 <div className="flex items-center justify-between border-t px-6 py-4 bg-muted/40 shrink-0">
                     <div className="text-xs text-muted-foreground">
                         Total {activePairings.length} offset pair(s) will be applied to balance physical count records.
@@ -787,10 +799,11 @@ export default function ManufacturingOffsettingModal({
                         <button
                             type="button"
                             onClick={handleSaveAndClose}
+                            disabled={saving || isReadOnly}
                             className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-indigo-700 transition-colors"
                         >
                             <CheckCircle2 className="h-4 w-4" />
-                            Apply & Save Offsetting
+                            {saving ? "Saving…" : "Apply & Save Offsetting"}
                         </button>
                     </div>
                 </div>

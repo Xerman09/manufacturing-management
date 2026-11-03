@@ -3,7 +3,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import {
-    Boxes,
+    Truck,
     PackageCheck,
     AlertTriangle,
     Layers,
@@ -47,10 +47,10 @@ export const TrackingMetricsCards: React.FC<TrackingMetricsCardsProps> = ({ metr
                     <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground">
                         <span
                             className="flex items-center gap-1"
-                            title="Orders where all ordered item lines are 100% allocated to inventory lots"
+                            title="Orders where delivery has been completed"
                         >
                             <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-                            {metrics.fully_allocated_count} allocated
+                            {metrics.delivered_orders_count} Delivered
                         </span>
                         <span>•</span>
                         <span
@@ -64,44 +64,44 @@ export const TrackingMetricsCards: React.FC<TrackingMetricsCardsProps> = ({ metr
                 </div>
             </motion.div>
 
-            {/* 2. Overall Allocation Rate Card */}
+            {/* 2. Overall Delivery Rate Card */}
             <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2, delay: 0.1 }}
                 className="p-4 rounded-xl border bg-card text-card-foreground shadow-sm flex flex-col justify-between"
-                title="Quantity-weighted percentage of ordered items allocated to inventory lots"
+                title="Percentage of ordered quantity delivered or dispatched"
             >
                 <div className="flex items-center justify-between">
                     <span
                         className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wider"
-                        title="Quantity-weighted allocation progress across all active lines"
+                        title="Percentage of ordered quantity delivered or dispatched across active orders"
                     >
-                        Allocation Rate (Qty-Weighted)
+                        Delivery Rate
                     </span>
                     <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                        <Boxes className="w-4 h-4" />
+                        <Truck className="w-4 h-4" />
                     </div>
                 </div>
                 <div className="mt-2">
                     <div
                         className="text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400"
-                        title={`Overall Allocation Rate: ${metrics.overall_allocation_rate.toFixed(1)}%`}
+                        title={`Overall Delivery Rate: ${metrics.overall_delivery_rate.toFixed(1)}%`}
                     >
-                        {metrics.overall_allocation_rate.toFixed(1)}%
+                        {metrics.overall_delivery_rate.toFixed(1)}%
                     </div>
                     <div
                         className="w-full bg-muted rounded-full h-1.5 mt-2 overflow-hidden"
-                        title={`Overall Allocation Progress: ${metrics.overall_allocation_rate.toFixed(1)}%`}
+                        title={`Overall Delivery Progress: ${metrics.overall_delivery_rate.toFixed(1)}%`}
                     >
                         <div
                             className="bg-blue-600 h-1.5 rounded-full transition-all duration-500"
-                            style={{ width: `${Math.min(100, metrics.overall_allocation_rate)}%` }}
+                            style={{ width: `${Math.min(100, metrics.overall_delivery_rate)}%` }}
                         />
                     </div>
                     <div className="flex items-center justify-between mt-1.5 text-[11px] text-muted-foreground">
-                        <span title="Orders with partial inventory reservations">{metrics.partially_allocated_count} Partial</span>
-                        <span title="Orders with no inventory allocations yet">{metrics.not_started_allocation_count} Unallocated</span>
+                        <span title="Orders confirmed delivered">{metrics.delivered_orders_count} Delivered</span>
+                        <span title="Orders dispatched or en route">{metrics.dispatched_orders_count} Dispatched</span>
                     </div>
                 </div>
             </motion.div>

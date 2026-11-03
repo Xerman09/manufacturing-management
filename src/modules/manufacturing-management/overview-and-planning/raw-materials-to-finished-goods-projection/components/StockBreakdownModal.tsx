@@ -242,19 +242,19 @@ export const StockBreakdownModal: React.FC<StockBreakdownModalProps> = ({
                     {/* Summary Metric Ribbon */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3">
                         <div className="bg-muted/40 rounded-md p-2.5 border border-border/40">
-                            <span className="text-[10px] text-muted-foreground font-medium">Physical On-Hand</span>
+                            <span className="text-[10px] text-muted-foreground font-medium">Physical Stock On-Hand</span>
                             <div className="text-sm font-bold font-mono text-foreground mt-0.5">
                                 {Number.isFinite(totalPhysical) ? totalPhysical.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "-"} {component?.stockUomName}
                             </div>
                         </div>
                         <div className="bg-muted/40 rounded-md p-2.5 border border-border/40">
-                            <span className="text-[10px] text-muted-foreground font-medium">Active Reservations</span>
+                            <span className="text-[10px] text-muted-foreground font-medium">Reserved Stock</span>
                             <div className="text-sm font-bold font-mono text-amber-600 dark:text-amber-400 mt-0.5">
                                 {Number.isFinite(totalReserved) ? totalReserved.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "-"} {component?.stockUomName}
                             </div>
                         </div>
                         <div className="bg-muted/40 rounded-md p-2.5 border border-border/40">
-                            <span className="text-[10px] text-muted-foreground font-medium">Net Available</span>
+                            <span className="text-[10px] text-muted-foreground font-medium">Available to Use</span>
                             <div className="text-sm font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
                                 {Number.isFinite(totalAvailable) ? totalAvailable.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "-"} {component?.stockUomName}
                             </div>
@@ -265,7 +265,7 @@ export const StockBreakdownModal: React.FC<StockBreakdownModalProps> = ({
                             )}
                         </div>
                         <div className="bg-primary/5 rounded-md p-2.5 border border-primary/20">
-                            <span className="text-[10px] text-primary font-semibold">Feasible Output</span>
+                            <span className="text-[10px] text-primary font-semibold">Projected Output</span>
                             <div className="text-sm font-bold font-mono text-primary mt-0.5">
                                 {totalBatchDecimal > 0 ? `~${totalBatchDecimal.toLocaleString(undefined, { maximumFractionDigits: 2 })} Batches` : "0 Batches"}
                             </div>
@@ -323,19 +323,53 @@ export const StockBreakdownModal: React.FC<StockBreakdownModalProps> = ({
                             <Table>
                                 <TableHeader className="bg-muted/40">
                                     <TableRow className="text-[11px] font-semibold text-muted-foreground hover:bg-transparent">
-                                        <TableHead className="pl-3 min-w-[170px]">Lot / Batch No</TableHead>
-                                        <TableHead className="min-w-[120px]">Location</TableHead>
-                                        <TableHead className="min-w-[100px]">QA Status</TableHead>
-                                        <TableHead className="text-right min-w-[95px]">Physical Qty</TableHead>
-                                        <TableHead className="text-right min-w-[95px]">Available Qty</TableHead>
-                                        <TableHead className="text-right min-w-[140px] font-bold text-foreground">
-                                            Feasible Batches
+                                        <TableHead
+                                            className="pl-3 min-w-[170px] cursor-help"
+                                            title="Unique manufacturing batch or lot identifier."
+                                        >
+                                            Lot / Batch #
                                         </TableHead>
-                                        <TableHead className="text-right min-w-[130px] font-semibold text-foreground">
-                                            Feasible Output ({fgUomName})
+                                        <TableHead
+                                            className="min-w-[120px] cursor-help"
+                                            title="Warehouse bin, shelf, or storage area where this lot is located."
+                                        >
+                                            Storage Location
                                         </TableHead>
-                                        <TableHead className="pr-3 min-w-[110px]">
-                                            {isPackaging ? "Inward Date" : "Expiry Date"}
+                                        <TableHead
+                                            className="min-w-[100px] cursor-help"
+                                            title="Quality control inspection status (e.g., Approved, Good, On Hold, Rejected)."
+                                        >
+                                            QA Status
+                                        </TableHead>
+                                        <TableHead
+                                            className="text-right min-w-[95px] cursor-help"
+                                            title="Total physical count present in this lot."
+                                        >
+                                            Physical Qty
+                                        </TableHead>
+                                        <TableHead
+                                            className="text-right min-w-[95px] cursor-help"
+                                            title="Unreserved quantity in this lot ready to be issued to production."
+                                        >
+                                            Available Qty
+                                        </TableHead>
+                                        <TableHead
+                                            className="text-right min-w-[140px] font-bold text-foreground cursor-help"
+                                            title="Number of batches this individual lot alone can produce."
+                                        >
+                                            Batches Supported
+                                        </TableHead>
+                                        <TableHead
+                                            className="text-right min-w-[130px] font-semibold text-foreground cursor-help"
+                                            title="Finished units this individual lot alone can produce."
+                                        >
+                                            Projected Output ({fgUomName})
+                                        </TableHead>
+                                        <TableHead
+                                            className="pr-3 min-w-[130px] cursor-help"
+                                            title="FIFO tracking for packaging (oldest received first) or FEFO tracking for raw materials (earliest expiry first)."
+                                        >
+                                            {isPackaging ? "Date Received (FIFO)" : "Expiration Date (FEFO)"}
                                         </TableHead>
                                     </TableRow>
                                 </TableHeader>

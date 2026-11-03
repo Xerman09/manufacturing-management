@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
     ArrowLeft,
     Sparkles,
@@ -18,13 +18,18 @@ import {
     ChevronDown,
     ChevronUp,
     Printer,
+    Search,
     Scale,
     Layers,
     AlertCircle,
-    ClipboardList
+    ClipboardList,
+    Pencil
 } from "lucide-react";
 import { toast } from "sonner";
+import { v4 as uuidv4 } from "uuid";
 import OffsettingPrintModal from "./OffsettingPrintModal";
+import OffsetPairEditor from "./OffsetPairEditor";
+import { canEditOffsetPairings, normalizeOffsetPairings, sameOffsetPairings } from "../utils/offset-pairings";
 import {
     OffsettingSheetQueueItem,
     OffsettingPairing,
@@ -37,18 +42,28 @@ import {
 interface OffsettingWorkspaceProps {
     sheet: OffsettingSheetQueueItem;
     onBack: () => void;
-    onSavePairings: (pairings: OffsettingPairing[]) => Promise<void>;
-    onCommitSheet: (pairings: OffsettingPairing[], auditNotes?: string) => Promise<void>;
+    onSavePairings: (pairings: OffsettingPairing[]) => Promise<OffsettingPairing[]>;
+    onCommitSheet: (auditNotes?: string) => Promise<void>;
 }
 
 const REASON_CODES = [
     "Lot Number Mix-up / Mislabeling",
+    "Product Substitution / Swap",
     "Production Batch Pick Swap",
     "Wrong SKU Tagging",
     "Barcoding Error",
     "UOM Miscount",
     "Packaging Variation"
 ] as const;
+
+function createOffsettingId(prefix: string): string | null {
+    try {
+        return `${prefix}${uuidv4()}`;
+    } catch {
+        toast.error("Unable to prepare offset pairings in this browser. Please use an updated browser or open the workspace over HTTPS, then try again.");
+        return null;
+    }
+}
 
 function formatCurrency(val: number): string {
     return new Intl.NumberFormat("en-PH", {
@@ -69,6 +84,10 @@ function normalizeProductName(name?: string): string {
         .trim();
 }
 
+function matchesQuickSearch(value: string | undefined, query: string): boolean {
+    return Boolean(value?.toLowerCase().includes(query));
+}
+
 export default function OffsettingWorkspace({
     sheet,
     onBack,
@@ -79,20 +98,47 @@ export default function OffsettingWorkspace({
     const lineItems = useMemo(() => sheet.details || [], [sheet.details]);
 
     const [activePairings, setActivePairings] = useState<OffsettingPairing[]>(sheet.offset_pairings || []);
+    const [savedPairings, setSavedPairings] = useState<OffsettingPairing[]>(sheet.offset_pairings || []);
+    const [editingPair, setEditingPair] = useState<OffsettingPairing | null>(null);
+    const [editTrigger, setEditTrigger] = useState<HTMLElement | null>(null);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [retryAction, setRetryAction] = useState<"save" | "commit">("save");
+    const canEdit = canEditOffsetPairings(sheet);
+    const hasUnsavedChanges = !sameOffsetPairings(activePairings, savedPairings);
 
     // Checkbox multi-select state arrays (supports number IDs and normalized string keys)
     const [selectedShortageProductIds, setSelectedShortageProductIds] = useState<(number | string)[]>([]);
     const [selectedSurplusProductIds, setSelectedSurplusProductIds] = useState<(number | string)[]>([]);
     const [selectedShortageDetailIds, setSelectedShortageDetailIds] = useState<number[]>([]);
     const [selectedSurplusDetailIds, setSelectedSurplusDetailIds] = useState<number[]>([]);
+    const [shortageSearch, setShortageSearch] = useState("");
+    const [surplusSearch, setSurplusSearch] = useState("");
 
     const [linkQty, setLinkQty] = useState<string>("");
-    const [linkReason, setLinkReason] = useState<string>(REASON_CODES[0]);
+    const [linkReason, setLinkReason] = useState<string>("");
     const [linkNotes, setLinkNotes] = useState<string>("");
     const [auditSignoffNotes, setAuditSignoffNotes] = useState<string>("");
     const [saving, setSaving] = useState(false);
     const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
     const [showLineItems, setShowLineItems] = useState(true);
+
+    useEffect(() => {
+        if (!hasUnsavedChanges) return;
+        const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+        const beforeLink = (event: MouseEvent) => {
+            const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+            if (link && link.getAttribute("href") !== "#" && !window.confirm("Discard unsaved offset pair changes?")) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        };
+        window.addEventListener("beforeunload", beforeUnload);
+        document.addEventListener("click", beforeLink, true);
+        return () => {
+            window.removeEventListener("beforeunload", beforeUnload);
+            document.removeEventListener("click", beforeLink, true);
+        };
+    }, [hasUnsavedChanges]);
 
     // View Mode & Accordion Expansion states
     const [groupingViewMode, setGroupingViewMode] = useState<"PRODUCT_GROUPED" | "LOT_GRANULAR">("PRODUCT_GROUPED");
@@ -111,7 +157,8 @@ export default function OffsettingWorkspace({
 
     // Multi-select toggle helper functions
     const toggleShortageProduct = (pId: number | string, childDetailIds: number[]) => {
-        const isProductSelected = selectedShortageProductIds.includes(pId);
+        const isProductSelected = selectedShortageProductIds.includes(pId)
+            || childDetailIds.length > 0 && childDetailIds.every(id => selectedShortageDetailIds.includes(id));
         if (isProductSelected) {
             setSelectedShortageProductIds(prev => prev.filter(id => id !== pId));
             setSelectedShortageDetailIds(prev => prev.filter(id => !childDetailIds.includes(id)));
@@ -122,7 +169,8 @@ export default function OffsettingWorkspace({
     };
 
     const toggleSurplusProduct = (pId: number | string, childDetailIds: number[]) => {
-        const isProductSelected = selectedSurplusProductIds.includes(pId);
+        const isProductSelected = selectedSurplusProductIds.includes(pId)
+            || childDetailIds.length > 0 && childDetailIds.every(id => selectedSurplusDetailIds.includes(id));
         if (isProductSelected) {
             setSelectedSurplusProductIds(prev => prev.filter(id => id !== pId));
             setSelectedSurplusDetailIds(prev => prev.filter(id => !childDetailIds.includes(id)));
@@ -130,18 +178,6 @@ export default function OffsettingWorkspace({
             setSelectedSurplusProductIds(prev => [...prev, pId]);
             setSelectedSurplusDetailIds(prev => Array.from(new Set([...prev, ...childDetailIds])));
         }
-    };
-
-    const toggleShortageDetail = (detailId: number) => {
-        setSelectedShortageDetailIds(prev =>
-            prev.includes(detailId) ? prev.filter(id => id !== detailId) : [...prev, detailId]
-        );
-    };
-
-    const toggleSurplusDetail = (detailId: number) => {
-        setSelectedSurplusDetailIds(prev =>
-            prev.includes(detailId) ? prev.filter(id => id !== detailId) : [...prev, detailId]
-        );
     };
 
     // Calculate allocated offset quantity per detail line item from active pairings in BASE PIECES
@@ -374,6 +410,115 @@ export default function OffsettingWorkspace({
         }
         return Array.from(map.values());
     }, [surplusItems]);
+
+    const shortageSearchQuery = shortageSearch.trim().toLowerCase();
+    const surplusSearchQuery = surplusSearch.trim().toLowerCase();
+
+    const filteredShortageProducts = useMemo(() => groupedShortageProducts.flatMap(group => {
+        const productMatches = matchesQuickSearch(group.productName, shortageSearchQuery)
+            || matchesQuickSearch(group.productCode, shortageSearchQuery)
+            || group.items.some(item => matchesQuickSearch(item.resolvedName, shortageSearchQuery)
+                || matchesQuickSearch(item.resolvedCode, shortageSearchQuery));
+
+        if (!shortageSearchQuery || productMatches) {
+            return [{ ...group, visibleItems: group.items, searchExpanded: false }];
+        }
+
+        const matchingItems = group.items.filter(item => matchesQuickSearch(item.resolvedLotName, shortageSearchQuery)
+            || matchesQuickSearch(item.resolvedBatchNo, shortageSearchQuery));
+
+        return matchingItems.length > 0
+            ? [{ ...group, visibleItems: matchingItems, searchExpanded: true }]
+            : [];
+    }), [groupedShortageProducts, shortageSearchQuery]);
+
+    const filteredSurplusProducts = useMemo(() => groupedSurplusProducts.flatMap(group => {
+        const productMatches = matchesQuickSearch(group.productName, surplusSearchQuery)
+            || matchesQuickSearch(group.productCode, surplusSearchQuery)
+            || group.items.some(item => matchesQuickSearch(item.resolvedName, surplusSearchQuery)
+                || matchesQuickSearch(item.resolvedCode, surplusSearchQuery));
+
+        if (!surplusSearchQuery || productMatches) {
+            return [{ ...group, visibleItems: group.items, searchExpanded: false }];
+        }
+
+        const matchingItems = group.items.filter(item => matchesQuickSearch(item.resolvedLotName, surplusSearchQuery)
+            || matchesQuickSearch(item.resolvedBatchNo, surplusSearchQuery));
+
+        return matchingItems.length > 0
+            ? [{ ...group, visibleItems: matchingItems, searchExpanded: true }]
+            : [];
+    }), [groupedSurplusProducts, surplusSearchQuery]);
+
+    const filteredShortageItems = useMemo(() => shortageItems.filter(item => !shortageSearchQuery
+        || matchesQuickSearch(item.resolvedName, shortageSearchQuery)
+        || matchesQuickSearch(item.resolvedCode, shortageSearchQuery)
+        || matchesQuickSearch(item.resolvedLotName, shortageSearchQuery)
+        || matchesQuickSearch(item.resolvedBatchNo, shortageSearchQuery)), [shortageItems, shortageSearchQuery]);
+
+    const filteredSurplusItems = useMemo(() => surplusItems.filter(item => !surplusSearchQuery
+        || matchesQuickSearch(item.resolvedName, surplusSearchQuery)
+        || matchesQuickSearch(item.resolvedCode, surplusSearchQuery)
+        || matchesQuickSearch(item.resolvedLotName, surplusSearchQuery)
+        || matchesQuickSearch(item.resolvedBatchNo, surplusSearchQuery)), [surplusItems, surplusSearchQuery]);
+
+    const visibleShortageDetailIds = useMemo(() => groupingViewMode === "PRODUCT_GROUPED"
+        ? filteredShortageProducts.flatMap(group => group.visibleItems.map(item => item.detailId))
+        : filteredShortageItems.map(item => item.detailId), [groupingViewMode, filteredShortageProducts, filteredShortageItems]);
+
+    const visibleSurplusDetailIds = useMemo(() => groupingViewMode === "PRODUCT_GROUPED"
+        ? filteredSurplusProducts.flatMap(group => group.visibleItems.map(item => item.detailId))
+        : filteredSurplusItems.map(item => item.detailId), [groupingViewMode, filteredSurplusProducts, filteredSurplusItems]);
+
+    const selectedShortageItemIds = useMemo(() => {
+        const selected = new Set(selectedShortageDetailIds);
+        for (const group of groupedShortageProducts) {
+            if (selectedShortageProductIds.includes(group.groupId) || selectedShortageProductIds.includes(group.productId)) {
+                group.items.forEach(item => selected.add(item.detailId));
+            }
+        }
+        return selected;
+    }, [groupedShortageProducts, selectedShortageProductIds, selectedShortageDetailIds]);
+
+    const selectedSurplusItemIds = useMemo(() => {
+        const selected = new Set(selectedSurplusDetailIds);
+        for (const group of groupedSurplusProducts) {
+            if (selectedSurplusProductIds.includes(group.groupId) || selectedSurplusProductIds.includes(group.productId)) {
+                group.items.forEach(item => selected.add(item.detailId));
+            }
+        }
+        return selected;
+    }, [groupedSurplusProducts, selectedSurplusProductIds, selectedSurplusDetailIds]);
+
+    const setShortageVisibleSelection = (detailIds: number[], isSelected: boolean) => {
+        const selected = new Set(selectedShortageItemIds);
+        detailIds.forEach(id => isSelected ? selected.add(id) : selected.delete(id));
+        setSelectedShortageProductIds([]);
+        setSelectedShortageDetailIds(Array.from(selected));
+    };
+
+    const setSurplusVisibleSelection = (detailIds: number[], isSelected: boolean) => {
+        const selected = new Set(selectedSurplusItemIds);
+        detailIds.forEach(id => isSelected ? selected.add(id) : selected.delete(id));
+        setSelectedSurplusProductIds([]);
+        setSelectedSurplusDetailIds(Array.from(selected));
+    };
+
+    const toggleShortageVisibleSelection = (detailIds: number[]) => {
+        setShortageVisibleSelection(detailIds, !detailIds.every(id => selectedShortageItemIds.has(id)));
+    };
+
+    const toggleSurplusVisibleSelection = (detailIds: number[]) => {
+        setSurplusVisibleSelection(detailIds, !detailIds.every(id => selectedSurplusItemIds.has(id)));
+    };
+
+    const toggleShortageDetail = (detailId: number) => {
+        setShortageVisibleSelection([detailId], !selectedShortageItemIds.has(detailId));
+    };
+
+    const toggleSurplusDetail = (detailId: number) => {
+        setSurplusVisibleSelection([detailId], !selectedSurplusItemIds.has(detailId));
+    };
 
     const formattedLineItems = useMemo(() => {
         return lineItems.map((item, idx) => {
@@ -643,6 +788,7 @@ export default function OffsettingWorkspace({
     };
 
     const handleRemoveGroupPairings = useCallback((groupId: string) => {
+        if (!canEdit || saving) return;
         setActivePairings(prev => {
             return prev.filter(p => {
                 const gId = p.group_link_id || `${p.shortage_product_id}-${p.surplus_product_id}-${p.reason_code}`;
@@ -650,7 +796,7 @@ export default function OffsettingWorkspace({
             });
         });
         toast.success("Offset pair group removed.");
-    }, []);
+    }, [canEdit, saving]);
 
     // Group active pairings for consolidated table view
     const groupedActivePairings = useMemo(() => {
@@ -705,6 +851,8 @@ export default function OffsettingWorkspace({
             const pSurpIds = new Set(grp.pairs.map(p => p.surplus_detail_id));
             grp.shortageLotsCount = sIds.size;
             grp.surplusLotsCount = pSurpIds.size;
+            if (new Set(grp.pairs.map(pair => pair.reason_code)).size > 1) grp.reasonCode = "Mixed reasons — view lot pairs";
+            if (new Set(grp.pairs.map(pair => pair.notes || "")).size > 1) grp.notes = "Multiple auditor notes — view lot pairs";
         }
 
         return Array.from(map.values());
@@ -712,8 +860,9 @@ export default function OffsettingWorkspace({
 
     // Pairing handler supporting Multi-Checkbox Selection (One-to-Many, Many-to-One, Many-to-Many)
     const handleAddPairing = useCallback(() => {
+        if (!canEdit || saving) return;
         const pcsToAllocate = parseFloat(linkQty);
-        if (isNaN(pcsToAllocate) || pcsToAllocate <= 0) {
+        if (!Number.isFinite(pcsToAllocate) || pcsToAllocate <= 0) {
             toast.error("Please enter a valid positive number of pieces to offset.");
             return;
         }
@@ -770,24 +919,6 @@ export default function OffsettingWorkspace({
             return;
         }
 
-        // Strict Same-Product Validation (matching product ID or normalized base product name)
-        for (const sItem of checkedShortageItems) {
-            const sProdId = getProdId(sItem.product_id);
-            const sNormName = normalizeProductName(sItem.resolvedName).toLowerCase();
-
-            for (const surpItem of checkedSurplusItems) {
-                const surpProdId = getProdId(surpItem.product_id);
-                const surpNormName = normalizeProductName(surpItem.resolvedName).toLowerCase();
-
-                const isSame = sProdId === surpProdId || (sNormName.length > 0 && sNormName === surpNormName);
-
-                if (!isSame) {
-                    toast.error(`Cross-product offsetting is disabled. Shortage product "${sItem.resolvedName}" cannot be offset against Surplus "${surpItem.resolvedName}". Offsetting is strictly permitted between lots/batches of the SAME product.`);
-                    return;
-                }
-            }
-        }
-
         const maxPossiblePcs = Math.min(selectedShortageTotalPieces, selectedSurplusTotalPieces);
         if (pcsToAllocate > maxPossiblePcs + 0.0001) {
             toast.error(`Offset quantity cannot exceed ${maxPossiblePcs.toLocaleString()} pcs.`);
@@ -796,8 +927,8 @@ export default function OffsettingWorkspace({
 
         let remPiecesToAllocate = pcsToAllocate;
         const generatedPairs: OffsettingPairing[] = [];
-        let matchCount = 0;
-        const groupLinkId = `OFF-GRP-${Date.now().toString().slice(-6)}`;
+        const groupLinkId = createOffsettingId("OFF-GRP-");
+        if (!groupLinkId) return;
 
         const sItems = checkedShortageItems.map(i => ({ ...i, remPcs: i.shortagePieces }));
         const pSurpItems = checkedSurplusItems.map(i => ({ ...i, remPcs: i.surplusPieces }));
@@ -823,8 +954,10 @@ export default function OffsettingWorkspace({
                 const unitCostVarPerPiece = surplusCostPerPiece - shortageCostPerPiece;
                 const netFinancialImpact = pairPieces * unitCostVarPerPiece;
 
+                const pairId = createOffsettingId("OFF-");
+                if (!pairId) return;
                 const pair: OffsettingPairing = {
-                    id: `OFF-${Date.now().toString().slice(-5)}-${matchCount + 1}`,
+                    id: pairId,
                     group_link_id: groupLinkId,
                     shortage_detail_id: sItem.detailId,
                     shortage_product_id: getProdId(sItem.product_id),
@@ -853,7 +986,7 @@ export default function OffsettingWorkspace({
                     surplus_unit_cost: surpItem.unitCost,
                     unit_cost_variance: unitCostVarPerPiece,
                     net_financial_impact: netFinancialImpact,
-                    reason_code: linkReason,
+                    reason_code: linkReason || REASON_CODES[0],
                     notes: linkNotes.trim() || undefined,
                     created_at: new Date().toISOString()
                 };
@@ -862,21 +995,33 @@ export default function OffsettingWorkspace({
                 sItem.remPcs -= pairPieces;
                 surpItem.remPcs -= pairPieces;
                 remPiecesToAllocate -= pairPieces;
-                matchCount++;
             }
         }
 
         if (generatedPairs.length > 0) {
+            const hasCrossProductPair = generatedPairs.some(pair => pair.shortage_product_id !== pair.surplus_product_id);
+            if (hasCrossProductPair && !linkReason) {
+                toast.error("Choose a reason code for cross-product audit pairings.");
+                return;
+            }
+            if (hasCrossProductPair && !linkNotes.trim()) {
+                toast.error("Enter an auditor note for cross-product audit pairings.");
+                return;
+            }
+
             setActivePairings(prev => [...prev, ...generatedPairs]);
             setSelectedShortageProductIds([]);
             setSelectedSurplusProductIds([]);
             setSelectedShortageDetailIds([]);
             setSelectedSurplusDetailIds([]);
             setLinkQty("");
+            setLinkReason("");
             setLinkNotes("");
             toast.success(`Linked offset pair (${pcsToAllocate.toLocaleString()} pcs total)!`);
         }
     }, [
+        canEdit,
+        saving,
         linkQty,
         groupingViewMode,
         groupedShortageProducts,
@@ -894,14 +1039,16 @@ export default function OffsettingWorkspace({
     ]);
 
     const handleRemovePairing = useCallback((pairId: string) => {
+        if (!canEdit || saving) return;
         setActivePairings(prev => prev.filter(p => p.id !== pairId));
         toast.info("Offset pairing removed.");
-    }, []);
+    }, [canEdit, saving]);
 
     // 1-Click Auto Match Same Product (Piece-Based)
     const handleAutoMatchSameProduct = useCallback(() => {
+        if (!canEdit || saving) return;
         const generatedPairs: OffsettingPairing[] = [];
-        let matchCount = 0;
+        const autoGroupIds = new Map<number, string>();
 
         const sItems = shortageItems.map(i => ({ ...i, remPcs: i.shortagePieces }));
         const pSurpItems = surplusItems.map(i => ({ ...i, remPcs: i.surplusPieces }));
@@ -936,9 +1083,13 @@ export default function OffsettingWorkspace({
                     const unitCostVarPerPiece = surplusCostPerPiece - shortageCostPerPiece;
                     const netFinancialImpact = pairPieces * unitCostVarPerPiece;
 
-                    const autoGroupId = `OFF-GRP-AUTO-${Date.now().toString().slice(-5)}`;
+                    const autoGroupId = autoGroupIds.get(sProdId) || createOffsettingId("OFF-GRP-AUTO-");
+                    if (!autoGroupId) return;
+                    autoGroupIds.set(sProdId, autoGroupId);
+                    const pairId = createOffsettingId("OFF-AUTO-");
+                    if (!pairId) return;
                     const pair: OffsettingPairing = {
-                        id: `OFF-AUTO-${Date.now().toString().slice(-5)}-${matchCount + 1}`,
+                        id: pairId,
                         group_link_id: autoGroupId,
                         shortage_detail_id: sItem.detailId,
                         shortage_product_id: sProdId,
@@ -975,7 +1126,6 @@ export default function OffsettingWorkspace({
                     generatedPairs.push(pair);
                     sItem.remPcs -= pairPieces;
                     surpItem.remPcs -= pairPieces;
-                    matchCount++;
                 }
             }
         }
@@ -987,28 +1137,41 @@ export default function OffsettingWorkspace({
 
         setActivePairings(prev => [...prev, ...generatedPairs]);
         toast.success(`Auto-matched ${generatedPairs.length} lot offset pairs across identical products!`);
-    }, [shortageItems, surplusItems]);
+    }, [shortageItems, surplusItems, canEdit, saving]);
 
     const handleSaveDraft = async () => {
+        if (!canEdit || saving) return;
         try {
             setSaving(true);
-            await onSavePairings(activePairings);
-            toast.success("Offsetting draft saved successfully.");
-        } catch {
-            toast.error("Failed to save offsetting draft.");
+            setSaveError(null);
+            const saved = await onSavePairings(normalizeOffsetPairings(activePairings, lineItems));
+            setSavedPairings(saved);
+            setActivePairings(saved);
+            toast.success("Offset pairs saved and verified.");
+        } catch (error) {
+            setRetryAction("save");
+            setSaveError(error instanceof Error ? error.message : "Failed to save offset pairs. Your changes have been retained.");
         } finally {
             setSaving(false);
         }
     };
 
     const handleApproveAndCommit = async () => {
+        if (!canEdit || saving || sheet.status !== "PENDING_REVIEW") return;
+        let pairsSaved = false;
         try {
             setSaving(true);
-            await onCommitSheet(activePairings, auditSignoffNotes);
+            setSaveError(null);
+            const saved = await onSavePairings(normalizeOffsetPairings(activePairings, lineItems));
+            setSavedPairings(saved);
+            setActivePairings(saved);
+            pairsSaved = true;
+            await onCommitSheet(auditSignoffNotes);
             toast.success("Offsetting audit approved and stock adjustments committed!");
             onBack();
-        } catch {
-            toast.error("Failed to commit offsetting audit.");
+        } catch (error) {
+            setRetryAction(pairsSaved ? "commit" : "save");
+            setSaveError(`${pairsSaved ? "Offset pairs were saved, but commitment failed. " : ""}${error instanceof Error ? error.message : "The audit could not be committed."}`);
         } finally {
             setSaving(false);
         }
@@ -1021,7 +1184,9 @@ export default function OffsettingWorkspace({
                 <div className="flex items-center gap-3">
                     <button
                         type="button"
-                        onClick={onBack}
+                        onClick={() => { if (!saving && (!hasUnsavedChanges || window.confirm("Discard unsaved offset pair changes?"))) onBack(); }}
+                        disabled={saving}
+                        aria-label="Back to offsetting queue"
                         className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors"
                     >
                         <ArrowLeft className="h-5 w-5" />
@@ -1057,6 +1222,7 @@ export default function OffsettingWorkspace({
                     <button
                         type="button"
                         onClick={handleAutoMatchSameProduct}
+                        disabled={!canEdit || saving}
                         className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-xs"
                     >
                         <Sparkles className="h-3.5 w-3.5" />
@@ -1066,14 +1232,14 @@ export default function OffsettingWorkspace({
                     <button
                         type="button"
                         onClick={handleSaveDraft}
-                        disabled={saving}
+                        disabled={!canEdit || saving || !hasUnsavedChanges}
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-foreground bg-background border border-input rounded-lg hover:bg-accent transition-colors shadow-xs"
                     >
                         <Save className="h-3.5 w-3.5" />
-                        {isCommitted ? "Save Offset Adjustments" : "Save Draft"}
+                        {saving ? "Saving…" : "Save audit record"}
                     </button>
 
-                    {!isCommitted && (
+                    {canEdit && sheet.status === "PENDING_REVIEW" && (
                         <button
                             type="button"
                             onClick={handleApproveAndCommit}
@@ -1086,6 +1252,18 @@ export default function OffsettingWorkspace({
                     )}
                 </div>
             </div>
+
+            <p role="status" aria-live="polite" className={`text-sm ${hasUnsavedChanges ? "font-semibold text-amber-700" : "text-muted-foreground"}`}>
+                {!canEdit ? "This audit record is read-only. Offset pairs cannot be changed." : saving ? "Saving and verifying offset pairs…" : hasUnsavedChanges ? "Unsaved changes — Save audit record to persist pair edits and unlinks." : "Offset pairs match the saved audit record."}
+            </p>
+            {saveError && (
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                    <span>{saveError}</span>
+                    <button type="button" disabled={!canEdit || saving} onClick={retryAction === "commit" ? handleApproveAndCommit : handleSaveDraft} className="rounded-md border border-rose-300 px-3 py-2 font-semibold focus-visible:outline-2">
+                        {retryAction === "commit" ? "Retry commit" : "Retry saving"}
+                    </button>
+                </div>
+            )}
 
             {/* KPI Summary Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1146,7 +1324,7 @@ export default function OffsettingWorkspace({
             </div>
 
             {/* Interactive Lot Linker Builder */}
-            <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-xs">
+            <fieldset disabled={!canEdit || saving} className={`min-w-0 rounded-xl border border-border bg-card p-5 space-y-4 shadow-xs ${!canEdit || saving ? "pointer-events-none opacity-60" : ""}`}>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-3">
                     <div>
                         <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
@@ -1154,7 +1332,7 @@ export default function OffsettingWorkspace({
                             Auditor Matching Builder
                         </h4>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                            Pair shortage items against surplus items to reconcile inventory balance
+                            Pair shortage items against surplus items for audit reporting and variance justification.
                         </p>
                     </div>
 
@@ -1185,6 +1363,11 @@ export default function OffsettingWorkspace({
                     </div>
                 </div>
 
+                <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <p>Audit pairings and saving them do not change perpetual inventory counts. Stock changes require the separate Approve &amp; Commit Stock Adjustments action.</p>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Shortage Column (Left) */}
                     <div className="space-y-2">
@@ -1192,24 +1375,9 @@ export default function OffsettingWorkspace({
                             <label className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5 cursor-pointer">
                                 <input
                                     type="checkbox"
-                                    checked={
-                                        groupingViewMode === "PRODUCT_GROUPED"
-                                            ? groupedShortageProducts.length > 0 && selectedShortageProductIds.length === groupedShortageProducts.length
-                                            : shortageItems.length > 0 && selectedShortageDetailIds.length === shortageItems.length
-                                    }
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            if (groupingViewMode === "PRODUCT_GROUPED") {
-                                                setSelectedShortageProductIds(groupedShortageProducts.map(g => g.productId));
-                                                setSelectedShortageDetailIds(shortageItems.map(i => i.detailId));
-                                            } else {
-                                                setSelectedShortageDetailIds(shortageItems.map(i => i.detailId));
-                                            }
-                                        } else {
-                                            setSelectedShortageProductIds([]);
-                                            setSelectedShortageDetailIds([]);
-                                        }
-                                    }}
+                                    checked={visibleShortageDetailIds.length > 0 && visibleShortageDetailIds.every(id => selectedShortageItemIds.has(id))}
+                                    disabled={visibleShortageDetailIds.length === 0}
+                                    onChange={(e) => setShortageVisibleSelection(visibleShortageDetailIds, e.target.checked)}
                                     className="h-3.5 w-3.5 rounded border-amber-400 text-amber-600 focus:ring-amber-500 cursor-pointer"
                                 />
                                 <TrendingDown className="h-3.5 w-3.5" />
@@ -1222,23 +1390,39 @@ export default function OffsettingWorkspace({
                             )}
                         </div>
 
+                        <div className="relative">
+                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <input
+                                type="search"
+                                aria-label="Search shortage discrepancies"
+                                placeholder="Search product, code, lot, or batch..."
+                                value={shortageSearch}
+                                onChange={e => setShortageSearch(e.target.value)}
+                                className="w-full h-9 rounded-lg border border-input bg-background pl-9 pr-3 text-xs focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                            />
+                        </div>
+
                         <div className="max-h-72 overflow-y-auto space-y-2 pr-1 border border-border rounded-lg p-2 bg-muted/20">
                             {groupingViewMode === "PRODUCT_GROUPED" ? (
                                 /* PRODUCT GROUPED VIEW FOR SHORTAGES */
-                                groupedShortageProducts.length === 0 ? (
+                                filteredShortageProducts.length === 0 ? (
                                     <div className="p-4 text-center text-xs text-muted-foreground">
-                                        No unallocated shortage products remaining.
+                                        {shortageSearchQuery ? "No shortage items match this search." : "No unallocated shortage products remaining."}
                                     </div>
                                 ) : (
-                                    groupedShortageProducts.map(group => {
-                                        const isExpanded = !!expandedShortageProducts[group.productId];
-                                        const isProductChecked = selectedShortageProductIds.includes(group.productId);
-                                        const hasCheckedChild = group.items.some(i => selectedShortageDetailIds.includes(i.detailId));
+                                    filteredShortageProducts.map(group => {
+                                        const groupDetailIds = group.visibleItems.map(item => item.detailId);
+                                        const isExpanded = group.searchExpanded || !!expandedShortageProducts[group.productId];
+                                        const isProductChecked = groupDetailIds.length > 0 && groupDetailIds.every(id => selectedShortageItemIds.has(id));
+                                        const hasCheckedChild = group.visibleItems.some(i => selectedShortageItemIds.has(i.detailId));
+                                        const toggleGroupSelection = () => shortageSearchQuery
+                                            ? toggleShortageVisibleSelection(groupDetailIds)
+                                            : toggleShortageProduct(group.productId, group.items.map(i => i.detailId));
 
                                         return (
                                             <div
                                                 key={group.productId}
-                                                onClick={() => toggleShortageProduct(group.productId, group.items.map(i => i.detailId))}
+                                                onClick={toggleGroupSelection}
                                                 className={`rounded-lg border transition-all cursor-pointer ${isProductChecked
                                                         ? "border-amber-500 bg-amber-500/15 ring-2 ring-amber-500 shadow-md"
                                                         : hasCheckedChild
@@ -1255,7 +1439,7 @@ export default function OffsettingWorkspace({
                                                                 checked={isProductChecked}
                                                                 onChange={(e) => {
                                                                     e.stopPropagation();
-                                                                    toggleShortageProduct(group.productId, group.items.map(i => i.detailId));
+                                                                    toggleGroupSelection();
                                                                 }}
                                                                 className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500 cursor-pointer mt-0.5 shrink-0"
                                                             />
@@ -1293,14 +1477,20 @@ export default function OffsettingWorkspace({
                                                             <Layers className="h-3 w-3 text-amber-500" />
                                                             Total Product Deficit ({group.items.length} {group.items.length === 1 ? "lot/batch" : "lots/batches"})
                                                         </span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => toggleShortageExpand(group.productId, e)}
-                                                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:underline"
-                                                        >
-                                                            {isExpanded ? "Hide Breakdown" : `Show Lot/Batch Breakdown (${group.items.length})`}
-                                                            {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                                                        </button>
+                                                        {group.searchExpanded ? (
+                                                            <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                                                                Matching Lots/Batches ({group.visibleItems.length})
+                                                            </span>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => toggleShortageExpand(group.productId, e)}
+                                                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:underline"
+                                                            >
+                                                                {isExpanded ? "Hide Breakdown" : `Show Lot/Batch Breakdown (${group.items.length})`}
+                                                                {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -1310,8 +1500,8 @@ export default function OffsettingWorkspace({
                                                         <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground px-1 pb-1">
                                                             Detailed Lots & Batches Breakdown:
                                                         </div>
-                                                        {group.items.map(item => {
-                                                            const isDetailChecked = selectedShortageDetailIds.includes(item.detailId);
+                                                        {group.visibleItems.map(item => {
+                                                            const isDetailChecked = selectedShortageItemIds.has(item.detailId);
                                                             return (
                                                                 <div
                                                                     key={item.detailId}
@@ -1372,13 +1562,13 @@ export default function OffsettingWorkspace({
                                 )
                             ) : (
                                 /* GRANULAR LOT/BATCH FLAT VIEW FOR SHORTAGES */
-                                shortageItems.length === 0 ? (
+                                filteredShortageItems.length === 0 ? (
                                     <div className="p-4 text-center text-xs text-muted-foreground">
-                                        No unallocated shortage lots remaining.
+                                        {shortageSearchQuery ? "No shortage items match this search." : "No unallocated shortage lots remaining."}
                                     </div>
                                 ) : (
-                                    shortageItems.map(item => {
-                                        const isChecked = selectedShortageDetailIds.includes(item.detailId);
+                                    filteredShortageItems.map(item => {
+                                        const isChecked = selectedShortageItemIds.has(item.detailId);
                                         return (
                                             <div
                                                 key={item.detailId}
@@ -1447,24 +1637,9 @@ export default function OffsettingWorkspace({
                             <label className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 cursor-pointer">
                                 <input
                                     type="checkbox"
-                                    checked={
-                                        groupingViewMode === "PRODUCT_GROUPED"
-                                            ? groupedSurplusProducts.length > 0 && selectedSurplusProductIds.length === groupedSurplusProducts.length
-                                            : surplusItems.length > 0 && selectedSurplusDetailIds.length === surplusItems.length
-                                    }
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            if (groupingViewMode === "PRODUCT_GROUPED") {
-                                                setSelectedSurplusProductIds(groupedSurplusProducts.map(g => g.productId));
-                                                setSelectedSurplusDetailIds(surplusItems.map(i => i.detailId));
-                                            } else {
-                                                setSelectedSurplusDetailIds(surplusItems.map(i => i.detailId));
-                                            }
-                                        } else {
-                                            setSelectedSurplusProductIds([]);
-                                            setSelectedSurplusDetailIds([]);
-                                        }
-                                    }}
+                                    checked={visibleSurplusDetailIds.length > 0 && visibleSurplusDetailIds.every(id => selectedSurplusItemIds.has(id))}
+                                    disabled={visibleSurplusDetailIds.length === 0}
+                                    onChange={(e) => setSurplusVisibleSelection(visibleSurplusDetailIds, e.target.checked)}
                                     className="h-3.5 w-3.5 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                                 />
                                 <TrendingUp className="h-3.5 w-3.5" />
@@ -1477,23 +1652,39 @@ export default function OffsettingWorkspace({
                             )}
                         </div>
 
+                        <div className="relative">
+                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <input
+                                type="search"
+                                aria-label="Search surplus discrepancies"
+                                placeholder="Search product, code, lot, or batch..."
+                                value={surplusSearch}
+                                onChange={e => setSurplusSearch(e.target.value)}
+                                className="w-full h-9 rounded-lg border border-input bg-background pl-9 pr-3 text-xs focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
+                            />
+                        </div>
+
                         <div className="max-h-72 overflow-y-auto space-y-2 pr-1 border border-border rounded-lg p-2 bg-muted/20">
                             {groupingViewMode === "PRODUCT_GROUPED" ? (
                                 /* PRODUCT GROUPED VIEW FOR SURPLUSES */
-                                groupedSurplusProducts.length === 0 ? (
+                                filteredSurplusProducts.length === 0 ? (
                                     <div className="p-4 text-center text-xs text-muted-foreground">
-                                        No unallocated surplus products remaining.
+                                        {surplusSearchQuery ? "No surplus items match this search." : "No unallocated surplus products remaining."}
                                     </div>
                                 ) : (
-                                    groupedSurplusProducts.map(group => {
-                                        const isExpanded = !!expandedSurplusProducts[group.productId];
-                                        const isProductChecked = selectedSurplusProductIds.includes(group.productId);
-                                        const hasCheckedChild = group.items.some(i => selectedSurplusDetailIds.includes(i.detailId));
+                                    filteredSurplusProducts.map(group => {
+                                        const groupDetailIds = group.visibleItems.map(item => item.detailId);
+                                        const isExpanded = group.searchExpanded || !!expandedSurplusProducts[group.productId];
+                                        const isProductChecked = groupDetailIds.length > 0 && groupDetailIds.every(id => selectedSurplusItemIds.has(id));
+                                        const hasCheckedChild = group.visibleItems.some(i => selectedSurplusItemIds.has(i.detailId));
+                                        const toggleGroupSelection = () => surplusSearchQuery
+                                            ? toggleSurplusVisibleSelection(groupDetailIds)
+                                            : toggleSurplusProduct(group.productId, group.items.map(i => i.detailId));
 
                                         return (
                                             <div
                                                 key={group.productId}
-                                                onClick={() => toggleSurplusProduct(group.productId, group.items.map(i => i.detailId))}
+                                                onClick={toggleGroupSelection}
                                                 className={`rounded-lg border transition-all cursor-pointer ${isProductChecked
                                                         ? "border-emerald-500 bg-emerald-500/15 ring-2 ring-emerald-500 shadow-md"
                                                         : hasCheckedChild
@@ -1510,7 +1701,7 @@ export default function OffsettingWorkspace({
                                                                 checked={isProductChecked}
                                                                 onChange={(e) => {
                                                                     e.stopPropagation();
-                                                                    toggleSurplusProduct(group.productId, group.items.map(i => i.detailId));
+                                                                    toggleGroupSelection();
                                                                 }}
                                                                 className="h-4 w-4 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 cursor-pointer mt-0.5 shrink-0"
                                                             />
@@ -1548,14 +1739,20 @@ export default function OffsettingWorkspace({
                                                             <Layers className="h-3 w-3 text-emerald-500" />
                                                             Total Product Overage ({group.items.length} {group.items.length === 1 ? "lot/batch" : "lots/batches"})
                                                         </span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => toggleSurplusExpand(group.productId, e)}
-                                                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline"
-                                                        >
-                                                            {isExpanded ? "Hide Breakdown" : `Show Lot/Batch Breakdown (${group.items.length})`}
-                                                            {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                                                        </button>
+                                                        {group.searchExpanded ? (
+                                                            <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                                                                Matching Lots/Batches ({group.visibleItems.length})
+                                                            </span>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => toggleSurplusExpand(group.productId, e)}
+                                                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline"
+                                                            >
+                                                                {isExpanded ? "Hide Breakdown" : `Show Lot/Batch Breakdown (${group.items.length})`}
+                                                                {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -1565,8 +1762,8 @@ export default function OffsettingWorkspace({
                                                         <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground px-1 pb-1">
                                                             Detailed Lots & Batches Breakdown:
                                                         </div>
-                                                        {group.items.map(item => {
-                                                            const isDetailChecked = selectedSurplusDetailIds.includes(item.detailId);
+                                                        {group.visibleItems.map(item => {
+                                                            const isDetailChecked = selectedSurplusItemIds.has(item.detailId);
                                                             return (
                                                                 <div
                                                                     key={item.detailId}
@@ -1627,13 +1824,13 @@ export default function OffsettingWorkspace({
                                 )
                             ) : (
                                 /* GRANULAR LOT/BATCH FLAT VIEW FOR SURPLUSES */
-                                surplusItems.length === 0 ? (
+                                filteredSurplusItems.length === 0 ? (
                                     <div className="p-4 text-center text-xs text-muted-foreground">
-                                        No unallocated surplus lots remaining.
+                                        {surplusSearchQuery ? "No surplus items match this search." : "No unallocated surplus lots remaining."}
                                     </div>
                                 ) : (
-                                    surplusItems.map(item => {
-                                        const isChecked = selectedSurplusDetailIds.includes(item.detailId);
+                                    filteredSurplusItems.map(item => {
+                                        const isChecked = selectedSurplusItemIds.has(item.detailId);
                                         return (
                                             <div
                                                 key={item.detailId}
@@ -1700,7 +1897,7 @@ export default function OffsettingWorkspace({
                 {/* Action inputs bar */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 pt-3 border-t bg-muted/20 p-3 rounded-lg">
                     <div className="flex-1 space-y-1">
-                        <label className="text-[11px] font-semibold text-muted-foreground flex items-center justify-between">
+                        <label htmlFor="offset-link-quantity" className="text-[11px] font-semibold text-muted-foreground flex items-center justify-between">
                             <span>Offset Qty (pcs)</span>
                             {selectedShortageTotalPieces > 0 && selectedSurplusTotalPieces > 0 && (
                                 <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold">
@@ -1709,6 +1906,7 @@ export default function OffsettingWorkspace({
                             )}
                         </label>
                         <input
+                            id="offset-link-quantity"
                             type="number"
                             step="any"
                             min="0"
@@ -1720,12 +1918,14 @@ export default function OffsettingWorkspace({
                     </div>
 
                     <div className="flex-1 space-y-1">
-                        <label className="text-[11px] font-semibold text-muted-foreground">Reason Code</label>
+                        <label htmlFor="offset-link-reason" className="text-[11px] font-semibold text-muted-foreground">Reason Code (required for cross-product)</label>
                         <select
+                            id="offset-link-reason"
                             value={linkReason}
                             onChange={e => setLinkReason(e.target.value)}
                             className="w-full h-9 rounded-md border border-input bg-background px-2 text-xs focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
                         >
+                            <option value="">Select a reason code...</option>
                             {REASON_CODES.map(code => (
                                 <option key={code} value={code}>
                                     {code}
@@ -1735,8 +1935,9 @@ export default function OffsettingWorkspace({
                     </div>
 
                     <div className="flex-1 space-y-1">
-                        <label className="text-[11px] font-semibold text-muted-foreground">Auditor Note</label>
+                        <label htmlFor="offset-link-note" className="text-[11px] font-semibold text-muted-foreground">Auditor Note (required for cross-product)</label>
                         <input
+                            id="offset-link-note"
                             type="text"
                             value={linkNotes}
                             onChange={e => setLinkNotes(e.target.value)}
@@ -1755,7 +1956,7 @@ export default function OffsettingWorkspace({
                         Link Offset Pair
                     </button>
                 </div>
-            </div>
+            </fieldset>
 
             {/* Active Offsetting Pairings Table */}
             <div className="space-y-3">
@@ -1865,15 +2066,18 @@ export default function OffsettingWorkspace({
                                                             onClick={() => toggleGroupRow(group.groupId)}
                                                             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 transition-colors"
                                                             title="Toggle lot breakdown"
+                                                            aria-expanded={isExpanded}
                                                         >
                                                             {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                                                            <span>{isExpanded ? "Hide" : `Lots (${group.pairs.length})`}</span>
+                                                            <span>{isExpanded ? "Hide" : `${canEdit ? "Edit pairs" : "Lots"} (${group.pairs.length})`}</span>
                                                         </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => handleRemoveGroupPairings(group.groupId)}
+                                                            disabled={!canEdit || saving}
+                                                            aria-label={`Unlink pair group ${group.groupId}`}
                                                             className="rounded-md p-1.5 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-600 transition-colors"
-                                                            title="Delete pair group"
+                                                            title="Unlink pair group"
                                                         >
                                                             <Trash2 className="h-4 w-4" />
                                                         </button>
@@ -1897,6 +2101,7 @@ export default function OffsettingWorkspace({
                                                                         <th className="py-1">Surplus Lot / Batch</th>
                                                                         <th className="py-1 text-right">Offset Pieces & Deduction</th>
                                                                         <th className="py-1 text-right">Net Impact</th>
+                                                                        <th className="py-1">Reason & Auditor Note</th>
                                                                         <th className="py-1 text-center">Action</th>
                                                                     </tr>
                                                                 </thead>
@@ -1924,9 +2129,16 @@ export default function OffsettingWorkspace({
                                                                                     {formatCurrency(pair.net_financial_impact)}
                                                                                 </td>
                                                                                 <td className="py-1.5 text-center">
+                                                                                    <p className="text-xs">{pair.reason_code || "No reason"}</p>
+                                                                                    <p className="text-xs text-muted-foreground">{pair.notes || "No note"}</p>
+                                                                                </td>
+                                                                                <td className="py-1.5 text-center">
+                                                                                    {canEdit && <button type="button" disabled={saving} aria-label={`Edit pair ${pair.id}`} onClick={event => { setEditTrigger(event.currentTarget); setEditingPair(pair); }} className="rounded px-2 py-1 text-indigo-700 focus-visible:outline-2"><Pencil className="mr-1 inline h-3 w-3" />Edit</button>}
                                                                                     <button
                                                                                         type="button"
                                                                                         onClick={() => handleRemovePairing(pair.id)}
+                                                                                        disabled={!canEdit || saving}
+                                                                                        aria-label={`Unlink pair ${pair.id}`}
                                                                                         className="rounded p-1 text-muted-foreground hover:text-rose-600"
                                                                                         title="Remove single lot pair"
                                                                                     >
@@ -2006,9 +2218,12 @@ export default function OffsettingWorkspace({
                                                 {pair.notes && <div className="text-[10px] text-muted-foreground italic mt-0.5">{pair.notes}</div>}
                                             </td>
                                             <td className="px-4 py-3 text-center">
+                                                {canEdit && <button type="button" disabled={saving} aria-label={`Edit pair ${pair.id}`} onClick={event => { setEditTrigger(event.currentTarget); setEditingPair(pair); }} className="rounded px-2 py-1 text-indigo-700 focus-visible:outline-2"><Pencil className="mr-1 inline h-3 w-3" />Edit</button>}
                                                 <button
                                                     type="button"
                                                     onClick={() => handleRemovePairing(pair.id)}
+                                                    disabled={!canEdit || saving}
+                                                    aria-label={`Unlink pair ${pair.id}`}
                                                     className="rounded-md p-1.5 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-600 transition-colors"
                                                     title="Unlink pair"
                                                 >
@@ -2126,8 +2341,10 @@ export default function OffsettingWorkspace({
 
             {/* Auditor Sign-off Remarks */}
             <div className="rounded-xl border border-border bg-card p-4 space-y-2 shadow-xs">
-                <label className="text-xs font-bold text-foreground uppercase tracking-wider">Auditor Sign-off Remarks</label>
+                <label htmlFor="offset-signoff-notes" className="text-xs font-bold text-foreground uppercase tracking-wider">Auditor Sign-off Remarks</label>
                 <textarea
+                    id="offset-signoff-notes"
+                    disabled={!canEdit || saving}
                     rows={2}
                     value={auditSignoffNotes}
                     onChange={e => setAuditSignoffNotes(e.target.value)}
@@ -2135,6 +2352,8 @@ export default function OffsettingWorkspace({
                     className="w-full rounded-lg border border-input bg-background p-3 text-xs focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
                 />
             </div>
+
+            {editingPair && canEdit && !saving && <OffsetPairEditor key={editingPair.id} pair={editingPair} pairings={activePairings} details={lineItems} reasons={REASON_CODES} trigger={editTrigger} onApply={setActivePairings} onClose={() => setEditingPair(null)} />}
 
             <OffsettingPrintModal
                 isOpen={isPrintModalOpen}

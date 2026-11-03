@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
 import { getJwtSubFromReq } from "@/lib/directus";
 import { parseBooleanFlag, extractId, roundQty, recalculateHeaderTotals } from "../../helper";
+import { normalizeOffsetPairings, OffsetPairingError, readOffsetPairings, writeOffsetPairings } from "@/modules/manufacturing-management/physical-inventory-offsetting/utils/offset-pairings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,6 +53,8 @@ export async function POST(request: NextRequest, context: RouteParams) {
         if (details.length === 0) {
             return NextResponse.json({ success: false, error: "Cannot commit a Physical Inventory sheet with no detail rows." }, { status: 400 });
         }
+        const storedPairings = readOffsetPairings(sheet.remarks);
+        normalizeOffsetPairings(storedPairings, details);
 
         // 4. Validate all line items & promote batch status
         for (const d of details) {
@@ -76,54 +79,34 @@ export async function POST(request: NextRequest, context: RouteParams) {
                 return NextResponse.json({ success: false, error: `Product UOM mismatch for detail batch ${d.batch_no || batchId}.` }, { status: 400 });
             }
 
-            // Ensure batch status is ACTIVE in mm_inventory_lots upon commit
-            let activeBatchId = batchId;
-            let isNewDraftBatch = false;
+            // inventory_lot_id always references the master inventory-lot collection.
+            // Draft-table IDs are never resolved here because they are a different key space.
+            const batchRes = await fetch(`${DIRECTUS_URL}/items/mm_inventory_lots/${batchId}?fields=*`, { headers, cache: "no-store" });
+            if (!batchRes.ok) {
+                return NextResponse.json({ success: false, error: `Inventory batch ${batchId} was not found for detail row ${d.physical_inventory_detail_id || d.id}.` }, { status: 409 });
+            }
+            const batchData = (await batchRes.json()).data;
+            const masterLotId = extractId(batchData.lot_id, "lot_id");
+            const masterBranchId = extractId(batchData.branch_id, "branch_id");
+            const masterProductId = extractId(batchData.product_id, "product_id");
+            if (masterLotId !== lotId || masterBranchId !== piBranchId || masterProductId !== productId) {
+                return NextResponse.json({ success: false, error: `Inventory batch ${d.batch_no || batchId} does not match its physical inventory detail. Remove and re-add the affected line.` }, { status: 409 });
+            }
+            if (d.batch_no && batchData.batch_no && String(d.batch_no).trim() !== String(batchData.batch_no).trim()) {
+                return NextResponse.json({ success: false, error: `Inventory batch ${d.batch_no} does not match the selected inventory lot. Remove and re-add the affected line.` }, { status: 409 });
+            }
 
-            const draftBatchRes = await fetch(`${DIRECTUS_URL}/items/mm_physical_inventory_draft_batches/${batchId}`, { headers, cache: "no-store" });
-            if (draftBatchRes.ok) {
-                const draftData = (await draftBatchRes.json()).data;
-                if (draftData) {
-                    isNewDraftBatch = true;
-                    const masterRes = await fetch(`${DIRECTUS_URL}/items/mm_inventory_lots`, {
-                        method: "POST",
-                        headers,
-                        body: JSON.stringify({
-                            lot_id: lotId,
-                            branch_id: piBranchId,
-                            product_id: productId,
-                            batch_no: draftData.batch_no,
-                            manufacturing_date: draftData.manufacturing_date || null,
-                            expiry_date: draftData.expiry_date || draftData.expiration_date || null,
-                            unit_cost: draftData.unit_cost || 0,
-                            qa_status: draftData.qa_status || "GOOD",
-                            status: "ACTIVE",
-                            source_type: "PHYSICAL_INVENTORY",
-                            source_reference: sheet.pi_no || `PI-#${sheetId}`,
-                        }),
-                    });
-                    if (masterRes.ok) {
-                        const newMaster = (await masterRes.json()).data;
-                        activeBatchId = extractId(newMaster.inventory_lot_id || newMaster.id);
-                        await fetch(`${DIRECTUS_URL}/items/mm_physical_inventory_details/${d.physical_inventory_detail_id || d.id}`, {
-                            method: "PATCH",
-                            headers,
-                            body: JSON.stringify({ inventory_lot_id: activeBatchId }),
-                        });
-                    }
-                }
-            } else {
-                const batchRes = await fetch(`${DIRECTUS_URL}/items/mm_inventory_lots/${batchId}`, { headers, cache: "no-store" });
-                if (batchRes.ok) {
-                    const batchData = (await batchRes.json()).data;
-                    if (batchData && (batchData.status !== "ACTIVE" || batchData.source_type === "PHYSICAL_INVENTORY_DRAFT")) {
-                        isNewDraftBatch = true;
-                        await fetch(`${DIRECTUS_URL}/items/mm_inventory_lots/${batchId}`, {
-                            method: "PATCH",
-                            headers,
-                            body: JSON.stringify({ status: "ACTIVE" }),
-                        });
-                    }
+            const activeBatchId = batchId;
+            const isNewDraftBatch = String(batchData.status || "").toUpperCase() !== "ACTIVE"
+                || String(batchData.source_type || "").toUpperCase() === "PHYSICAL_INVENTORY_DRAFT";
+            if (String(batchData.status || "").toUpperCase() !== "ACTIVE") {
+                const activateRes = await fetch(`${DIRECTUS_URL}/items/mm_inventory_lots/${batchId}`, {
+                    method: "PATCH",
+                    headers,
+                    body: JSON.stringify({ status: "ACTIVE" }),
+                });
+                if (!activateRes.ok) {
+                    return NextResponse.json({ success: false, error: `Failed to activate inventory batch ${d.batch_no || batchId}.` }, { status: 502 });
                 }
             }
 
@@ -164,14 +147,7 @@ export async function POST(request: NextRequest, context: RouteParams) {
         const reqBody = await request.json().catch(() => ({}));
         const reqRemarks = reqBody?.remarks ? String(reqBody.remarks).trim() : null;
 
-        let finalRemarks = sheet.remarks ? String(sheet.remarks) : "";
-        if (reqRemarks) {
-            let offsetPart = "";
-            if (finalRemarks.includes("__OFFSET_DATA__:")) {
-                offsetPart = finalRemarks.substring(finalRemarks.indexOf("__OFFSET_DATA__:"));
-            }
-            finalRemarks = offsetPart ? `${reqRemarks}\n${offsetPart}` : reqRemarks;
-        }
+        const finalRemarks = writeOffsetPairings(reqRemarks || sheet.remarks, storedPairings);
 
         // 8. Execute Commit Update
         const commitPayload: Record<string, unknown> = {
@@ -205,6 +181,6 @@ export async function POST(request: NextRequest, context: RouteParams) {
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : "Internal Server Error";
         console.error("Commit API error:", error);
-        return NextResponse.json({ success: false, error: msg }, { status: 500 });
+        return NextResponse.json({ success: false, error: msg }, { status: error instanceof OffsetPairingError ? error.status : 500 });
     }
 }

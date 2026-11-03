@@ -8,6 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { SalesOrderDetail, SalesOrderReleaseGroup } from "../types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { remainingQuantity } from "../utils/demand-groups";
+import { getUnitOfMeasureLabel } from "../utils/unit-of-measure";
 
 interface ConsolidationPanelProps {
     selectedLines: SalesOrderDetail[];
@@ -36,6 +37,18 @@ export function ConsolidationPanel({
     canDirectAllocate,
     handleInitiateDirectAllocate
 }: ConsolidationPanelProps) {
+    if (selectedLines.length === 0) {
+        return (
+            <div className="flex items-center gap-3 rounded-xl border border-dashed bg-muted/20 px-4 py-3">
+                <Settings className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <div className="min-w-0">
+                    <p className="text-sm font-semibold">Job Order Release Groups</p>
+                    <p className="text-xs text-muted-foreground">Select an eligible Sales Order line to review release groups.</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <Card className="shadow-sm border-primary/20 bg-primary/[0.01]">
             <CardHeader className="pb-3 border-b bg-primary/[0.02]">
@@ -48,25 +61,20 @@ export function ConsolidationPanel({
                 </CardDescription>
             </CardHeader>
             <CardContent className="pt-4 space-y-4">
-                {selectedLines.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-muted-foreground font-medium">
-                        No lines selected. Use the Sales Order row checkboxes to select eligible demand.
-                    </div>
-                ) : (
-                    <div className="space-y-4">
-                        {!releaseBlockReason && (
-                            <Alert className="border-green-200 bg-green-50/10">
-                                <Check className="h-4 w-4 text-green-600" />
-                                <AlertTitle className="text-xs font-bold text-green-700 uppercase">Valid Multi-JO Release</AlertTitle>
-                                <AlertDescription className="text-xs font-medium text-green-600 mt-1">
-                                    Ready to create {releaseGroups.length} product-specific Job Order{releaseGroups.length === 1 ? "" : "s"} from {selectedLines.length} Sales Order detail line{selectedLines.length === 1 ? "" : "s"}.
-                                </AlertDescription>
-                            </Alert>
-                        )}
+                <div className="space-y-4">
+                    {!releaseBlockReason && (
+                        <Alert className="border-green-200 bg-green-50/10">
+                            <Check className="h-4 w-4 text-green-600" />
+                            <AlertTitle className="text-xs font-bold text-green-700 uppercase">Valid Multi-JO Release</AlertTitle>
+                            <AlertDescription className="text-xs font-medium text-green-600 mt-1">
+                                Ready to create {releaseGroups.length} product-specific Job Order{releaseGroups.length === 1 ? "" : "s"} from {selectedLines.length} Sales Order detail line{selectedLines.length === 1 ? "" : "s"}.
+                            </AlertDescription>
+                        </Alert>
+                    )}
 
-                        <div className="space-y-2">
-                            {releaseGroups.map((group, index) => (
-                                <Collapsible key={group.key} className="bg-card border rounded-lg p-3">
+                    <div className="space-y-2">
+                        {releaseGroups.map((group, index) => (
+                            <Collapsible key={group.key} className="bg-card border rounded-lg p-3">
                                     <div className="space-y-2">
                                         <div className="flex items-start justify-between gap-3 text-xs">
                                             <div className="min-w-0">
@@ -90,7 +98,7 @@ export function ConsolidationPanel({
                                         </div>
                                         <div className="flex justify-between items-center text-xs">
                                             <span className="font-semibold text-muted-foreground">Full remaining quantity:</span>
-                                            <span className="font-bold text-emerald-700">{group.totalRemainingQuantity.toLocaleString()} {group.lines[0]?.product_id?.uom || "units"}</span>
+                                            <span className="font-bold tabular-nums text-emerald-700">{group.totalRemainingQuantity.toLocaleString()} {getUnitOfMeasureLabel(group.lines[0]?.product_id)}</span>
                                         </div>
                                         {releaseGroups.length === 1 && (
                                             <div className="flex justify-between items-center text-xs">
@@ -106,7 +114,7 @@ export function ConsolidationPanel({
                                                 <div className="min-w-0 text-xs">
                                                     <div className="break-all font-semibold text-foreground">{line.order_no || `Sales Order ${line.order_id}`}</div>
                                                     <div className="text-[10px] text-muted-foreground">
-                                                        Line #{line.detail_id} · {remainingQuantity(line).toLocaleString()} {line.product_id?.uom || "units"} remaining
+                                                        Line #{line.detail_id} · {remainingQuantity(line).toLocaleString()} {getUnitOfMeasureLabel(line.product_id)} remaining
                                                     </div>
                                                 </div>
                                                 <Button
@@ -123,11 +131,10 @@ export function ConsolidationPanel({
                                             </div>
                                         ))}
                                     </CollapsibleContent>
-                                </Collapsible>
-                            ))}
-                        </div>
+                            </Collapsible>
+                        ))}
                     </div>
-                )}
+                </div>
                 <div className="space-y-2 shrink-0">
                     <Button className="w-full font-bold text-xs uppercase" disabled={releaseBlockReason !== null} onClick={() => handleInitiateRelease()}>
                         {releaseGroups.length > 1 ? `Release ${releaseGroups.length} Job Orders` : "Release Job Order"}

@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
+import { eligibleDashboardBranches } from "@/modules/manufacturing-management/operations-dashboard/utils/branches";
+import { materialStockShortage } from "@/modules/manufacturing-management/operations-dashboard/utils/shortages";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,24 +24,22 @@ export async function GET(req: NextRequest) {
         const branchIdParam = searchParams.get("branchId");
 
         // 1. Fetch authorized operational branches (excluding bad stock branches)
-        let branches: Array<{ id: number; branch_name: string }> = [];
+        let branches;
         try {
             const branchesRes = await fetch(
-                `${DIRECTUS_URL}/items/branches?limit=-1&fields=id,branch_name,branch_code,isBadStock&sort=branch_name`,
+                `${DIRECTUS_URL}/items/branches?limit=-1&fields=id,branch_name,branch_code,isActive,isBadStock&filter[isActive][_eq]=1&sort=branch_name,branch_code,id`,
                 { headers, cache: "no-store" }
             );
-            if (branchesRes.ok) {
-                const bData = await branchesRes.json();
-                const allBranches = Array.isArray(bData?.data) ? bData.data : [];
-                branches = allBranches
-                    .filter((b: any) => Number(b.isBadStock) !== 1)
-                    .map((b: any) => ({
-                        id: b.id,
-                        branch_name: b.branch_name,
-                    }));
-            }
+            if (!branchesRes.ok) throw new Error("Branch lookup failed");
+            const bData = await branchesRes.json();
+            if (!Array.isArray(bData?.data)) throw new Error("Invalid branch lookup response");
+            branches = eligibleDashboardBranches(bData.data);
         } catch (e) {
             console.error("[Operations Dashboard] Error fetching branches:", e);
+            return NextResponse.json({ error: "Unable to load branches. Retry the dashboard." }, { status: 502 });
+        }
+        if (branchIdParam && branchIdParam !== "all" && !branches.some(branch => String(branch.id) === branchIdParam)) {
+            return NextResponse.json({ error: "This branch is unavailable or inactive. Reset the branch filter to continue." }, { status: 400 });
         }
 
         // 2. Fetch Work Centers from `manufacturing_work_centers`
@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
         let products: any[] = [];
         try {
             const prodRes = await fetch(
-                `${DIRECTUS_URL}/items/products?limit=-1&fields=product_id,product_name,product_code,product_type,cost_per_unit,price_per_unit,unit_of_measurement.unit_name,unit_of_measurement.unit_shortcut`,
+                `${DIRECTUS_URL}/items/products?limit=-1&fields=product_id,product_name,product_code,product_type,cost_per_unit,price_per_unit,maintaining_quantity,unit_of_measurement.unit_name,unit_of_measurement.unit_shortcut`,
                 { headers, cache: "no-store" }
             );
             if (prodRes.ok) {
@@ -288,18 +288,18 @@ export async function GET(req: NextRequest) {
         products.forEach((prod) => {
             const pid = safeNumber(prod.product_id);
             const onHand = stockMap.get(pid) || 0;
-            // Shortage threshold: negative balance or below minimum buffer (50)
-            if (onHand < 50) {
+            const shortage = materialStockShortage(prod.maintaining_quantity, onHand);
+            if (shortage) {
                 materialShortagesList.push({
                     joId: `SHORTAGE-${pid}`,
                     joNumber: "Stock Alert",
                     productName: prod.product_name || `SKU-${pid}`,
                     componentName: prod.product_name || `SKU-${pid}`,
                     componentCode: prod.product_code || `SKU-${pid}`,
-                    requiredQty: 50,
+                    requiredQty: shortage.requiredQty,
                     onHandQty: onHand,
-                    shortageQty: Math.max(0, 50 - onHand),
-                    uom: prod.unit_of_measurement?.unit_shortcut || "pcs",
+                    shortageQty: shortage.shortageQty,
+                    uom: safeString(prod.unit_of_measurement?.unit_shortcut) || safeString(prod.unit_of_measurement?.unit_name) || "UOM unavailable",
                     actionUrl: `/mm/material-staging`,
                 });
             }
@@ -408,7 +408,9 @@ export async function GET(req: NextRequest) {
                 exceptions.push({
                     id: `EXC-MAT-${idx}`,
                     title: `Critical Stockout: ${item.componentName}`,
-                    description: `Current on-hand stock is ${item.onHandQty} ${item.uom}. Reorder threshold is ${item.requiredQty} ${item.uom}. Immediate restocking needed.`,
+                    description: item.requiredQty === null
+                        ? `Current on-hand stock is ${item.onHandQty} ${item.uom}. Maintaining quantity is not set; shortage is not calculated. Configure maintaining quantity and investigate negative stock.`
+                        : `Current on-hand stock is ${item.onHandQty} ${item.uom}. Configured maintaining quantity is ${item.requiredQty} ${item.uom}; shortage is ${item.shortageQty} ${item.uom}.`,
                     sourceModule: "Material Staging",
                     referenceNumber: item.componentCode,
                     severity: "WARNING",
