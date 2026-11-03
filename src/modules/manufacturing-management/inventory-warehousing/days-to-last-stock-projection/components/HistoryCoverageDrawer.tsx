@@ -70,81 +70,106 @@ export default function HistoryCoverageDrawer({
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                     {/* Calculation Audit Card */}
-                    <div className="rounded-xl border border-border bg-muted/30 p-3.5 space-y-3">
-                        <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                            <Calculator className="h-4 w-4 text-primary" />
-                            <span>Projection Calculation Breakdown</span>
-                        </div>
+                    {(() => {
+                        // Dynamically sync metrics with verified records if loaded
+                        const recordsTotal = details.reduce((sum, d) => sum + (Number(d.quantity_out) || 0), 0);
+                        const displayTotalConsumed = details.length > 0 && recordsTotal > 0
+                            ? Number(recordsTotal.toFixed(2))
+                            : item.total_consumed_quantity;
 
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
-                            <div className="p-2.5 rounded-lg bg-card border border-border">
-                                <span className="text-[10px] text-muted-foreground block">
-                                    Eligible Available Stock
-                                </span>
-                                <span className="font-mono font-bold text-foreground text-sm">
-                                    {item.available_stock.toLocaleString()} {item.unit_shortcut}
-                                </span>
-                            </div>
+                        const assessedMonths = item.assessed_months || 3;
+                        const workingDays = item.working_days_per_month || 26;
 
-                            <div className="p-2.5 rounded-lg bg-card border border-border">
-                                <span className="text-[10px] text-muted-foreground block">
-                                    Assessed Period
-                                </span>
-                                <span className="font-mono font-bold text-foreground text-sm">
-                                    {item.assessed_months} Mos ({item.actual_working_days_covered}d)
-                                </span>
-                            </div>
+                        const displayMAvg = displayTotalConsumed > 0 && assessedMonths > 0
+                            ? Number((displayTotalConsumed / assessedMonths).toFixed(2))
+                            : item.m_avg;
 
-                            <div className="p-2.5 rounded-lg bg-card border border-border">
-                                <span className="text-[10px] text-muted-foreground block">
-                                    Total Consumed
-                                </span>
-                                <span className="font-mono font-bold text-foreground text-sm">
-                                    {item.total_consumed_quantity.toLocaleString()} {item.unit_shortcut}
-                                </span>
-                            </div>
+                        const displayDAvg = displayMAvg > 0 && workingDays > 0
+                            ? Number((displayMAvg / workingDays).toFixed(2))
+                            : item.d_avg;
 
-                            <div className="p-2.5 rounded-lg bg-card border border-border">
-                                <span className="text-[10px] text-muted-foreground block">
-                                    Monthly Average (MAvg)
-                                </span>
-                                <span className="font-mono font-bold text-foreground text-sm">
-                                    {item.m_avg.toLocaleString()} {item.unit_shortcut}
-                                </span>
-                            </div>
+                        const displayDaysToLast = displayDAvg > 0
+                            ? Number((item.available_stock / displayDAvg).toFixed(1))
+                            : item.days_to_last;
 
-                            <div className="p-2.5 rounded-lg bg-card border border-border">
-                                <span className="text-[10px] text-muted-foreground block">
-                                    Daily Average (DAvg)
-                                </span>
-                                <span className="font-mono font-bold text-primary text-sm">
-                                    {item.d_avg.toLocaleString()} {item.unit_shortcut}
-                                </span>
-                            </div>
+                        return (
+                            <div className="rounded-xl border border-border bg-muted/30 p-3.5 space-y-3">
+                                <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                                    <Calculator className="h-4 w-4 text-primary" />
+                                    <span>Projection Calculation Breakdown</span>
+                                </div>
 
-                            <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/30">
-                                <span className="text-[10px] text-primary block font-medium">
-                                    Days of Supply
-                                </span>
-                                <span className="font-mono font-bold text-primary text-base">
-                                    {item.days_to_last !== null ? `${item.days_to_last} Days` : "N/A"}
-                                </span>
-                            </div>
-                        </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
+                                    <div className="p-2.5 rounded-lg bg-card border border-border">
+                                        <span className="text-[10px] text-muted-foreground block">
+                                            Eligible Available Stock
+                                        </span>
+                                        <span className="font-mono font-bold text-foreground text-sm">
+                                            {item.available_stock.toLocaleString()} {item.unit_shortcut}
+                                        </span>
+                                    </div>
 
-                        {/* Formula audit explanation */}
-                        <div className="text-[11px] text-muted-foreground bg-card/60 p-2.5 rounded-lg border border-border/60 space-y-1">
-                            <div>
-                                <strong>1. Monthly Average (MAvg):</strong> {item.total_consumed_quantity.toLocaleString()} {item.unit_shortcut} ÷ {item.assessed_months} Mos = <strong>{item.m_avg.toLocaleString()} {item.unit_shortcut}/month</strong>
+                                    <div className="p-2.5 rounded-lg bg-card border border-border">
+                                        <span className="text-[10px] text-muted-foreground block">
+                                            Assessed Period
+                                        </span>
+                                        <span className="font-mono font-bold text-foreground text-sm">
+                                            {item.assessed_months} Mos ({item.actual_working_days_covered}d)
+                                        </span>
+                                    </div>
+
+                                    <div className="p-2.5 rounded-lg bg-card border border-border">
+                                        <span className="text-[10px] text-muted-foreground block">
+                                            Total Consumed
+                                        </span>
+                                        <span className="font-mono font-bold text-foreground text-sm">
+                                            {displayTotalConsumed.toLocaleString()} {item.unit_shortcut}
+                                        </span>
+                                    </div>
+
+                                    <div className="p-2.5 rounded-lg bg-card border border-border">
+                                        <span className="text-[10px] text-muted-foreground block">
+                                            Monthly Average (MAvg)
+                                        </span>
+                                        <span className="font-mono font-bold text-foreground text-sm">
+                                            {displayMAvg.toLocaleString()} {item.unit_shortcut}
+                                        </span>
+                                    </div>
+
+                                    <div className="p-2.5 rounded-lg bg-card border border-border">
+                                        <span className="text-[10px] text-muted-foreground block">
+                                            Daily Average (DAvg)
+                                        </span>
+                                        <span className="font-mono font-bold text-primary text-sm">
+                                            {displayDAvg.toLocaleString()} {item.unit_shortcut}
+                                        </span>
+                                    </div>
+
+                                    <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/30">
+                                        <span className="text-[10px] text-primary block font-medium">
+                                            Days of Supply
+                                        </span>
+                                        <span className="font-mono font-bold text-primary text-base">
+                                            {displayDaysToLast !== null ? `${displayDaysToLast} Days` : "N/A"}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Formula audit explanation */}
+                                <div className="text-[11px] text-muted-foreground bg-card/60 p-2.5 rounded-lg border border-border/60 space-y-1">
+                                    <div>
+                                        <strong>1. Monthly Average (MAvg):</strong> {displayTotalConsumed.toLocaleString()} {item.unit_shortcut} ÷ {assessedMonths} Mos = <strong>{displayMAvg.toLocaleString()} {item.unit_shortcut}/month</strong>
+                                    </div>
+                                    <div>
+                                        <strong>2. Daily Average (DAvg):</strong> {displayMAvg.toLocaleString()} {item.unit_shortcut} ÷ {workingDays} working days = <strong>{displayDAvg.toLocaleString()} {item.unit_shortcut}/day</strong>
+                                    </div>
+                                    <div>
+                                        <strong>3. Days to Last:</strong> {item.available_stock.toLocaleString()} {item.unit_shortcut} ÷ {displayDAvg.toLocaleString()} {item.unit_shortcut}/day = <strong>{displayDaysToLast ?? "N/A"} working days</strong>
+                                    </div>
+                                </div>
                             </div>
-                            <div>
-                                <strong>2. Daily Average (DAvg):</strong> {item.m_avg.toLocaleString()} {item.unit_shortcut} ÷ {item.working_days_per_month} working days = <strong>{item.d_avg.toLocaleString()} {item.unit_shortcut}/day</strong>
-                            </div>
-                            <div>
-                                <strong>3. Days to Last:</strong> {item.available_stock.toLocaleString()} {item.unit_shortcut} ÷ {item.d_avg.toLocaleString()} {item.unit_shortcut}/day = <strong>{item.days_to_last ?? "N/A"} working days</strong>
-                            </div>
-                        </div>
-                    </div>
+                        );
+                    })()}
 
                     {/* Transaction breakdown table */}
                     <div className="space-y-2">

@@ -54,14 +54,24 @@ interface SpringBatchOnhandRow {
 }
 
 interface WipRawMovement {
+    movement_key?: string | null;
+    movementKey?: string | null;
     branch_id?: number | null;
+    branchId?: number | null;
     branch?: number | null;
     product_id?: number | null;
+    productId?: number | null;
     product?: number | null;
     quantity_out?: number | string | null;
+    quantityOut?: number | string | null;
     transaction_date?: string | null;
+    transactionDate?: string | null;
+    posted_at?: string | null;
+    postedAt?: string | null;
     transaction_type?: string | null;
+    transactionType?: string | null;
     source_module?: string | null;
+    sourceModule?: string | null;
 }
 
 interface DirectusJobOrderMaterialRaw {
@@ -255,10 +265,13 @@ export async function GET(request: Request) {
             { totalConsumed: number; txCount: number; earliestDate: string | null; latestDate: string | null }
         >();
 
+        // Track unique transactions to prevent double counting across Spring movements and Directus JOM
+        const seenMovements = new Set<string>();
+
         // Source A: Spring Boot v_mm_inventory_movements
         for (const mv of springMovements) {
-            const srcModule = String(mv.source_module || "").toUpperCase();
-            const txType = String(mv.transaction_type || "").toUpperCase();
+            const srcModule = String(mv.source_module || mv.sourceModule || "").toUpperCase().trim();
+            const txType = String(mv.transaction_type || mv.transactionType || "").toUpperCase().trim();
             const isProductionConsumption =
                 srcModule === "MM_JOB_ORDER" ||
                 txType === "JOB_ORDER_CONSUMPTION" ||
@@ -266,18 +279,22 @@ export async function GET(request: Request) {
 
             if (!isProductionConsumption) continue;
 
-            const bId = Number(mv.branch_id || mv.branch || 0);
-            const pId = Number(mv.product_id || mv.product || 0);
+            const bId = Number(mv.branch_id ?? mv.branchId ?? mv.branch ?? 0);
+            const pId = Number(mv.product_id ?? mv.productId ?? mv.product ?? 0);
             if (!bId || !pId) continue;
 
-            const txDateStr = mv.transaction_date;
+            const txDateStr = String(mv.transaction_date || mv.transactionDate || mv.posted_at || mv.postedAt || "");
             if (!isAllTime && txDateStr) {
                 const txDate = new Date(txDateStr);
-                if (txDate < cutoffDate) continue; // Outside assessed window
+                if (!isNaN(txDate.getTime()) && txDate < cutoffDate) continue; // Outside assessed window
             }
 
-            const qtyOut = Number(mv.quantity_out) || 0;
+            const qtyOut = Number(mv.quantity_out ?? mv.quantityOut ?? 0);
             if (qtyOut <= 0) continue;
+
+            const mKey = String(mv.movement_key || mv.movementKey || `${bId}:${pId}:${txDateStr}:${qtyOut}`);
+            if (seenMovements.has(mKey)) continue;
+            seenMovements.add(mKey);
 
             const key = `${bId}:${pId}`;
             const curr = consumptionMap.get(key) || {
@@ -296,21 +313,24 @@ export async function GET(request: Request) {
             consumptionMap.set(key, curr);
         }
 
-        // Source B: Directus manufacturing_job_order_materials
+        // Source B: Directus manufacturing_job_order_materials (for Job Orders or fallback)
         for (const jom of directusJobOrderMaterials) {
             const joObj = typeof jom.job_order_id === "object" ? jom.job_order_id : null;
             const pId = typeof jom.product_id === "object" ? Number(jom.product_id.product_id) : Number(jom.product_id);
-            const bId = joObj ? Number(joObj.branch_id) : 1; // Default to main branch if not joined
+            const bId = joObj?.branch_id ? Number(joObj.branch_id) : 1;
             if (!pId || !bId) continue;
 
             const txDateStr = joObj?.created_at || joObj?.scheduled_start_date || null;
             if (!isAllTime && txDateStr) {
                 const txDate = new Date(txDateStr);
-                if (txDate < cutoffDate) continue;
+                if (!isNaN(txDate.getTime()) && txDate < cutoffDate) continue;
             }
 
             const qtyOut = Number(jom.actual_consumed_quantity) || 0;
             if (qtyOut <= 0) continue;
+
+            const jomKey = `JOM-${jom.jo_material_id}`;
+            if (seenMovements.has(jomKey)) continue;
 
             const key = `${bId}:${pId}`;
             const curr = consumptionMap.get(key) || {
@@ -320,20 +340,17 @@ export async function GET(request: Request) {
                 latestDate: null,
             };
 
-            // Avoid double counting if already populated by movement key
-            if (springMovements.length === 0) {
+            // If springMovements had zero rows for this product, accumulate all Directus JOM rows
+            if (springMovements.length === 0 || curr.totalConsumed === 0) {
+                seenMovements.add(jomKey);
                 curr.totalConsumed += qtyOut;
                 curr.txCount += 1;
-            } else if (curr.totalConsumed === 0) {
-                curr.totalConsumed = qtyOut;
-                curr.txCount = 1;
+                if (txDateStr) {
+                    if (!curr.earliestDate || txDateStr < curr.earliestDate) curr.earliestDate = txDateStr;
+                    if (!curr.latestDate || txDateStr > curr.latestDate) curr.latestDate = txDateStr;
+                }
+                consumptionMap.set(key, curr);
             }
-
-            if (txDateStr) {
-                if (!curr.earliestDate || txDateStr < curr.earliestDate) curr.earliestDate = txDateStr;
-                if (!curr.latestDate || txDateStr > curr.latestDate) curr.latestDate = txDateStr;
-            }
-            consumptionMap.set(key, curr);
         }
 
         // 9. Iterate across all REAL catalog products
