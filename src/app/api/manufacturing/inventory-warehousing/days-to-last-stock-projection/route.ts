@@ -429,6 +429,8 @@ export async function GET(request: Request) {
                 }
 
                 items.push({
+                    assessment_start: isAllTime ? null : cutoffDate.toISOString(),
+                    assessment_end: now.toISOString(),
                     product_id: pId,
                     product_code: displayCode,
                     product_name: displayName,

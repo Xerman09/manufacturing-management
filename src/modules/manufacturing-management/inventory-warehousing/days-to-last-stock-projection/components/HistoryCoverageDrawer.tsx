@@ -22,7 +22,7 @@ export default function HistoryCoverageDrawer({
         if (!item || !open) return;
         let active = true;
 
-        fetchMaterialConsumptionBreakdown(item.product_id, item.branch_id).then((res) => {
+        fetchMaterialConsumptionBreakdown(item).then((res) => {
             if (active) {
                 setDetails(res);
             }
