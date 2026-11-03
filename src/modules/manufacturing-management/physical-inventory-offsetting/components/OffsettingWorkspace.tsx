@@ -26,6 +26,7 @@ import {
     Pencil
 } from "lucide-react";
 import { toast } from "sonner";
+import { v4 as uuidv4 } from "uuid";
 import OffsettingPrintModal from "./OffsettingPrintModal";
 import OffsetPairEditor from "./OffsetPairEditor";
 import { canEditOffsetPairings, normalizeOffsetPairings, sameOffsetPairings } from "../utils/offset-pairings";
@@ -54,6 +55,15 @@ const REASON_CODES = [
     "UOM Miscount",
     "Packaging Variation"
 ] as const;
+
+function createOffsettingId(prefix: string): string | null {
+    try {
+        return `${prefix}${uuidv4()}`;
+    } catch {
+        toast.error("Unable to prepare offset pairings in this browser. Please use an updated browser or open the workspace over HTTPS, then try again.");
+        return null;
+    }
+}
 
 function formatCurrency(val: number): string {
     return new Intl.NumberFormat("en-PH", {
@@ -917,7 +927,8 @@ export default function OffsettingWorkspace({
 
         let remPiecesToAllocate = pcsToAllocate;
         const generatedPairs: OffsettingPairing[] = [];
-        const groupLinkId = `OFF-GRP-${crypto.randomUUID()}`;
+        const groupLinkId = createOffsettingId("OFF-GRP-");
+        if (!groupLinkId) return;
 
         const sItems = checkedShortageItems.map(i => ({ ...i, remPcs: i.shortagePieces }));
         const pSurpItems = checkedSurplusItems.map(i => ({ ...i, remPcs: i.surplusPieces }));
@@ -943,8 +954,10 @@ export default function OffsettingWorkspace({
                 const unitCostVarPerPiece = surplusCostPerPiece - shortageCostPerPiece;
                 const netFinancialImpact = pairPieces * unitCostVarPerPiece;
 
+                const pairId = createOffsettingId("OFF-");
+                if (!pairId) return;
                 const pair: OffsettingPairing = {
-                    id: `OFF-${crypto.randomUUID()}`,
+                    id: pairId,
                     group_link_id: groupLinkId,
                     shortage_detail_id: sItem.detailId,
                     shortage_product_id: getProdId(sItem.product_id),
@@ -1070,10 +1083,13 @@ export default function OffsettingWorkspace({
                     const unitCostVarPerPiece = surplusCostPerPiece - shortageCostPerPiece;
                     const netFinancialImpact = pairPieces * unitCostVarPerPiece;
 
-                    const autoGroupId = autoGroupIds.get(sProdId) || `OFF-GRP-AUTO-${crypto.randomUUID()}`;
+                    const autoGroupId = autoGroupIds.get(sProdId) || createOffsettingId("OFF-GRP-AUTO-");
+                    if (!autoGroupId) return;
                     autoGroupIds.set(sProdId, autoGroupId);
+                    const pairId = createOffsettingId("OFF-AUTO-");
+                    if (!pairId) return;
                     const pair: OffsettingPairing = {
-                        id: `OFF-AUTO-${crypto.randomUUID()}`,
+                        id: pairId,
                         group_link_id: autoGroupId,
                         shortage_detail_id: sItem.detailId,
                         shortage_product_id: sProdId,
