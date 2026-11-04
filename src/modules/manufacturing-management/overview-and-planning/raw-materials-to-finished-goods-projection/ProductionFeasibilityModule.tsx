@@ -325,15 +325,15 @@ export default function ProductionFeasibilityModule() {
                 </Alert>
             )}
 
-            {/* Production Notes & Unit Conversion Alerts Banner */}
+            {/* Production Notes & Recipe Alerts Banner */}
             {result && result.diagnostics.length > 0 && (
                 <Alert className="border-amber-500/20 bg-amber-500/5 text-amber-900 dark:text-amber-200">
                     <Info className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                     <AlertTitle
                         className="text-xs font-semibold"
-                        title="Important system observations regarding material conversions, stock allocation, or recipe requirements."
+                        title="Important system observations regarding material conversions, recipe setup, or stock allocation."
                     >
-                        Production Notes &amp; Unit Conversion Alerts
+                        Production Notes &amp; Recipe Alerts
                     </AlertTitle>
                     <AlertDescription className="text-xs mt-1 space-y-1">
                         {Array.from(new Set(result.diagnostics)).map((diag, idx) => (

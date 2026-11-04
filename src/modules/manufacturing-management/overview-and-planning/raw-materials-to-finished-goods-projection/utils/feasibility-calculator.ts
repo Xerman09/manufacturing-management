@@ -53,7 +53,7 @@ interface SubAssemblyCompoundingSpec {
  */
 function detectBOMCycles(bom: BOMDefinition, visited = new Set<number>()): string | null {
     if (visited.has(bom.productId)) {
-        return `Cyclic BOM dependency detected involving product "${bom.productName}" (ID ${bom.productId}).`;
+        return `Circular Recipe Reference Detected: "${bom.productName}" (ID ${bom.productId}) is configured as an ingredient of itself or one of its sub-assemblies (forming an infinite loop). Please remove this self-reference in Recipe Master.`;
     }
 
     const nextVisited = new Set(visited);
