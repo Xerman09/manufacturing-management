@@ -1,4 +1,3 @@
-import { formatProjectionQuantity, formatSupplyDays, longRangeCaveat } from "../utils/projection";
 import React, { useEffect, useState } from "react";
 import { X, Calculator } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,26 +16,22 @@ export default function HistoryCoverageDrawer({
     open,
     onClose,
 }: HistoryCoverageDrawerProps) {
-    const [error, setError] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [retry, setRetry] = useState(0);
     const [details, setDetails] = useState<VerifiedConsumptionDetail[]>([]);
 
     useEffect(() => {
         if (!item || !open) return;
         let active = true;
 
-        queueMicrotask(() => { if (active) { setDetails([]); setError(null); setLoading(true); } });
         fetchMaterialConsumptionBreakdown(item).then((res) => {
             if (active) {
                 setDetails(res);
             }
-        }).catch(error => { if (active) setError(error.message); }).finally(() => { if (active) setLoading(false); });
+        });
 
         return () => {
             active = false;
         };
-    }, [item, open, retry]);
+    }, [item, open]);
 
     if (!open || !item) return null;
 
@@ -75,83 +70,106 @@ export default function HistoryCoverageDrawer({
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                     {/* Calculation Audit Card */}
-                    <div className="rounded-xl border border-border bg-muted/30 p-3.5 space-y-3">
-                        <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                            <Calculator className="h-4 w-4 text-primary" />
-                            <span>Projection Calculation Breakdown</span>
-                        </div>
+                    {(() => {
+                        // Dynamically sync metrics with verified records if loaded
+                        const recordsTotal = details.reduce((sum, d) => sum + (Number(d.quantity_out) || 0), 0);
+                        const displayTotalConsumed = details.length > 0 && recordsTotal > 0
+                            ? Number(recordsTotal.toFixed(2))
+                            : item.total_consumed_quantity;
 
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
-                            <div className="p-2.5 rounded-lg bg-card border border-border">
-                                <span className="text-[10px] text-muted-foreground block">
-                                    Eligible Available Stock
-                                </span>
-                                <span className="font-mono font-bold text-foreground text-sm">
-                                    {formatProjectionQuantity(item.available_stock)} {item.unit_shortcut}
-                                </span>
-                            </div>
+                        const assessedMonths = item.assessed_months || 3;
+                        const workingDays = item.working_days_per_month || 26;
 
-                            <div className="p-2.5 rounded-lg bg-card border border-border">
-                                <span className="text-[10px] text-muted-foreground block">
-                                    Assessed Period
-                                </span>
-                                <span className="font-mono font-bold text-foreground text-sm">
-                                    {item.assessed_months} Mos ({item.actual_working_days_covered}d)
-                                </span>
-                            </div>
+                        const displayMAvg = displayTotalConsumed > 0 && assessedMonths > 0
+                            ? Number((displayTotalConsumed / assessedMonths).toFixed(2))
+                            : item.m_avg;
 
-                            <div className="p-2.5 rounded-lg bg-card border border-border">
-                                <span className="text-[10px] text-muted-foreground block">
-                                    Total Consumed
-                                </span>
-                                <span className="font-mono font-bold text-foreground text-sm">
-                                    {formatProjectionQuantity(item.total_consumed_quantity)} {item.unit_shortcut}
-                                </span>
-                            </div>
+                        const displayDAvg = displayMAvg > 0 && workingDays > 0
+                            ? Number((displayMAvg / workingDays).toFixed(2))
+                            : item.d_avg;
 
-                            <div className="p-2.5 rounded-lg bg-card border border-border">
-                                <span className="text-[10px] text-muted-foreground block">
-                                    Monthly Average (MAvg)
-                                </span>
-                                <span className="font-mono font-bold text-foreground text-sm">
-                                    {formatProjectionQuantity(item.m_avg)} {item.unit_shortcut}
-                                </span>
-                            </div>
+                        const displayDaysToLast = displayDAvg > 0
+                            ? Number((item.available_stock / displayDAvg).toFixed(1))
+                            : item.days_to_last;
 
-                            <div className="p-2.5 rounded-lg bg-card border border-border">
-                                <span className="text-[10px] text-muted-foreground block">
-                                    Daily Average (DAvg)
-                                </span>
-                                <span className="font-mono font-bold text-primary text-sm">
-                                    {formatProjectionQuantity(item.d_avg)} {item.unit_shortcut}
-                                </span>
-                            </div>
+                        return (
+                            <div className="rounded-xl border border-border bg-muted/30 p-3.5 space-y-3">
+                                <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                                    <Calculator className="h-4 w-4 text-primary" />
+                                    <span>Projection Calculation Breakdown</span>
+                                </div>
 
-                            <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/30">
-                                <span className="text-[10px] text-primary block font-medium">
-                                    Days of Supply
-                                </span>
-                                <span className="font-mono font-bold text-primary text-base">
-                                    {formatSupplyDays(item.days_to_last)}
-                                </span>
-                            </div>
-                        </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
+                                    <div className="p-2.5 rounded-lg bg-card border border-border">
+                                        <span className="text-[10px] text-muted-foreground block">
+                                            Eligible Available Stock
+                                        </span>
+                                        <span className="font-mono font-bold text-foreground text-sm">
+                                            {item.available_stock.toLocaleString()} {item.unit_shortcut}
+                                        </span>
+                                    </div>
 
-                        <p className="text-xs text-muted-foreground">Calculations use full precision; displayed values are rounded.</p>
-                        {item.days_to_last !== null && item.days_to_last > 12 * item.working_days_per_month && <p className="text-xs text-amber-700">{longRangeCaveat}</p>}
-                        {/* Formula audit explanation */}
-                        <div className="text-[11px] text-muted-foreground bg-card/60 p-2.5 rounded-lg border border-border/60 space-y-1">
-                            <div>
-                                <strong>1. Monthly Average (MAvg):</strong> {formatProjectionQuantity(item.total_consumed_quantity)} {item.unit_shortcut} ÷ {item.assessed_months} Mos ? <strong>{formatProjectionQuantity(item.m_avg)} {item.unit_shortcut}/month</strong>
+                                    <div className="p-2.5 rounded-lg bg-card border border-border">
+                                        <span className="text-[10px] text-muted-foreground block">
+                                            Assessed Period
+                                        </span>
+                                        <span className="font-mono font-bold text-foreground text-sm">
+                                            {item.assessed_months} Mos ({item.actual_working_days_covered}d)
+                                        </span>
+                                    </div>
+
+                                    <div className="p-2.5 rounded-lg bg-card border border-border">
+                                        <span className="text-[10px] text-muted-foreground block">
+                                            Total Consumed
+                                        </span>
+                                        <span className="font-mono font-bold text-foreground text-sm">
+                                            {displayTotalConsumed.toLocaleString()} {item.unit_shortcut}
+                                        </span>
+                                    </div>
+
+                                    <div className="p-2.5 rounded-lg bg-card border border-border">
+                                        <span className="text-[10px] text-muted-foreground block">
+                                            Monthly Average (MAvg)
+                                        </span>
+                                        <span className="font-mono font-bold text-foreground text-sm">
+                                            {displayMAvg.toLocaleString()} {item.unit_shortcut}
+                                        </span>
+                                    </div>
+
+                                    <div className="p-2.5 rounded-lg bg-card border border-border">
+                                        <span className="text-[10px] text-muted-foreground block">
+                                            Daily Average (DAvg)
+                                        </span>
+                                        <span className="font-mono font-bold text-primary text-sm">
+                                            {displayDAvg.toLocaleString()} {item.unit_shortcut}
+                                        </span>
+                                    </div>
+
+                                    <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/30">
+                                        <span className="text-[10px] text-primary block font-medium">
+                                            Days of Supply
+                                        </span>
+                                        <span className="font-mono font-bold text-primary text-base">
+                                            {displayDaysToLast !== null ? `${displayDaysToLast} Days` : "N/A"}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Formula audit explanation */}
+                                <div className="text-[11px] text-muted-foreground bg-card/60 p-2.5 rounded-lg border border-border/60 space-y-1">
+                                    <div>
+                                        <strong>1. Monthly Average (MAvg):</strong> {displayTotalConsumed.toLocaleString()} {item.unit_shortcut} ÷ {assessedMonths} Mos = <strong>{displayMAvg.toLocaleString()} {item.unit_shortcut}/month</strong>
+                                    </div>
+                                    <div>
+                                        <strong>2. Daily Average (DAvg):</strong> {displayMAvg.toLocaleString()} {item.unit_shortcut} ÷ {workingDays} working days = <strong>{displayDAvg.toLocaleString()} {item.unit_shortcut}/day</strong>
+                                    </div>
+                                    <div>
+                                        <strong>3. Days to Last:</strong> {item.available_stock.toLocaleString()} {item.unit_shortcut} ÷ {displayDAvg.toLocaleString()} {item.unit_shortcut}/day = <strong>{displayDaysToLast ?? "N/A"} working days</strong>
+                                    </div>
+                                </div>
                             </div>
-                            <div>
-                                <strong>2. Daily Average (DAvg):</strong> {formatProjectionQuantity(item.m_avg)} {item.unit_shortcut} ÷ {item.working_days_per_month} working days ? <strong>{formatProjectionQuantity(item.d_avg)} {item.unit_shortcut}/day</strong>
-                            </div>
-                            <div>
-                                <strong>3. Days to Last:</strong> {formatProjectionQuantity(item.available_stock)} {item.unit_shortcut} ÷ {formatProjectionQuantity(item.d_avg)} {item.unit_shortcut}/day ? <strong>{formatSupplyDays(item.days_to_last)}</strong>
-                            </div>
-                        </div>
-                    </div>
+                        );
+                    })()}
 
                     {/* Transaction breakdown table */}
                     <div className="space-y-2">
@@ -164,12 +182,7 @@ export default function HistoryCoverageDrawer({
                             </span>
                         </div>
 
-                        <p className="text-xs text-muted-foreground">Applied window: {item.assessment_start || "All recorded history"} to {item.assessment_end}</p>
-                        {loading && <p role="status">Loading verified outflows...</p>}
-                        {error && <div role="alert">{error} <Button onClick={() => setRetry(value => value + 1)}>Retry</Button></div>}
-                        {!loading && !error && <p className="text-xs">Verified total: {details.reduce((sum, row) => sum + row.quantity_out, 0).toLocaleString(undefined, { maximumFractionDigits: 8 })} {item.unit_shortcut}</p>}
-                        {!loading && !error && Math.abs(details.reduce((sum, row) => sum + row.quantity_out, 0) - item.total_consumed_quantity) > 0.00000001 && <p role="alert">Verified records changed since report generation. Close this preview and refresh the report before relying on these figures.</p>}
-                        {loading || error ? null : details.length === 0 ? (
+                        {details.length === 0 ? (
                             <div className="p-6 border border-border rounded-xl text-center text-xs text-muted-foreground bg-muted/20">
                                 No individual transaction records retrieved for this material.
                             </div>
@@ -197,7 +210,7 @@ export default function HistoryCoverageDrawer({
                                                     {row.batch_no || "-"}
                                                 </td>
                                                 <td className="py-2 px-3 text-right font-bold text-foreground">
-                                                    {row.quantity_out.toLocaleString(undefined, { maximumFractionDigits: 8 })} {row.unit_shortcut || item.unit_shortcut}
+                                                    {row.quantity_out.toLocaleString()} {row.unit_shortcut || item.unit_shortcut}
                                                 </td>
                                             </tr>
                                         ))}

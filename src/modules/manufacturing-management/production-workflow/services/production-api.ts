@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { v4 as uuidv4 } from "uuid";
 import { 
     JobOrder, 
     User, 
@@ -285,7 +286,11 @@ export async function submitShiftRunLog(payload: ShiftRunLogPayload): Promise<an
     formData.set("inspectorEvidenceKeys", JSON.stringify(files.map((file) => {
         let key = shiftEvidenceKeysByFile.get(file);
         if (!key) {
-            key = crypto.randomUUID();
+            try {
+                key = uuidv4();
+            } catch {
+                throw new Error("Unable to prepare shift attachments in this browser. Please use an updated browser or open the terminal over HTTPS, then try saving again.");
+            }
             shiftEvidenceKeysByFile.set(file, key);
         }
         return key;
