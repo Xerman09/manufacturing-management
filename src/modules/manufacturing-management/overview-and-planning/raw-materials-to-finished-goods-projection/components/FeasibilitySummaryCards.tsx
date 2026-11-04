@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React from "react";
 import { motion, AnimatePresence, type Variants } from "framer-motion";
 import {
     CheckCircle2,
@@ -56,6 +56,39 @@ const statusConfig: Record<
         cardBorder: "border-amber-500/20"
     }
 };
+
+function getIncompleteDetails(result: FeasibilityResult) {
+    const bottleneckLower = (result.bottleneckReason || "").toLowerCase();
+    const diagsLower = (result.diagnostics || []).join(" ").toLowerCase();
+    const allContext = `${bottleneckLower} ${diagsLower}`;
+
+    if (allContext.includes("circular") || allContext.includes("cyclic") || allContext.includes("loop")) {
+        return {
+            label: "Circular Recipe Loop",
+            description: "The recipe contains an infinite circular self-reference loop.",
+            badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+        };
+    }
+    if (allContext.includes("unit conversion") || allContext.includes("density")) {
+        return {
+            label: "Missing Unit Conversion",
+            description: "Unit conversion or density factor is missing for one or more recipe materials.",
+            badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+        };
+    }
+    if (allContext.includes("routing") || allContext.includes("routing steps") || allContext.includes("components") || allContext.includes("bom")) {
+        return {
+            label: "Incomplete Recipe Setup",
+            description: "The recipe version is missing routing steps or component definitions.",
+            badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+        };
+    }
+    return {
+        label: "Recipe Requires Review",
+        description: "Calculation paused: Please review the recipe alerts above.",
+        badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+    };
+}
 
 const containerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -122,39 +155,7 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
     const StatusIcon = currentStatus.icon;
     const limiting = result.limitingComponent;
 
-    const bottleneckLower = (result.bottleneckReason || "").toLowerCase();
-    const diagsLower = (result.diagnostics || []).join(" ").toLowerCase();
-    const allContext = `${bottleneckLower} ${diagsLower}`;
-
-    const incompleteDetails = useMemo(() => {
-        if (!isIncomplete) return null;
-        if (allContext.includes("circular") || allContext.includes("cyclic") || allContext.includes("loop")) {
-            return {
-                label: "Circular Recipe Loop",
-                description: "The recipe contains an infinite circular self-reference loop.",
-                badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
-            };
-        }
-        if (allContext.includes("unit conversion") || allContext.includes("density")) {
-            return {
-                label: "Missing Unit Conversion",
-                description: "Unit conversion or density factor is missing for one or more recipe materials.",
-                badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
-            };
-        }
-        if (allContext.includes("routing") || allContext.includes("routing steps") || allContext.includes("components") || allContext.includes("bom")) {
-            return {
-                label: "Incomplete Recipe Setup",
-                description: "The recipe version is missing routing steps or component definitions.",
-                badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
-            };
-        }
-        return {
-            label: "Recipe Requires Review",
-            description: "Calculation paused: Please review the recipe alerts above.",
-            badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
-        };
-    }, [isIncomplete, allContext]);
+    const incompleteDetails = isIncomplete ? getIncompleteDetails(result) : null;
 
     const activeStatusLabel = incompleteDetails ? incompleteDetails.label : isNotProducible ? "Cannot Produce (0 Units)" : currentStatus.label;
     const activeBadgeClass = incompleteDetails ? incompleteDetails.badgeClass : currentStatus.badgeClass;
