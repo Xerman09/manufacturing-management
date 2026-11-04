@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import { motion, AnimatePresence, type Variants } from "framer-motion";
 import {
     CheckCircle2,
@@ -117,9 +117,50 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
     }
 
     const isNotProducible = result.status === "NOT_PRODUCIBLE";
+    const isIncomplete = result.status === "INCOMPLETE_DATA";
     const currentStatus = statusConfig[result.status] || statusConfig.INCOMPLETE_DATA;
     const StatusIcon = currentStatus.icon;
     const limiting = result.limitingComponent;
+
+    const bottleneckLower = (result.bottleneckReason || "").toLowerCase();
+    const diagsLower = (result.diagnostics || []).join(" ").toLowerCase();
+    const allContext = `${bottleneckLower} ${diagsLower}`;
+
+    const incompleteDetails = useMemo(() => {
+        if (!isIncomplete) return null;
+        if (allContext.includes("circular") || allContext.includes("cyclic") || allContext.includes("loop")) {
+            return {
+                label: "Circular Recipe Loop",
+                description: "The recipe contains an infinite circular self-reference loop.",
+                badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+            };
+        }
+        if (allContext.includes("unit conversion") || allContext.includes("density")) {
+            return {
+                label: "Missing Unit Conversion",
+                description: "Unit conversion or density factor is missing for one or more recipe materials.",
+                badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+            };
+        }
+        if (allContext.includes("routing") || allContext.includes("routing steps") || allContext.includes("components") || allContext.includes("bom")) {
+            return {
+                label: "Incomplete Recipe Setup",
+                description: "The recipe version is missing routing steps or component definitions.",
+                badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+            };
+        }
+        return {
+            label: "Recipe Requires Review",
+            description: "Calculation paused: Please review the recipe alerts above.",
+            badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+        };
+    }, [isIncomplete, allContext]);
+
+    const activeStatusLabel = incompleteDetails ? incompleteDetails.label : isNotProducible ? "Cannot Produce (0 Units)" : currentStatus.label;
+    const activeBadgeClass = incompleteDetails ? incompleteDetails.badgeClass : currentStatus.badgeClass;
+    const activeStatusDescription = result.bottleneckReason && result.status !== "PRODUCIBLE"
+        ? result.bottleneckReason
+        : (incompleteDetails?.description || currentStatus.description);
 
     // Formatting numbers with fallback "-"
     const formattedMaxFgUnits = Number.isFinite(result.maxFgUnits)
@@ -307,13 +348,11 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                     </div>
                                 </div>
                                 <div className="space-y-1">
-                                    <Badge variant="outline" className={`text-xs px-2.5 py-0.5 font-semibold ${currentStatus.badgeClass}`}>
-                                        {isNotProducible ? "Cannot Produce (0 Units)" : currentStatus.label}
+                                    <Badge variant="outline" className={`text-xs px-2.5 py-0.5 font-semibold ${activeBadgeClass}`}>
+                                        {activeStatusLabel}
                                     </Badge>
                                     <p className="text-xs text-muted-foreground mt-1.5 leading-snug">
-                                        {result.bottleneckReason && result.status !== "PRODUCIBLE"
-                                            ? result.bottleneckReason
-                                            : currentStatus.description}
+                                        {activeStatusDescription}
                                     </p>
                                 </div>
                                 <div className="pt-1 text-[11px] text-muted-foreground/80 flex items-center gap-1">
@@ -342,15 +381,15 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                 <div>
                                     <div className={`text-2xl font-bold tracking-tight flex items-baseline gap-1.5 ${isNotProducible ? "text-rose-600 dark:text-rose-400" : "text-foreground"}`}>
                                         <span>
-                                            {isNotProducible
+                                            {isNotProducible || isIncomplete || totalDecimalBatches <= 0
                                                 ? "0 Batches"
                                                 : `~${totalDecimalBatches.toLocaleString(undefined, { maximumFractionDigits: 2 })} Batches`}
                                         </span>
                                     </div>
                                     <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                                        {result.status === "INCOMPLETE_DATA" ? (
+                                        {isIncomplete ? (
                                             <span className="text-amber-600 dark:text-amber-400 font-medium">
-                                                Calculation paused: Missing recipe or unit conversion data
+                                                Calculation paused: Recipe issues must be resolved to estimate output
                                             </span>
                                         ) : isNotProducible ? (
                                             <span className="text-rose-500 font-medium">
@@ -373,11 +412,11 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                 </div>
                                 <div className="pt-1 flex flex-wrap items-center gap-1.5">
                                     <Badge
-                                        variant={isNotProducible ? "destructive" : result.status === "INCOMPLETE_DATA" ? "outline" : "secondary"}
-                                        className={`text-[10px] font-normal py-0 ${result.status === "INCOMPLETE_DATA" ? "border-amber-500/30 text-amber-600 dark:text-amber-400" : ""}`}
+                                        variant={isNotProducible ? "destructive" : isIncomplete ? "outline" : "secondary"}
+                                        className={`text-[10px] font-normal py-0 ${isIncomplete ? "border-amber-500/30 text-amber-600 dark:text-amber-400" : ""}`}
                                     >
-                                        {result.status === "INCOMPLETE_DATA"
-                                            ? "Missing Recipe or Conversion"
+                                        {isIncomplete
+                                            ? "Calculation Paused"
                                             : isNotProducible
                                                 ? "Zero Feasible Output"
                                                 : result.mode === "WHOLE_UNITS"
@@ -467,13 +506,13 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                                 )}
                                             </div>
                                         </>
-                                    ) : result.status === "INCOMPLETE_DATA" ? (
+                                    ) : isIncomplete ? (
                                         <>
                                             <div className="font-semibold text-sm text-amber-600 dark:text-amber-400">
-                                                Recipe or Unit Conversion Incomplete
+                                                Bottleneck Evaluation Paused
                                             </div>
                                             <p className="text-xs text-muted-foreground mt-1">
-                                                Please resolve the missing unit conversions or component requirements listed above.
+                                                Material bottleneck cannot be evaluated until recipe alerts are resolved.
                                             </p>
                                         </>
                                     ) : (
@@ -493,9 +532,9 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                             {limiting.classification.replace("_", " ")}
                                         </Badge>
                                     )}
-                                    {result.status === "INCOMPLETE_DATA" && !limiting && (
+                                    {isIncomplete && !limiting && (
                                         <Badge variant="outline" className="text-[10px] py-0 border-amber-500/30 text-amber-600 dark:text-amber-400">
-                                            No Components
+                                            Pending Recipe Resolution
                                         </Badge>
                                     )}
                                 </div>
@@ -520,21 +559,23 @@ export const FeasibilitySummaryCards: React.FC<FeasibilitySummaryCardsProps> = (
                                 </div>
                                 <div>
                                     <div className="text-2xl font-bold tracking-tight text-foreground flex items-baseline gap-1.5">
-                                        <span>{result.components.length > 0 ? formattedBatchSize : "-"}</span>
+                                        <span>{result.batchSize > 0 && !isIncomplete ? formattedBatchSize : "-"}</span>
                                         <span className="text-xs font-normal text-muted-foreground">
-                                            {result.components.length > 0 ? `${result.fgUomName || "units"} / batch` : "No Recipe Sizing"}
+                                            {result.batchSize > 0 && !isIncomplete ? `${result.fgUomName || "units"} / batch` : "Batch Sizing Unavailable"}
                                         </span>
                                     </div>
                                     <p className="text-xs text-muted-foreground mt-1.5">
-                                        {result.components.length > 0
-                                            ? `${result.components.length} recipe materials evaluated`
-                                            : "BOM version lacks route step or component definitions"}
+                                        {isIncomplete
+                                            ? "Batch sizing and recipe evaluation are on hold until recipe alerts are resolved."
+                                            : result.components.length > 0
+                                                ? `${result.components.length} recipe materials evaluated`
+                                                : "Selected BOM version has no route steps or component definitions."}
                                     </p>
                                 </div>
                                 <div className="pt-1 text-[11px] text-muted-foreground flex items-center justify-between">
                                     <span>Wastage &amp; Scrap Factored</span>
-                                    <span className={`font-mono font-medium ${result.components.length > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
-                                        {result.components.length > 0 ? "Included" : "Pending Recipe"}
+                                    <span className={`font-mono font-medium ${result.components.length > 0 && !isIncomplete ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
+                                        {isIncomplete ? "Pending Recipe Validation" : result.components.length > 0 ? "Included" : "Pending Recipe"}
                                     </span>
                                 </div>
                             </CardContent>

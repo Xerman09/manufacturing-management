@@ -334,12 +334,18 @@ async function loadBOMDefinition(
     productId: number,
     preferredVersionId: number | null,
     unitsMap: Map<number, UnitInfo>,
-    visitedProducts = new Set<number>()
+    visitedProducts = new Set<number>(),
+    productNamesMap = new Map<number, string>(),
+    path: Array<{ productId: number; name: string }> = []
 ): Promise<{ bom: BOMDefinition | null; diagnostic?: string }> {
     if (visitedProducts.has(productId)) {
+        const prodName = productNamesMap.get(productId) || `Product #${productId}`;
+        const trail = path.length > 0
+            ? [...path.map((p) => `"${p.name}" (ID ${p.productId})`), `"${prodName}" (ID ${productId})`].join(" ➔ ")
+            : `"${prodName}" (ID ${productId})`;
         return {
             bom: null,
-            diagnostic: `Cyclic BOM relationship detected involving product ID ${productId}.`
+            diagnostic: `Circular Recipe Reference Detected: Infinite loop in recipe hierarchy (${trail}). Product "${prodName}" cannot be an ingredient of itself or its sub-assemblies. Please remove the circular reference in Recipe Master.`
         };
     }
     visitedProducts.add(productId);
@@ -356,6 +362,9 @@ async function loadBOMDefinition(
     if (!prodData) {
         return { bom: null, diagnostic: `Product #${productId} does not exist.` };
     }
+
+    const currentProdName = prodData.description || prodData.product_name || `Product #${productId}`;
+    productNamesMap.set(productId, currentProdName);
 
     // 2. Fetch Version
     let targetVersion: DirectusVersion | null = null;
@@ -466,7 +475,11 @@ async function loadBOMDefinition(
         );
         if (cpRes.ok) {
             const list: DirectusProduct[] = (await cpRes.json())?.data || [];
-            list.forEach((p) => childProdsMap.set(Number(p.product_id), p));
+            list.forEach((p) => {
+                childProdsMap.set(Number(p.product_id), p);
+                const name = p.description || p.product_name || `Product #${p.product_id}`;
+                productNamesMap.set(Number(p.product_id), name);
+            });
         }
     }
 
@@ -499,6 +512,15 @@ async function loadBOMDefinition(
     for (const row of bomRows) {
         const compProdId = Number(row.product_id);
         const compProd = childProdsMap.get(compProdId);
+
+        // Immediate check: direct self-consumption
+        if (compProdId === productId) {
+            return {
+                bom: null,
+                diagnostic: `Direct Self-Reference in BOM: "${currentProdName}" (ID ${productId}) is entered as an ingredient in its own recipe. A product cannot consume itself to produce itself. Please remove this item from the recipe in BOM Master.`
+            };
+        }
+
         const compUomId = typeof row.unit_of_measurement === "object"
             ? Number(row.unit_of_measurement?.unit_id || row.unit_of_measurement?.id)
             : Number(row.unit_of_measurement);
@@ -523,7 +545,15 @@ async function loadBOMDefinition(
         let subAssemblyBOM: BOMDefinition | null = null;
         if (isSubAssembly) {
             const subVerId = subVerByProdId.get(compProdId)!;
-            const subRes = await loadBOMDefinition(compProdId, subVerId, unitsMap, new Set(visitedProducts));
+            const nextPath = [...path, { productId, name: currentProdName }];
+            const subRes = await loadBOMDefinition(
+                compProdId,
+                subVerId,
+                unitsMap,
+                new Set(visitedProducts),
+                productNamesMap,
+                nextPath
+            );
             if (subRes.bom) {
                 subAssemblyBOM = subRes.bom;
             } else if (subRes.diagnostic) {
