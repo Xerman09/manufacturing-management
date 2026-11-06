@@ -47,6 +47,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { TransferStatusBadge } from "./components/TransferStatusBadge";
@@ -931,6 +932,53 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
                   </span>
                 </div>
               </div>
+
+              {/* Transfer Reason */}
+              <div className="p-3.5 border rounded-xl bg-card text-xs space-y-1">
+                <span className="text-muted-foreground font-semibold uppercase tracking-wider block">
+                  Transfer Reason / Justification
+                </span>
+                <p className="text-sm text-foreground break-words font-medium">
+                  {selectedTransfer.reason?.trim() || "-"}
+                </p>
+              </div>
+
+              {/* Rejection / Cancellation / Reversal Reason Alerts (if applicable) */}
+              {selectedTransfer.rejectionReason && (
+                <div className="p-3 border border-destructive/30 rounded-xl bg-destructive/10 text-destructive text-xs space-y-1">
+                  <div className="font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Rejection Reason
+                  </div>
+                  <p className="text-sm break-words">
+                    {selectedTransfer.rejectionReason}
+                  </p>
+                </div>
+              )}
+
+              {selectedTransfer.cancellationReason && (
+                <div className="p-3 border border-amber-500/30 rounded-xl bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs space-y-1">
+                  <div className="font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Cancellation Reason
+                  </div>
+                  <p className="text-sm break-words">
+                    {selectedTransfer.cancellationReason}
+                  </p>
+                </div>
+              )}
+
+              {selectedTransfer.reversalReason && (
+                <div className="p-3 border border-blue-500/30 rounded-xl bg-blue-500/10 text-blue-900 dark:text-blue-200 text-xs space-y-1">
+                  <div className="font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                    <History className="w-3.5 h-3.5" />
+                    Reversal Reason
+                  </div>
+                  <p className="text-sm break-words">
+                    {selectedTransfer.reversalReason}
+                  </p>
+                </div>
+              )}
 
               {/* Line items table */}
               <div className="border rounded-xl bg-card overflow-hidden">
