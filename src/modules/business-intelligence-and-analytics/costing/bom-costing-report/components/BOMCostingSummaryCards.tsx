@@ -9,14 +9,15 @@ import {
     TrendingUp
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { BOMCostingReportData } from "../types";
+import { BOMCostingReportData, ForexOption } from "../types";
 import { formatStandardCurrency } from "./BOMCostingTreeTable";
 
 interface BOMCostingSummaryCardsProps {
     data: BOMCostingReportData;
+    selectedCurrency?: ForexOption | null;
 }
 
-export default function BOMCostingSummaryCards({ data }: BOMCostingSummaryCardsProps) {
+export default function BOMCostingSummaryCards({ data, selectedCurrency }: BOMCostingSummaryCardsProps) {
     const { summary } = data;
 
     const totalBatchCost = summary.totalBatchCost > 0 ? summary.totalBatchCost : summary.totalMaterialCost;
@@ -49,10 +50,10 @@ export default function BOMCostingSummaryCards({ data }: BOMCostingSummaryCardsP
                 </div>
                 <div className="mt-3">
                     <div className="text-xl font-bold tracking-tight font-mono text-foreground">
-                        {formatStandardCurrency(totalBatchCost, 4)}
+                        {formatStandardCurrency(totalBatchCost, 4, selectedCurrency)}
                     </div>
                     <div className="text-[11px] text-muted-foreground mt-1 font-mono">
-                        Per Piece Unit Cost: <span className="font-semibold text-foreground">{formatStandardCurrency(summary.costPerUnit, 4)}</span>
+                        Per Piece Unit Cost: <span className="font-semibold text-foreground">{formatStandardCurrency(summary.costPerUnit, 4, selectedCurrency)}</span>
                     </div>
                 </div>
             </div>
@@ -61,7 +62,7 @@ export default function BOMCostingSummaryCards({ data }: BOMCostingSummaryCardsP
             <div className="rounded-xl border bg-card p-4 shadow-xs flex flex-col justify-between">
                 <div className="flex items-center justify-between">
                     <span className="text-[11px] font-semibold tracking-wider uppercase text-muted-foreground">
-                        Direct Materials
+                        Materials
                     </span>
                     <div className="p-1.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400">
                         <Boxes className="h-4 w-4" />
@@ -69,7 +70,7 @@ export default function BOMCostingSummaryCards({ data }: BOMCostingSummaryCardsP
                 </div>
                 <div className="mt-3 space-y-2">
                     <div className="text-xl font-bold tracking-tight font-mono text-foreground">
-                        {formatStandardCurrency(directMaterials, 4)}
+                        {formatStandardCurrency(directMaterials, 4, selectedCurrency)}
                     </div>
                     <div className="space-y-1">
                         <div className="text-[11px] text-muted-foreground">
@@ -97,7 +98,7 @@ export default function BOMCostingSummaryCards({ data }: BOMCostingSummaryCardsP
                 </div>
                 <div className="mt-3 space-y-2">
                     <div className="text-xl font-bold tracking-tight font-mono text-foreground">
-                        {formatStandardCurrency(directLabor, 4)}
+                        {formatStandardCurrency(directLabor, 4, selectedCurrency)}
                     </div>
                     <div className="space-y-1">
                         <div className="text-[11px] text-muted-foreground">
@@ -125,7 +126,7 @@ export default function BOMCostingSummaryCards({ data }: BOMCostingSummaryCardsP
                 </div>
                 <div className="mt-3 space-y-2">
                     <div className="text-xl font-bold tracking-tight font-mono text-foreground">
-                        {formatStandardCurrency(mfgOverhead, 4)}
+                        {formatStandardCurrency(mfgOverhead, 4, selectedCurrency)}
                     </div>
                     <div className="space-y-1">
                         <div className="text-[11px] text-muted-foreground">
@@ -153,7 +154,7 @@ export default function BOMCostingSummaryCards({ data }: BOMCostingSummaryCardsP
                 </div>
                 <div className="mt-3 space-y-2">
                     <div className="text-xl font-bold tracking-tight font-mono text-foreground">
-                        {formatStandardCurrency(scrapAllowance, 4)}
+                        {formatStandardCurrency(scrapAllowance, 4, selectedCurrency)}
                     </div>
                     <div className="space-y-1">
                         <div className="text-[11px] text-muted-foreground">

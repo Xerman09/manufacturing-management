@@ -3,6 +3,7 @@ import {
     BOMCostNode,
     BOMCostingReportData,
     BOMCostingSummary,
+    ForexOption,
     InventoryRule,
     MaterialClassification,
     ProductOption,
@@ -54,6 +55,41 @@ export async function GET(req: NextRequest) {
                 { ok: false, error: "Directus API base URL is not configured." },
                 { status: 500 }
             );
+        }
+
+        // 0. ACTION: Get active Forex Configurations
+        if (action === "currencies") {
+            const forexRes = await fetch(
+                `${DIRECTUS_URL}/items/forex_configurations?filter=${encodeURIComponent(JSON.stringify({ is_active: { _eq: 1 } }))}&sort=currency_code&limit=-1`,
+                { headers, cache: "no-store" }
+            );
+
+            let currencies: ForexOption[] = [];
+            if (forexRes.ok) {
+                const forexData = await forexRes.json();
+                currencies = (forexData.data || []).map((f: Record<string, unknown>) => ({
+                    forex_id: Number(f.forex_id),
+                    currency_code: String(f.currency_code || "").toUpperCase(),
+                    currency_name: String(f.currency_name || ""),
+                    symbol: String(f.symbol || "$"),
+                    exchange_rate: Number(f.exchange_rate) || 1.0,
+                    is_active: f.is_active === 1 || f.is_active === true
+                }));
+            }
+
+            const hasPHP = currencies.some(c => c.currency_code === "PHP");
+            if (!hasPHP) {
+                currencies.unshift({
+                    forex_id: 0,
+                    currency_code: "PHP",
+                    currency_name: "Philippine Peso",
+                    symbol: "₱",
+                    exchange_rate: 1.0,
+                    is_active: true
+                });
+            }
+
+            return NextResponse.json({ ok: true, currencies });
         }
 
         // 1. ACTION: Get products eligible for BOM costing
@@ -169,7 +205,7 @@ export async function GET(req: NextRequest) {
                     ? Number((parentVal as Record<string, unknown>).product_id)
                     : (parentVal ? Number(parentVal) : null);
                 const isParent = !parentIdNum;
-                const recipeReady = hasRecipeReady(pid);
+                const directRecipeReady = directVersionProductIds.has(pid);
                 const prodType = p.product_type != null
                     ? (typeof p.product_type === "object" ? Number((p.product_type as Record<string, unknown>).id) : Number(p.product_type))
                     : null;
@@ -186,8 +222,8 @@ export async function GET(req: NextRequest) {
                     product_type: prodType,
                     parent_id: parentIdNum,
                     is_parent: isParent,
-                    has_versions: recipeReady,
-                    material_type: determineMaterialClassification(prodType, recipeReady),
+                    has_versions: directRecipeReady,
+                    material_type: determineMaterialClassification(prodType, directRecipeReady),
                     uom_name: uomName
                 };
             });
@@ -206,47 +242,17 @@ export async function GET(req: NextRequest) {
             }
 
             const productId = Number(productIdStr);
-            const [prodRes, unitsRes] = await Promise.all([
-                fetch(`${DIRECTUS_URL}/items/products/${productId}?fields=product_id,parent_id`, { headers, cache: "no-store" }),
-                fetch(`${DIRECTUS_URL}/items/units?limit=-1`, { headers, cache: "no-store" })
-            ]);
+            const unitsRes = await fetch(`${DIRECTUS_URL}/items/units?limit=-1`, { headers, cache: "no-store" });
 
-            let parentIdNum: number | null = null;
-            if (prodRes.ok) {
-                const pData = (await prodRes.json()).data;
-                const parentVal = pData?.parent_id;
-                parentIdNum = parentVal && typeof parentVal === "object"
-                    ? Number((parentVal as Record<string, unknown>).product_id)
-                    : (parentVal ? Number(parentVal) : null);
-            }
+            // Query versions strictly for this exact productId (do not load parent or other product versions)
+            const versionFilter = encodeURIComponent(JSON.stringify({ product_id: { _eq: productId } }));
 
-            // Query versions for productId or its parent or its children
-            const versionFilter = parentIdNum
-                ? encodeURIComponent(JSON.stringify({ product_id: { _in: [productId, parentIdNum] } }))
-                : encodeURIComponent(JSON.stringify({ product_id: { _eq: productId } }));
-
-            let versionsRes = await fetch(
+            const versionsRes = await fetch(
                 `${DIRECTUS_URL}/items/product_manufacturing_version?filter=${versionFilter}&fields=*&limit=-1`,
                 { headers, cache: "no-store" }
             );
 
-            let versionsData = versionsRes.ok ? await versionsRes.json() : { data: [] };
-
-            // If empty, check if children of this product have versions
-            if ((!versionsData.data || versionsData.data.length === 0)) {
-                const childFilter = encodeURIComponent(JSON.stringify({ parent_id: { _eq: productId } }));
-                const childProdRes = await fetch(`${DIRECTUS_URL}/items/products?filter=${childFilter}&fields=product_id&limit=-1`, { headers, cache: "no-store" });
-                if (childProdRes.ok) {
-                    const childIds = ((await childProdRes.json()).data || []).map((c: Record<string, unknown>) => Number(c.product_id)).filter(Boolean);
-                    if (childIds.length > 0) {
-                        const childVerFilter = encodeURIComponent(JSON.stringify({ product_id: { _in: childIds } }));
-                        versionsRes = await fetch(`${DIRECTUS_URL}/items/product_manufacturing_version?filter=${childVerFilter}&fields=*&limit=-1`, { headers, cache: "no-store" });
-                        if (versionsRes.ok) {
-                            versionsData = await versionsRes.json();
-                        }
-                    }
-                }
-            }
+            const versionsData = versionsRes.ok ? await versionsRes.json() : { data: [] };
 
             const unitsData = unitsRes.ok ? await unitsRes.json() : { data: [] };
             const unitsMap = new Map<number, string>();
@@ -273,11 +279,13 @@ export async function GET(req: NextRequest) {
 
             const versions: VersionOption[] = rawVersions.map((v: Record<string, unknown>): VersionOption => {
                 const uomId = Number(v.uom_id || 0);
+                const rawBaseQty = Number(v.base_quantity);
+                const baseQty = !isNaN(rawBaseQty) && rawBaseQty > 0 ? rawBaseQty : 1;
                 return {
                     version_id: Number(v.version_id),
                     product_id: Number(v.product_id),
                     version_name: String(v.version_name || "Standard"),
-                    base_quantity: Number(v.base_quantity || 1),
+                    base_quantity: baseQty,
                     uom_id: uomId,
                     uom_name: unitsMap.get(uomId) || "unit",
                     status: String(v.status || "Draft"),
@@ -369,21 +377,16 @@ export async function GET(req: NextRequest) {
                 }
             });
 
-            // Determine Target Version
+            // Determine Target Version strictly for the selected product
             let targetVersion: Record<string, unknown> | null = null;
             if (versionIdStr) {
                 const vId = Number(versionIdStr);
-                targetVersion = allVersions.find(v => Number(v.version_id) === vId) || null;
+                targetVersion = allVersions.find(v => Number(v.version_id) === vId && Number(v.product_id) === productId)
+                    || allVersions.find(v => Number(v.version_id) === vId)
+                    || null;
             }
             if (!targetVersion) {
                 targetVersion = primaryVersionByProduct.get(productId) || null;
-            }
-            if (!targetVersion && productData?.parent_id) {
-                const parentVal = productData.parent_id;
-                const parentIdVal = typeof parentVal === "object" ? Number(parentVal.product_id) : Number(parentVal);
-                if (parentIdVal) {
-                    targetVersion = primaryVersionByProduct.get(parentIdVal) || null;
-                }
             }
 
             if (!targetVersion) {
@@ -394,7 +397,8 @@ export async function GET(req: NextRequest) {
             }
 
             const versionId = Number(targetVersion.version_id);
-            const baseQuantity = Number(targetVersion.base_quantity) || 1;
+            const rawBaseQty = Number(targetVersion.base_quantity);
+            const baseQuantity = !isNaN(rawBaseQty) && rawBaseQty > 0 ? rawBaseQty : 1;
             const targetQuantity = targetQtyStr && Number(targetQtyStr) > 0 ? Number(targetQtyStr) : baseQuantity;
             const batchScalingFactor = targetQuantity / baseQuantity;
             const uomId = Number(targetVersion.uom_id || productData.unit_of_measurement || 0);
@@ -541,42 +545,6 @@ export async function GET(req: NextRequest) {
                         subAssemblyVersionName: subAssemblyVersion ? String(subAssemblyVersion.version_name) : null,
                         children
                     });
-                }
-
-                // If sub-assemblies already exist with children, keep them
-                const hasExistingSubAssemblies = rawNodes.some(n => n.children && n.children.length > 0);
-                if (hasExistingSubAssemblies || level > 1) {
-                    return rawNodes;
-                }
-
-                // If all items are currently flat L1, organize by manufacturing intermediate dough/mixing stages
-                // Items from preparatory operations (1st Mix, Blanching, Premixes) roll up under the primary base ingredient (2nd Mix / Wheat Flour)
-                const mixingNodes = rawNodes.filter(n => n.materialClassification === "raw_material");
-                const packagingNodes = rawNodes.filter(n => n.materialClassification === "packaging");
-                const otherNodes = rawNodes.filter(n => n.materialClassification !== "raw_material" && n.materialClassification !== "packaging");
-
-                if (mixingNodes.length > 1) {
-                    // Find the primary base raw material (largest total cost / scaled qty, or operation with 2nd Mix / Flour)
-                    let primaryIndex = mixingNodes.findIndex(n =>
-                        n.productName.toLowerCase().includes("flour") ||
-                        (n.operationName && n.operationName.toLowerCase().includes("2nd mix"))
-                    );
-                    if (primaryIndex === -1) {
-                        primaryIndex = mixingNodes.reduce((maxIdx, n, currIdx, arr) =>
-                            n.totalLineCost > arr[maxIdx].totalLineCost ? currIdx : maxIdx, 0
-                        );
-                    }
-
-                    const parentNode = { ...mixingNodes[primaryIndex] };
-                    const childNodes = mixingNodes.filter((_, idx) => idx !== primaryIndex).map(c => ({
-                        ...c,
-                        level: 2,
-                        parentId: parentNode.id
-                    }));
-
-                    parentNode.children = childNodes;
-
-                    return [parentNode, ...packagingNodes, ...otherNodes];
                 }
 
                 return rawNodes;

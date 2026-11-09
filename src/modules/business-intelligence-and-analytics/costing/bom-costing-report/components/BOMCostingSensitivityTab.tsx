@@ -14,11 +14,12 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { BOMCostingReportData, BOMCostNode } from "../types";
+import { BOMCostingReportData, BOMCostNode, ForexOption } from "../types";
 import { formatStandardCurrency } from "./BOMCostingTreeTable";
 
 interface BOMCostingSensitivityTabProps {
     data: BOMCostingReportData;
+    selectedCurrency?: ForexOption | null;
 }
 
 export interface SimulatedMaterialItem {
@@ -36,7 +37,7 @@ export interface SimulatedMaterialItem {
     operations: string[];
 }
 
-export default function BOMCostingSensitivityTab({ data }: BOMCostingSensitivityTabProps) {
+export default function BOMCostingSensitivityTab({ data, selectedCurrency }: BOMCostingSensitivityTabProps) {
     const { summary, tree } = data;
 
     // State for individual material price shifts keyed by material id
@@ -412,7 +413,7 @@ export default function BOMCostingSensitivityTab({ data }: BOMCostingSensitivity
                                         <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
                                             <span>-50% (Deflation)</span>
                                             <span className="text-foreground/70">
-                                                Base: {formatStandardCurrency(item.baselineTotalCost, 4)} ({formatStandardCurrency(item.unitCost, 4)}/{item.uomName})
+                                                Base: {formatStandardCurrency(item.baselineTotalCost, 4, selectedCurrency)} ({formatStandardCurrency(item.unitCost, 4, selectedCurrency)}/{item.uomName})
                                             </span>
                                             <span>+100% (Shock)</span>
                                         </div>
@@ -422,10 +423,10 @@ export default function BOMCostingSensitivityTab({ data }: BOMCostingSensitivity
                                             <span className="text-muted-foreground">
                                                 Simulated Cost:{" "}
                                                 <span className="font-semibold text-foreground">
-                                                    {formatStandardCurrency(simLineCost, 4)}
+                                                    {formatStandardCurrency(simLineCost, 4, selectedCurrency)}
                                                 </span>{" "}
                                                 <span className="text-[10px] text-muted-foreground">
-                                                    ({formatStandardCurrency(simUnitCost, 4)}/{item.uomName})
+                                                    ({formatStandardCurrency(simUnitCost, 4, selectedCurrency)}/{item.uomName})
                                                 </span>
                                             </span>
                                             <span
@@ -438,7 +439,7 @@ export default function BOMCostingSensitivityTab({ data }: BOMCostingSensitivity
                                                 }`}
                                             >
                                                 {deltaCost >= 0 ? "+" : ""}
-                                                {formatStandardCurrency(deltaCost, 4)}
+                                                {formatStandardCurrency(deltaCost, 4, selectedCurrency)}
                                             </span>
                                         </div>
                                     </div>
@@ -452,10 +453,10 @@ export default function BOMCostingSensitivityTab({ data }: BOMCostingSensitivity
                 <div className="rounded-xl bg-[#090e17] text-white border border-slate-800 p-5 flex flex-wrap items-center justify-between gap-4 shadow-sm">
                     <div className="space-y-1">
                         <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                            Simulated Extended Batch Cost
+                            Simulated Extended Batch Cost ({selectedCurrency?.currency_code || "PHP"})
                         </div>
                         <div className="text-3xl font-extrabold font-mono text-sky-400 tracking-tight">
-                            {formatStandardCurrency(simulatedBatchCost, 4)}
+                            {formatStandardCurrency(simulatedBatchCost, 4, selectedCurrency)}
                         </div>
                         <div className="text-xs text-slate-300">
                             Cost Variance:{" "}
@@ -469,10 +470,10 @@ export default function BOMCostingSensitivityTab({ data }: BOMCostingSensitivity
                                 }`}
                             >
                                 {costVariance >= 0 ? "+" : ""}
-                                {formatStandardCurrency(costVariance, 4)} ({costVariance >= 0 ? "+" : ""}
+                                {formatStandardCurrency(costVariance, 4, selectedCurrency)} ({costVariance >= 0 ? "+" : ""}
                                 {variancePct.toFixed(4)}%)
                             </span>{" "}
-                            compared to baseline ({formatStandardCurrency(baselineBatchCost, 4)}).
+                            compared to baseline ({formatStandardCurrency(baselineBatchCost, 4, selectedCurrency)}).
                         </div>
                     </div>
 

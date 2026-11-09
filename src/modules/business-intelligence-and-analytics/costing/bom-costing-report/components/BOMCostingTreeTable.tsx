@@ -26,22 +26,30 @@ import {
     BOMCostingReportData,
     MaterialClassification,
     HierarchyRollupMode,
-    ComponentCategoryFilter
+    ComponentCategoryFilter,
+    ForexOption
 } from "../types";
 
 interface BOMCostingTreeTableProps {
     data: BOMCostingReportData;
+    selectedCurrency?: ForexOption | null;
 }
 
-// 1. Strict 4-decimal currency formatting
-export const formatStandardCurrency = (val: number, decimals: number = 4): string => {
+// 1. Strict 4-decimal currency formatting with multi-currency forex support
+export const formatStandardCurrency = (
+    val: number,
+    decimals: number = 4,
+    currency?: ForexOption | null
+): string => {
     const num = Number(val) || 0;
-    return new Intl.NumberFormat("en-PH", {
-        style: "currency",
-        currency: "PHP",
+    const rate = currency?.exchange_rate && currency.exchange_rate > 0 ? currency.exchange_rate : 1.0;
+    const symbol = currency?.symbol || "₱";
+    const converted = num / rate;
+
+    return `${symbol}${new Intl.NumberFormat("en-US", {
         minimumFractionDigits: decimals,
         maximumFractionDigits: decimals
-    }).format(num);
+    }).format(converted)}`;
 };
 
 // 2. Discrete vs Continuous Unit Formatting
@@ -94,7 +102,7 @@ export const formatUomQuantity = (val: number, uom?: string): string => {
     }).format(num);
 };
 
-export default function BOMCostingTreeTable({ data }: BOMCostingTreeTableProps) {
+export default function BOMCostingTreeTable({ data, selectedCurrency }: BOMCostingTreeTableProps) {
     const { tree, summary, targetProduct } = data;
 
     // Filter and search state
@@ -374,9 +382,9 @@ export default function BOMCostingTreeTable({ data }: BOMCostingTreeTableProps) 
                     {/* 9. UNIT COST (Strict 4 Decimals) */}
                     <td
                         className="py-2.5 px-3 min-w-[105px] text-right font-mono whitespace-nowrap"
-                        title={`Standard Unit Cost: ${formatStandardCurrency(node.unitCost, 4)} per ${node.uomName}`}
+                        title={`Standard Unit Cost: ${formatStandardCurrency(node.unitCost, 4, selectedCurrency)} per ${node.uomName}`}
                     >
-                        {formatStandardCurrency(node.unitCost, 4)}
+                        {formatStandardCurrency(node.unitCost, 4, selectedCurrency)}
                     </td>
 
                     {/* 10. GROSS (EFF.) QTY */}
@@ -390,9 +398,9 @@ export default function BOMCostingTreeTable({ data }: BOMCostingTreeTableProps) 
                     {/* 11. EXT. TOTAL COST (Strict 4 Decimals) */}
                     <td
                         className="py-2.5 px-3 min-w-[120px] text-right font-mono font-semibold text-foreground whitespace-nowrap"
-                        title={`Extended Line Total Cost: ${formatStandardCurrency(node.totalLineCost, 4)} (Gross Qty × Unit Cost)`}
+                        title={`Extended Line Total Cost: ${formatStandardCurrency(node.totalLineCost, 4, selectedCurrency)} (Gross Qty × Unit Cost)`}
                     >
-                        {formatStandardCurrency(node.totalLineCost, 4)}
+                        {formatStandardCurrency(node.totalLineCost, 4, selectedCurrency)}
                     </td>
 
                     {/* 12. SHARE % with mini progress indicator */}
@@ -582,11 +590,11 @@ export default function BOMCostingTreeTable({ data }: BOMCostingTreeTableProps) 
                                 <td colSpan={5} className="py-3 px-3" title={`Total Standard Batch Cost Rollup for ${targetProduct.product_name}`}>
                                     Total Standard Batch Cost Rollup ({targetProduct.product_name})
                                 </td>
-                                <td colSpan={4} className="py-3 px-3 text-right font-normal text-muted-foreground" title={`Per Piece Unit Cost: ${formatStandardCurrency(summary.costPerUnit, 4)} per ${targetProduct.uom_name}`}>
-                                    Per Piece Unit Cost: <strong className="text-foreground font-mono">{formatStandardCurrency(summary.costPerUnit, 4)}</strong> / {targetProduct.uom_name}
+                                <td colSpan={4} className="py-3 px-3 text-right font-normal text-muted-foreground" title={`Per Piece Unit Cost: ${formatStandardCurrency(summary.costPerUnit, 4, selectedCurrency)} per ${targetProduct.uom_name}`}>
+                                    Per Piece Unit Cost: <strong className="text-foreground font-mono">{formatStandardCurrency(summary.costPerUnit, 4, selectedCurrency)}</strong> / {targetProduct.uom_name}
                                 </td>
-                                <td className="py-3 px-3 text-right font-mono text-sm font-bold text-primary" title={`Total Batch Cost: ${formatStandardCurrency(summary.totalBatchCost || summary.totalMaterialCost, 4)}`}>
-                                    {formatStandardCurrency(summary.totalBatchCost || summary.totalMaterialCost, 4)}
+                                <td className="py-3 px-3 text-right font-mono text-sm font-bold text-primary" title={`Total Batch Cost: ${formatStandardCurrency(summary.totalBatchCost || summary.totalMaterialCost, 4, selectedCurrency)}`}>
+                                    {formatStandardCurrency(summary.totalBatchCost || summary.totalMaterialCost, 4, selectedCurrency)}
                                 </td>
                                 <td className="py-3 px-3 text-right font-mono" title="100.0000% total standard cost rollup">
                                     100.0000%

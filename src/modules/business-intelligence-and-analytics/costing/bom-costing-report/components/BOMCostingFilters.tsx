@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { ProductOption, VersionOption } from "../types";
+import { ProductOption, VersionOption, ForexOption } from "../types";
 import { isDiscreteUom } from "./BOMCostingTreeTable";
 
 interface BOMCostingFiltersProps {
@@ -45,6 +45,9 @@ interface BOMCostingFiltersProps {
     versions?: VersionOption[];
     selectedVersion: VersionOption | null;
     onSelectVersion?: (version: VersionOption) => void;
+    currencies?: ForexOption[];
+    selectedCurrency?: ForexOption | null;
+    onSelectCurrency?: (currency: ForexOption) => void;
     targetQuantity: number;
     onChangeTargetQuantity: (qty: number) => void;
     onGenerate: () => void;
@@ -61,6 +64,9 @@ export default function BOMCostingFilters({
     versions = [],
     selectedVersion,
     onSelectVersion,
+    currencies = [],
+    selectedCurrency,
+    onSelectCurrency,
     targetQuantity,
     onChangeTargetQuantity,
     onGenerate,
@@ -82,14 +88,20 @@ export default function BOMCostingFilters({
     };
 
     const [prevTargetQuantity, setPrevTargetQuantity] = useState(targetQuantity);
+    const [prevVersionId, setPrevVersionId] = useState(selectedVersion?.version_id);
     const [prevUomName, setPrevUomName] = useState(selectedVersion?.uom_name);
     const [rawQtyInput, setRawQtyInput] = useState<string>(
         formatInitialQty(targetQuantity, selectedVersion?.uom_name)
     );
 
     // Synchronize local input string when external targetQuantity or version changes
-    if (targetQuantity !== prevTargetQuantity || selectedVersion?.uom_name !== prevUomName) {
+    if (
+        targetQuantity !== prevTargetQuantity ||
+        selectedVersion?.version_id !== prevVersionId ||
+        selectedVersion?.uom_name !== prevUomName
+    ) {
         setPrevTargetQuantity(targetQuantity);
+        setPrevVersionId(selectedVersion?.version_id);
         setPrevUomName(selectedVersion?.uom_name);
         setRawQtyInput(formatInitialQty(targetQuantity, selectedVersion?.uom_name));
     }
@@ -115,9 +127,12 @@ export default function BOMCostingFilters({
     const handleQtyBlur = () => {
         const num = parseFloat(rawQtyInput);
         const uom = selectedVersion?.uom_name;
+        const versionBaseQty = selectedVersion?.base_quantity && selectedVersion.base_quantity > 0
+            ? selectedVersion.base_quantity
+            : 1;
+
         if (isNaN(num) || num <= 0) {
-            const fallback = selectedVersion?.base_quantity || 1;
-            const formattedFallback = formatInitialQty(fallback, uom);
+            const formattedFallback = formatInitialQty(versionBaseQty, uom);
             setRawQtyInput(formattedFallback);
             onChangeTargetQuantity(parseFloat(formattedFallback));
         } else {
@@ -435,14 +450,26 @@ export default function BOMCostingFilters({
                         <Coins className="h-3.5 w-3.5 text-primary" />
                         Currency Base
                     </Label>
-                    <Select defaultValue="PHP">
+                    <Select
+                        value={selectedCurrency?.currency_code || "PHP"}
+                        onValueChange={(val) => {
+                            const found = (currencies || []).find(c => c.currency_code === val);
+                            if (found && onSelectCurrency) {
+                                onSelectCurrency(found);
+                            }
+                        }}
+                    >
                         <SelectTrigger className="h-9 text-xs bg-background">
-                            <SelectValue placeholder="Currency" />
+                            <SelectValue placeholder="Select currency..." />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="PHP" className="text-xs">
-                                PHP (₱) - Philippine Peso
-                            </SelectItem>
+                            {(currencies && currencies.length > 0 ? currencies : [
+                                { forex_id: 0, currency_code: "PHP", currency_name: "Philippine Peso", symbol: "₱", exchange_rate: 1.0, is_active: true }
+                            ]).map((c) => (
+                                <SelectItem key={c.currency_code} value={c.currency_code} className="text-xs">
+                                    {c.currency_code} ({c.symbol}) - {c.currency_name} {c.exchange_rate !== 1 ? `[₱${c.exchange_rate.toFixed(2)}]` : "[Base]"}
+                                </SelectItem>
+                            ))}
                         </SelectContent>
                     </Select>
                 </div>

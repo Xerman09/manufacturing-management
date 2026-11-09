@@ -15,11 +15,12 @@ import {
     YAxis,
     CartesianGrid
 } from "recharts";
-import { BOMCostingReportData, BOMCostNode, ComponentCategoryFilter } from "../types";
+import { BOMCostingReportData, BOMCostNode, ComponentCategoryFilter, ForexOption } from "../types";
 import { formatStandardCurrency } from "./BOMCostingTreeTable";
 
 interface BOMCostingAnalyticsTabProps {
     data: BOMCostingReportData;
+    selectedCurrency?: ForexOption | null;
 }
 
 type TooltipValue = number | string | Array<number | string>;
@@ -39,7 +40,7 @@ const CATEGORY_LABELS: Record<ComponentCategoryFilter, string> = {
     overhead: "Overhead"
 };
 
-export default function BOMCostingAnalyticsTab({ data }: BOMCostingAnalyticsTabProps) {
+export default function BOMCostingAnalyticsTab({ data, selectedCurrency }: BOMCostingAnalyticsTabProps) {
     const { summary, tree } = data;
 
     // 1. Flatten all leaf components to calculate exact category and driver splits
@@ -251,7 +252,7 @@ export default function BOMCostingAnalyticsTab({ data }: BOMCostingAnalyticsTabP
                                     </Pie>
                                     <RechartsTooltip
                                         formatter={(val: TooltipValue) => [
-                                            `${formatStandardCurrency(Number(val) || 0, 4)} (${categoryBreakdown.total > 0 ? (((Number(val) || 0) / categoryBreakdown.total) * 100).toFixed(4) : "0.0000"}%)`,
+                                            `${formatStandardCurrency(Number(val) || 0, 4, selectedCurrency)} (${categoryBreakdown.total > 0 ? (((Number(val) || 0) / categoryBreakdown.total) * 100).toFixed(4) : "0.0000"}%)`,
                                             "Extended Cost"
                                         ]}
                                         contentStyle={{
@@ -363,7 +364,7 @@ export default function BOMCostingAnalyticsTab({ data }: BOMCostingAnalyticsTabP
                                         ) => {
                                             const payload = item?.payload;
                                             const shareVal = Number(val) || 0;
-                                            const costStr = formatStandardCurrency(payload?.cost || 0, 4);
+                                            const costStr = formatStandardCurrency(payload?.cost || 0, 4, selectedCurrency);
 
                                             if (selectedDriverCategory !== "all" && payload?.batchSharePct !== undefined) {
                                                 return [
