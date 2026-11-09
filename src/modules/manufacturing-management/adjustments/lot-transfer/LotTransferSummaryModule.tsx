@@ -751,23 +751,6 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleOpenPrint(item)}
-                              disabled={printLoadingId === item.id}
-                              className="h-8 text-xs gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-                              title="Print lot transfer slip"
-                            >
-                              {printLoadingId === item.id ? (
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <Printer className="w-3.5 h-3.5" />
-                              )}
-                              <span className="hidden sm:inline">Print</span>
-                            </Button>
-                          </motion.div>
-                          <motion.div whileTap={{ scale: 0.95 }} className="inline-block">
-                            <Button
-                              variant="ghost"
-                              size="sm"
                               onClick={() => handleOpenDetail(item)}
                               disabled={auditLoadingId === item.id}
                               className="h-8 text-xs gap-1.5"
