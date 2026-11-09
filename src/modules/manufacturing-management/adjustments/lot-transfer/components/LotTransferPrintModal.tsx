@@ -50,7 +50,91 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
   if (!open || !transfer) return null;
 
   const handlePrint = () => {
-    window.print();
+    const reportEl = document.getElementById("printable-lot-transfer-paper");
+    if (!reportEl) {
+      window.print();
+      return;
+    }
+
+    const printFrame = document.createElement("iframe");
+    printFrame.name = "print_frame";
+    printFrame.style.position = "fixed";
+    printFrame.style.top = "-9999px";
+    printFrame.style.left = "-9999px";
+    printFrame.style.width = "0px";
+    printFrame.style.height = "0px";
+    printFrame.style.border = "none";
+
+    document.body.appendChild(printFrame);
+
+    const frameDoc = printFrame.contentWindow?.document;
+    if (!frameDoc) {
+      window.print();
+      return;
+    }
+
+    const styleTags = Array.from(document.querySelectorAll("style, link[rel='stylesheet']"))
+      .map((el) => el.outerHTML)
+      .join("\n");
+
+    frameDoc.open();
+    frameDoc.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Lot Transfer Slip - ${transfer.requestNo || "Document"}</title>
+        ${styleTags}
+        <style>
+          @page {
+            size: A4 portrait;
+            margin: 8mm;
+          }
+          html, body {
+            background: white !important;
+            color: black !important;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0 !important;
+            padding: 0 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          #printable-lot-transfer-paper {
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            background: white !important;
+          }
+          tr, table, .page-break-avoid {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+        </style>
+      </head>
+      <body>
+        ${reportEl.outerHTML}
+      </body>
+      </html>
+    `);
+    frameDoc.close();
+
+    setTimeout(() => {
+      try {
+        printFrame.contentWindow?.focus();
+        printFrame.contentWindow?.print();
+      } catch (err) {
+        console.error("Print error:", err);
+        window.print();
+      } finally {
+        setTimeout(() => {
+          if (document.body.contains(printFrame)) {
+            document.body.removeChild(printFrame);
+          }
+        }, 1000);
+      }
+    }, 300);
   };
 
   const branchDisplay =
@@ -84,54 +168,17 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
           Lot Transfer Slip - {transfer.requestNo || "Preview"}
         </DialogTitle>
 
-        <style jsx global>{`
+        <style>{`
           @media print {
             @page {
               size: A4 portrait;
               margin: 8mm;
             }
-            html,
-            body {
-              background: white !important;
-              color: black !important;
-              height: auto !important;
-              overflow: visible !important;
-            }
-            body > *:not([data-slot="dialog-portal"]) {
-              display: none !important;
-            }
-            [data-slot="dialog-overlay"],
             .print-hidden-bar {
               display: none !important;
             }
-            [data-slot="dialog-content"] {
-              position: static !important;
-              display: block !important;
-              width: 100% !important;
-              max-width: 100% !important;
-              height: auto !important;
-              max-height: none !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              box-shadow: none !important;
-              border: none !important;
-              background: white !important;
-              color: black !important;
-              overflow: visible !important;
-              transform: none !important;
-            }
-            #printable-lot-transfer-paper {
-              position: static !important;
-              display: block !important;
-              width: 100% !important;
-              max-width: 100% !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              box-shadow: none !important;
-              border: none !important;
-              background: white !important;
-              color: black !important;
-              overflow: visible !important;
+            [data-slot="dialog-overlay"] {
+              display: none !important;
             }
             tr,
             table,
@@ -364,10 +411,10 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
 
         {/* 3-Party Verification & Sign-Off Matrix */}
         <div className="grid grid-cols-2 gap-4 pt-3 border-t-2 border-black page-break-avoid text-[10px]">
-          {/* Box 1: Requested By */}
+          {/* Requested By */}
           <div className="border border-neutral-300 rounded-lg p-3 flex flex-col justify-between min-h-[72px]">
             <span className="font-bold text-neutral-600 block uppercase text-[8px] tracking-wider">
-              1. Requested By
+              Requested By
             </span>
             <div className="my-auto py-1">
               <div className="font-bold text-black text-[11px]">
@@ -382,10 +429,10 @@ export const LotTransferPrintModal: React.FC<LotTransferPrintModalProps> = ({
           </div>
  
 
-          {/* Box 3: Posted By */}
+          {/* Posted By */}
           <div className="border border-neutral-300 rounded-lg p-3 flex flex-col justify-between min-h-[72px]">
             <span className="font-bold text-neutral-600 block uppercase text-[8px] tracking-wider">
-              3. Posted By
+              Posted By
             </span>
             <div className="my-auto py-1">
               <div className="font-bold text-black text-[11px]">
