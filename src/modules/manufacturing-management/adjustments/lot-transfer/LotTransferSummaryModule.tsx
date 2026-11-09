@@ -271,26 +271,8 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
   // Printable slip modal state
   const [printTransfer, setPrintTransfer] = useState<LotTransfer | null>(null);
   const [printModalOpen, setPrintModalOpen] = useState(false);
-  const [printLoadingId, setPrintLoadingId] = useState<number | null>(null);
+  const [, setPrintLoadingId] = useState<number | null>(null);
 
-  const handleOpenPrint = useCallback(async (item: LotTransfer) => {
-    if (item.details && item.details.length > 0) {
-      setPrintTransfer(item);
-      setPrintModalOpen(true);
-      return;
-    }
-    setPrintLoadingId(item.id);
-    try {
-      const full = await lotTransferService.getTransferById(item.id);
-      setPrintTransfer(full || item);
-      setPrintModalOpen(true);
-    } catch {
-      setPrintTransfer(item);
-      setPrintModalOpen(true);
-    } finally {
-      setPrintLoadingId(null);
-    }
-  }, []);
 
   const loadTransfers = useCallback(async () => {
     setLoading(true);

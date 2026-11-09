@@ -39,6 +39,12 @@ export async function fetchOrderTrackingList(
         if (params.pageSize !== undefined) {
             query.set("pageSize", String(params.pageSize));
         }
+        if (params.sortBy) {
+            query.set("sortBy", params.sortBy);
+        }
+        if (params.sortOrder) {
+            query.set("sortOrder", params.sortOrder);
+        }
         query.set("_ts", String(Date.now()));
 
         const res = await fetch(`${BASE_API}?${query.toString()}`, {

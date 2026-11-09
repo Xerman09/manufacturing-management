@@ -166,6 +166,8 @@ export interface TrackingFilterParams {
     exceptionsOnly?: boolean;
     page?: number;
     pageSize?: number;
+    sortBy?: string;
+    sortOrder?: "asc" | "desc";
 }
 
 export interface TrackingApiResponse {

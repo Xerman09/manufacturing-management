@@ -54,6 +54,8 @@ export function useOrderAllocationTracking() {
     const [pageSize, setPageSize] = useState(15);
     const [totalPages, setTotalPages] = useState(0);
     const [totalCount, setTotalCount] = useState(0);
+    const [sortBy, setSortBy] = useState<string>("order_date");
+    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
@@ -78,6 +80,8 @@ export function useOrderAllocationTracking() {
                 consolidationStatus,
                 page,
                 pageSize,
+                sortBy,
+                sortOrder,
             });
 
             if (res.success) {
@@ -93,7 +97,7 @@ export function useOrderAllocationTracking() {
             setIsLoading(false);
             setIsRefreshing(false);
         }
-    }, [selectedBranchId, search, stage, allocationStatus, consolidationStatus, page, pageSize]);
+    }, [selectedBranchId, search, stage, allocationStatus, consolidationStatus, page, pageSize, sortBy, sortOrder]);
 
     useEffect(() => {
         isMounted.current = true;
@@ -140,6 +144,16 @@ export function useOrderAllocationTracking() {
         setSelectedOrder(null);
     };
 
+    const handleSort = (column: string) => {
+        if (sortBy === column) {
+            setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+        } else {
+            setSortBy(column);
+            setSortOrder("asc");
+        }
+        setPage(0);
+    };
+
     return {
         orders,
         metrics,
@@ -175,6 +189,11 @@ export function useOrderAllocationTracking() {
         setPageSize,
         totalPages,
         totalCount,
+        sortBy,
+        sortOrder,
+        setSortBy,
+        setSortOrder,
+        handleSort,
         isLoading,
         isRefreshing,
         loadOrders,
