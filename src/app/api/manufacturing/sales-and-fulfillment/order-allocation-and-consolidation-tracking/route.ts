@@ -54,6 +54,8 @@ export async function GET(req: NextRequest) {
         const exceptionsOnly = searchParams.get("exceptionsOnly") === "true";
         const page = Math.max(0, parseInt(searchParams.get("page") || "0", 10));
         const pageSize = Math.max(1, Math.min(100, parseInt(searchParams.get("pageSize") || "15", 10)));
+        const sortBy = searchParams.get("sortBy") || "";
+        const sortOrder = searchParams.get("sortOrder") === "desc" ? "desc" : "asc";
 
         // 1. Fetch active branches for filter combobox
         const branchRes = await fetch(
@@ -770,8 +772,7 @@ export async function GET(req: NextRequest) {
                     item.exceptions.has_excess_allocation ||
                     item.exceptions.has_excess_consolidation ||
                     item.exceptions.has_missing_reservations ||
-                    item.exceptions.has_zero_quantity ||
-                    item.exceptions.is_mixed_uom
+                    item.exceptions.has_zero_quantity
             );
         }
 
@@ -850,8 +851,7 @@ export async function GET(req: NextRequest) {
                 item.exceptions.has_excess_allocation ||
                 item.exceptions.has_excess_consolidation ||
                 item.exceptions.has_missing_reservations ||
-                item.exceptions.has_zero_quantity ||
-                item.exceptions.is_mixed_uom;
+                item.exceptions.has_zero_quantity;
 
             if (hasAnyEx) totalExceptionsCount++;
         }
@@ -883,6 +883,45 @@ export async function GET(req: NextRequest) {
             dispatched_orders_count: dispatchedOrdersCount,
             overall_delivery_rate: grandOrderedQty > 0 ? (deliveredOrDispatchedQty / grandOrderedQty) * 100 : 0,
         };
+
+        // 8.5. Sorting across all filtered records
+        if (sortBy) {
+            filteredItems.sort((a, b) => {
+                let comparison = 0;
+                switch (sortBy) {
+                    case "order_no":
+                        comparison = (a.order_no || "").localeCompare(b.order_no || "");
+                        break;
+                    case "customer_name":
+                        comparison = (a.customer_name || "").localeCompare(b.customer_name || "");
+                        break;
+                    case "branch_name":
+                        comparison = (a.branch_name || "").localeCompare(b.branch_name || "");
+                        break;
+                    case "order_date": {
+                        const dateA = a.order_date ? new Date(a.order_date).getTime() : 0;
+                        const dateB = b.order_date ? new Date(b.order_date).getTime() : 0;
+                        comparison = dateA - dateB;
+                        break;
+                    }
+                    case "total_ordered_quantity":
+                        comparison = a.total_ordered_quantity - b.total_ordered_quantity;
+                        break;
+                    case "physical_consolidation_rate":
+                        comparison = a.physical_consolidation_rate - b.physical_consolidation_rate;
+                        break;
+                    case "invoiced_served_rate":
+                        comparison = a.invoiced_served_rate - b.invoiced_served_rate;
+                        break;
+                    case "stage":
+                        comparison = (a.stage || "").localeCompare(b.stage || "");
+                        break;
+                    default:
+                        break;
+                }
+                return sortOrder === "desc" ? -comparison : comparison;
+            });
+        }
 
         // 9. Pagination
         const totalCount = filteredItems.length;

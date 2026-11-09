@@ -10,6 +10,14 @@ import {
     Calendar,
     Building2,
     TrendingUp,
+    ArrowUpDown,
+    ArrowUp,
+    ArrowDown,
+    ChevronLeft,
+    ChevronRight,
+    ChevronsLeft,
+    ChevronsRight,
+    Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +32,35 @@ interface TrackingOrderTableProps {
     totalPages: number;
     totalCount: number;
     onPageChange: (newPage: number) => void;
+    sortBy?: string;
+    sortOrder?: "asc" | "desc";
+    onSort?: (column: string) => void;
+}
+
+function getVisiblePages(current: number, total: number): (number | "ellipsis")[] {
+    if (total <= 7) {
+        return Array.from({ length: total }, (_, i) => i);
+    }
+    const pages: (number | "ellipsis")[] = [];
+    pages.push(0);
+
+    if (current > 2) {
+        pages.push("ellipsis");
+    }
+
+    const start = Math.max(1, current - 1);
+    const end = Math.min(total - 2, current + 1);
+
+    for (let i = start; i <= end; i++) {
+        pages.push(i);
+    }
+
+    if (current < total - 3) {
+        pages.push("ellipsis");
+    }
+
+    pages.push(total - 1);
+    return pages;
 }
 
 export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
@@ -35,6 +72,9 @@ export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
     totalPages,
     totalCount,
     onPageChange,
+    sortBy,
+    sortOrder,
+    onSort,
 }) => {
     const getStageBadge = (stage: string) => {
         switch (stage) {
@@ -65,6 +105,42 @@ export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
         }
     };
 
+    const renderSortHeader = (
+        label: string,
+        columnKey: string,
+        tooltip: string,
+        extraThClass = ""
+    ) => {
+        const isSorted = sortBy === columnKey;
+        return (
+            <th
+                className={`p-3 select-none whitespace-nowrap ${extraThClass}`}
+                title={`${tooltip} (Click to sort ${isSorted && sortOrder === "asc" ? "descending" : "ascending"})`}
+            >
+                <button
+                    type="button"
+                    onClick={() => onSort?.(columnKey)}
+                    className={`group/btn inline-flex items-center gap-1.5 font-semibold transition-colors hover:text-foreground text-left focus:outline-none ${
+                        isSorted ? "text-primary" : "text-muted-foreground"
+                    }`}
+                >
+                    <span>{label}</span>
+                    <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
+                        {isSorted ? (
+                            sortOrder === "desc" ? (
+                                <ArrowDown className="w-3.5 h-3.5 text-primary" />
+                            ) : (
+                                <ArrowUp className="w-3.5 h-3.5 text-primary" />
+                            )
+                        ) : (
+                            <ArrowUpDown className="w-3.5 h-3.5 text-muted-foreground/40 group-hover/btn:text-foreground group-hover/btn:opacity-100 transition-opacity" />
+                        )}
+                    </span>
+                </button>
+            </th>
+        );
+    };
+
     if (isLoading && orders.length === 0) {
         return (
             <div className="border rounded-xl bg-card p-12 text-center shadow-sm">
@@ -93,23 +169,48 @@ export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
 
     return (
         <div className="border rounded-xl bg-card overflow-hidden shadow-sm flex flex-col">
-            <div className="overflow-x-auto">
+            {/* Top Loading Progress Line */}
+            <div className="h-0.5 w-full bg-transparent overflow-hidden relative">
+                {isLoading && (
+                    <motion.div
+                        className="h-full bg-primary"
+                        initial={{ x: "-100%", width: "45%" }}
+                        animate={{ x: "250%" }}
+                        transition={{ repeat: Infinity, duration: 1.2, ease: "easeInOut" }}
+                    />
+                )}
+            </div>
+
+            <div className="overflow-x-auto relative">
+                {isLoading && (
+                    <div className="absolute inset-0 bg-background/25 backdrop-blur-[0.5px] z-10 flex items-center justify-center pointer-events-none transition-opacity">
+                        <div className="bg-background/95 border shadow-md rounded-full px-3 py-1 flex items-center gap-2 text-xs font-medium text-foreground">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                            <span>Updating orders...</span>
+                        </div>
+                    </div>
+                )}
                 <table className="w-full text-left text-xs border-collapse">
                     <thead>
                         <tr className="border-b bg-muted/40 text-muted-foreground font-semibold">
-                            <th className="p-3 pl-4" title="Sales Order Number and Customer PO Reference">Order &amp; PO</th>
-                            <th className="p-3" title="Customer Name and Account Code">Customer</th>
-                            <th className="p-3" title="Originating Branch or Location">Branch</th>
-                            <th className="p-3" title="Order Date and Requested Delivery Date">Dates</th>
-                            <th className="p-3 text-left" title="Total Ordered Quantity across all items in this order">Ordered Qty</th>
-                            <th className="p-3 min-w-[190px]" title="Progress of physical picks and approved consolidation towards ordered quantity">Consolidated vs Ordered</th>
-                            <th className="p-3 min-w-[190px]" title="Comparison of invoiced order quantity against physically served quantity">Invoiced Order vs Serve Qty</th>
-                            <th className="p-3" title="Current warehouse fulfillment workflow stage">Fulfillment Stage</th>
-                            <th className="p-3" title="Operational alerts and audit discrepancies for this order">Exceptions</th>
-                            <th className="p-3 pr-4 text-right" title="View detailed order tracking and batch audit breakdown">Actions</th>
+                            {renderSortHeader("Order & PO", "order_no", "Sales Order Number and Customer PO Reference", "w-[150px] min-w-[150px] pl-4")}
+                            {renderSortHeader("Customer", "customer_name", "Customer Name and Account Code", "w-[170px] min-w-[170px]")}
+                            {renderSortHeader("Branch", "branch_name", "Originating Branch or Location", "w-[130px] min-w-[130px]")}
+                            {renderSortHeader("Dates", "order_date", "Order Date and Requested Delivery Date", "w-[125px] min-w-[125px]")}
+                            {renderSortHeader("Ordered Qty", "total_ordered_quantity", "Total Ordered Quantity across all items in this order", "w-[115px] min-w-[115px]")}
+                            {renderSortHeader("Consolidated vs Ordered", "physical_consolidation_rate", "Progress of physical picks and approved consolidation towards ordered quantity", "w-[200px] min-w-[200px]")}
+                            {renderSortHeader("Ordered vs Serve Qty", "invoiced_served_rate", "Comparison of invoiced order quantity against physically served quantity", "w-[200px] min-w-[200px]")}
+                            {renderSortHeader("Fulfillment Stage", "stage", "Current warehouse fulfillment workflow stage", "w-[135px] min-w-[135px]")}
+                            <th className="p-3 w-[130px] min-w-[130px] whitespace-nowrap" title="Operational alerts and audit discrepancies for this order">Exceptions</th>
+                            <th className="p-3 pr-4 text-right w-[110px] min-w-[110px] whitespace-nowrap" title="View detailed order tracking and batch audit breakdown">Actions</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-border">
+                    <tbody
+                        key={`page-${page}`}
+                        className={`divide-y divide-border transition-opacity duration-150 ${
+                            isLoading ? "opacity-60" : "opacity-100"
+                        }`}
+                    >
                         <AnimatePresence initial={false}>
                             {orders.map((order, idx) => {
                                 const hasAnyException =
@@ -119,7 +220,6 @@ export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
                                     order.exceptions.has_excess_consolidation ||
                                     order.exceptions.has_missing_reservations ||
                                     order.exceptions.has_zero_quantity ||
-                                    order.exceptions.is_mixed_uom ||
                                     Boolean(order.exceptions.has_substituted_lot) ||
                                     Boolean(order.exceptions.has_added_lot);
 
@@ -129,7 +229,7 @@ export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
                                         initial={{ opacity: 0, y: 6 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         exit={{ opacity: 0, y: -6 }}
-                                        transition={{ duration: 0.15, delay: idx * 0.02 }}
+                                        transition={{ duration: 0.15, delay: Math.min(idx * 0.02, 0.2) }}
                                         className="hover:bg-muted/30 transition-colors group"
                                     >
                                         {/* 1. Order & PO */}
@@ -336,11 +436,6 @@ export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
                                                             Zero Qty
                                                         </Badge>
                                                     )}
-                                                    {order.exceptions.is_mixed_uom && (
-                                                        <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-300" title="Order contains items with multiple units of measure">
-                                                            Mixed UOM
-                                                        </Badge>
-                                                    )}
                                                 </div>
                                             )}
                                         </td>
@@ -369,30 +464,92 @@ export const TrackingOrderTable: React.FC<TrackingOrderTableProps> = ({
             {/* Pagination Controls */}
             {totalPages > 1 && (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-muted/20 border-t text-xs">
-                    <span className="text-muted-foreground">
-                        Showing {(page * pageSize) + 1} to {Math.min(totalCount, (page + 1) * pageSize)} of {totalCount} orders
-                    </span>
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={page === 0}
-                            onClick={() => onPageChange(page - 1)}
-                            className="h-8 px-3 text-xs"
-                        >
-                            Previous
-                        </Button>
-                        <span className="text-xs font-semibold">
-                            Page {page + 1} of {totalPages}
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                        <span>
+                            Showing <span className="font-semibold text-foreground">{(page * pageSize) + 1}</span> to{" "}
+                            <span className="font-semibold text-foreground">{Math.min(totalCount, (page + 1) * pageSize)}</span> of{" "}
+                            <span className="font-semibold text-foreground">{totalCount}</span> orders
                         </span>
+                        {isLoading && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-primary animate-pulse ml-2 font-medium">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Updating page...
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            disabled={page === 0 || isLoading}
+                            onClick={() => onPageChange(0)}
+                            className="h-8 w-8 text-xs"
+                            title="First Page"
+                        >
+                            <ChevronsLeft className="w-3.5 h-3.5" />
+                        </Button>
                         <Button
                             variant="outline"
                             size="sm"
-                            disabled={page >= totalPages - 1}
-                            onClick={() => onPageChange(page + 1)}
-                            className="h-8 px-3 text-xs"
+                            disabled={page === 0 || isLoading}
+                            onClick={() => onPageChange(page - 1)}
+                            className="h-8 px-2.5 text-xs flex items-center gap-1"
+                            title="Previous Page"
                         >
-                            Next
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Prev</span>
+                        </Button>
+
+                        <div className="flex items-center gap-1 mx-1">
+                            {getVisiblePages(page, totalPages).map((p, pIdx) => {
+                                if (p === "ellipsis") {
+                                    return (
+                                        <span key={`ellipsis-${pIdx}`} className="px-1 text-muted-foreground select-none">
+                                            ...
+                                        </span>
+                                    );
+                                }
+                                const isCurrent = p === page;
+                                return (
+                                    <Button
+                                        key={`page-btn-${p}`}
+                                        variant={isCurrent ? "default" : "outline"}
+                                        size="icon"
+                                        disabled={isLoading}
+                                        onClick={() => onPageChange(p)}
+                                        className={`h-8 w-8 text-xs transition-all ${
+                                            isCurrent
+                                                ? "font-bold shadow-sm"
+                                                : "text-muted-foreground hover:text-foreground"
+                                        }`}
+                                    >
+                                        {p + 1}
+                                    </Button>
+                                );
+                            })}
+                        </div>
+
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={page >= totalPages - 1 || isLoading}
+                            onClick={() => onPageChange(page + 1)}
+                            className="h-8 px-2.5 text-xs flex items-center gap-1"
+                            title="Next Page"
+                        >
+                            <span className="hidden sm:inline">Next</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            disabled={page >= totalPages - 1 || isLoading}
+                            onClick={() => onPageChange(totalPages - 1)}
+                            className="h-8 w-8 text-xs"
+                            title="Last Page"
+                        >
+                            <ChevronsRight className="w-3.5 h-3.5" />
                         </Button>
                     </div>
                 </div>

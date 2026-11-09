@@ -58,7 +58,7 @@ export function useWorkInProgress() {
             }
             setError(null);
 
-            const response = await fetchWipData(filters);
+            const response = await fetchWipData({ branchId: filters.branchId });
             setRawItems(response.items || []);
             setMetrics(response.metrics || initialMetrics);
             setJobOrderOptions(response.jobOrderOptions || []);
@@ -75,7 +75,7 @@ export function useWorkInProgress() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [filters]);
+    }, [filters.branchId]);
 
     useEffect(() => {
         loadData(false);

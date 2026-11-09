@@ -47,6 +47,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { TransferStatusBadge } from "./components/TransferStatusBadge";
@@ -270,26 +271,7 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
   // Printable slip modal state
   const [printTransfer, setPrintTransfer] = useState<LotTransfer | null>(null);
   const [printModalOpen, setPrintModalOpen] = useState(false);
-  const [printLoadingId, setPrintLoadingId] = useState<number | null>(null);
-
-  const handleOpenPrint = useCallback(async (item: LotTransfer) => {
-    if (item.details && item.details.length > 0) {
-      setPrintTransfer(item);
-      setPrintModalOpen(true);
-      return;
-    }
-    setPrintLoadingId(item.id);
-    try {
-      const full = await lotTransferService.getTransferById(item.id);
-      setPrintTransfer(full || item);
-      setPrintModalOpen(true);
-    } catch {
-      setPrintTransfer(item);
-      setPrintModalOpen(true);
-    } finally {
-      setPrintLoadingId(null);
-    }
-  }, []);
+  
 
   const loadTransfers = useCallback(async () => {
     setLoading(true);
@@ -750,23 +732,6 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleOpenPrint(item)}
-                              disabled={printLoadingId === item.id}
-                              className="h-8 text-xs gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-                              title="Print lot transfer slip"
-                            >
-                              {printLoadingId === item.id ? (
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <Printer className="w-3.5 h-3.5" />
-                              )}
-                              <span className="hidden sm:inline">Print</span>
-                            </Button>
-                          </motion.div>
-                          <motion.div whileTap={{ scale: 0.95 }} className="inline-block">
-                            <Button
-                              variant="ghost"
-                              size="sm"
                               onClick={() => handleOpenDetail(item)}
                               disabled={auditLoadingId === item.id}
                               className="h-8 text-xs gap-1.5"
@@ -931,6 +896,53 @@ export const LotTransferSummaryModule: React.FC<LotTransferSummaryModuleProps> =
                   </span>
                 </div>
               </div>
+
+              {/* Transfer Reason */}
+              <div className="p-3.5 border rounded-xl bg-card text-xs space-y-1">
+                <span className="text-muted-foreground font-semibold uppercase tracking-wider block">
+                  Transfer Reason / Justification
+                </span>
+                <p className="text-sm text-foreground break-words font-medium">
+                  {selectedTransfer.reason?.trim() || "-"}
+                </p>
+              </div>
+
+              {/* Rejection / Cancellation / Reversal Reason Alerts (if applicable) */}
+              {selectedTransfer.rejectionReason && (
+                <div className="p-3 border border-destructive/30 rounded-xl bg-destructive/10 text-destructive text-xs space-y-1">
+                  <div className="font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Rejection Reason
+                  </div>
+                  <p className="text-sm break-words">
+                    {selectedTransfer.rejectionReason}
+                  </p>
+                </div>
+              )}
+
+              {selectedTransfer.cancellationReason && (
+                <div className="p-3 border border-amber-500/30 rounded-xl bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs space-y-1">
+                  <div className="font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Cancellation Reason
+                  </div>
+                  <p className="text-sm break-words">
+                    {selectedTransfer.cancellationReason}
+                  </p>
+                </div>
+              )}
+
+              {selectedTransfer.reversalReason && (
+                <div className="p-3 border border-blue-500/30 rounded-xl bg-blue-500/10 text-blue-900 dark:text-blue-200 text-xs space-y-1">
+                  <div className="font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                    <History className="w-3.5 h-3.5" />
+                    Reversal Reason
+                  </div>
+                  <p className="text-sm break-words">
+                    {selectedTransfer.reversalReason}
+                  </p>
+                </div>
+              )}
 
               {/* Line items table */}
               <div className="border rounded-xl bg-card overflow-hidden">

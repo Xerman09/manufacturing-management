@@ -23,7 +23,8 @@ import BOMCostingSensitivityTab from "./components/BOMCostingSensitivityTab";
 import {
     ProductOption,
     VersionOption,
-    BOMCostingReportData
+    BOMCostingReportData,
+    ForexOption
 } from "./types";
 
 type ViewTab = "table" | "analytics" | "sensitivity";
@@ -34,6 +35,19 @@ export default function BOMCostingReportModule() {
     const [versions, setVersions] = useState<VersionOption[]>([]);
     const [selectedVersion, setSelectedVersion] = useState<VersionOption | null>(null);
     const [targetQuantity, setTargetQuantity] = useState<number>(1);
+    const [currencies, setCurrencies] = useState<ForexOption[]>([
+        { forex_id: 0, currency_code: "PHP", currency_name: "Philippine Peso", symbol: "₱", exchange_rate: 1.0, is_active: true }
+    ]);
+    const [selectedCurrency, setSelectedCurrency] = useState<ForexOption>({
+        forex_id: 0,
+        currency_code: "PHP",
+        currency_name: "Philippine Peso",
+        symbol: "₱",
+        exchange_rate: 1.0,
+        is_active: true
+    });
+    // Applied currency locked upon clicking 'Generate Costing Report'
+    const [appliedCurrency, setAppliedCurrency] = useState<ForexOption | null>(null);
     const [reportData, setReportData] = useState<BOMCostingReportData | null>(null);
     const [activeTab, setActiveTab] = useState<ViewTab>("table");
 
@@ -42,7 +56,22 @@ export default function BOMCostingReportModule() {
     const [isGenerating, setIsGenerating] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-    // 1. Fetch products catalog on initial mount
+    // 1. Fetch active Forex currencies on initial mount
+    const fetchCurrencies = useCallback(async () => {
+        try {
+            const res = await fetch("/api/bia/costing/bom-costing-report?action=currencies");
+            const data = await res.json();
+            if (res.ok && data.ok && Array.isArray(data.currencies) && data.currencies.length > 0) {
+                setCurrencies(data.currencies);
+                const php = data.currencies.find((c: ForexOption) => c.currency_code === "PHP") || data.currencies[0];
+                setSelectedCurrency(php);
+            }
+        } catch {
+            // Silently keep default base PHP if currencies request fails
+        }
+    }, []);
+
+    // 2. Fetch products catalog on initial mount
     const fetchProducts = useCallback(async () => {
         try {
             setIsLoadingProducts(true);
@@ -67,13 +96,13 @@ export default function BOMCostingReportModule() {
 
     useEffect(() => {
         fetchProducts();
-    }, [fetchProducts]);
+        fetchCurrencies();
+    }, [fetchProducts, fetchCurrencies]);
 
     // 2. Fetch versions when a product is selected
     const handleSelectProduct = async (prod: ProductOption) => {
         setSelectedProduct(prod);
         setSelectedVersion(null);
-        setReportData(null);
         setErrorMessage(null);
 
         try {
@@ -93,7 +122,8 @@ export default function BOMCostingReportModule() {
             if (verList.length > 0) {
                 const primary = verList.find(v => v.is_primary) || verList.find(v => v.status.toLowerCase() === "active") || verList[0];
                 setSelectedVersion(primary);
-                setTargetQuantity(primary.base_quantity || 1);
+                const baseQty = Number(primary.base_quantity) > 0 ? Number(primary.base_quantity) : 1;
+                setTargetQuantity(baseQty);
             } else {
                 toast.warning(`Product "${prod.product_name}" does not have any manufacturing versions created yet.`);
             }
@@ -109,8 +139,8 @@ export default function BOMCostingReportModule() {
     // 3. Select specific version
     const handleSelectVersion = (ver: VersionOption) => {
         setSelectedVersion(ver);
-        setTargetQuantity(ver.base_quantity || 1);
-        setReportData(null);
+        const baseQty = Number(ver.base_quantity) > 0 ? Number(ver.base_quantity) : 1;
+        setTargetQuantity(baseQty);
     };
 
     // 4. Generate BOM Standard Costing Report
@@ -136,6 +166,7 @@ export default function BOMCostingReportModule() {
             }
 
             setReportData(resJson.data);
+            setAppliedCurrency(selectedCurrency);
             toast.success(`Standard Costing generated for ${resJson.data.targetProduct.product_name} (${resJson.data.summary.totalComponentsCount} components decomposed).`);
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Error generating report";
@@ -153,7 +184,10 @@ export default function BOMCostingReportModule() {
         setVersions([]);
         setTargetQuantity(1);
         setReportData(null);
+        setAppliedCurrency(null);
         setErrorMessage(null);
+        const php = currencies.find(c => c.currency_code === "PHP") || currencies[0];
+        if (php) setSelectedCurrency(php);
         toast.info("Report parameters cleared.");
     };
 
@@ -176,8 +210,7 @@ export default function BOMCostingReportModule() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                    <BOMCostingExport data={reportData} />
-         
+                    <BOMCostingExport data={reportData} selectedCurrency={appliedCurrency || selectedCurrency} />
                 </div>
             </div>
 
@@ -189,6 +222,9 @@ export default function BOMCostingReportModule() {
                 versions={versions}
                 selectedVersion={selectedVersion}
                 onSelectVersion={handleSelectVersion}
+                currencies={currencies}
+                selectedCurrency={selectedCurrency}
+                onSelectCurrency={setSelectedCurrency}
                 targetQuantity={targetQuantity}
                 onChangeTargetQuantity={setTargetQuantity}
                 onGenerate={handleGenerate}
@@ -261,7 +297,7 @@ export default function BOMCostingReportModule() {
                         className="space-y-4"
                     >
                         {/* 5 Summary Metric Cards */}
-                        <BOMCostingSummaryCards data={reportData} />
+                        <BOMCostingSummaryCards data={reportData} selectedCurrency={appliedCurrency || selectedCurrency} />
 
                         {/* Sub-navigation tabs: Standard Cost Tree Table | Share & Cost Analytics | Commodity Sensitivity */}
                         <div className="flex items-center gap-2 border-b pb-2">
@@ -305,15 +341,15 @@ export default function BOMCostingReportModule() {
 
                         {/* Tab Content */}
                         {activeTab === "table" && (
-                            <BOMCostingTreeTable data={reportData} />
+                            <BOMCostingTreeTable data={reportData} selectedCurrency={appliedCurrency || selectedCurrency} />
                         )}
 
                         {activeTab === "analytics" && (
-                            <BOMCostingAnalyticsTab data={reportData} />
+                            <BOMCostingAnalyticsTab data={reportData} selectedCurrency={appliedCurrency || selectedCurrency} />
                         )}
 
                         {activeTab === "sensitivity" && (
-                            <BOMCostingSensitivityTab data={reportData} />
+                            <BOMCostingSensitivityTab data={reportData} selectedCurrency={appliedCurrency || selectedCurrency} />
                         )}
                     </motion.div>
                 ) : (

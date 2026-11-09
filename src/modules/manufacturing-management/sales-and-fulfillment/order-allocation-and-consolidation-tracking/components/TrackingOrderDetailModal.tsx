@@ -45,7 +45,6 @@ export const TrackingOrderDetailModal: React.FC<TrackingOrderDetailModalProps> =
         order.exceptions.has_excess_consolidation ||
         order.exceptions.has_missing_reservations ||
         order.exceptions.has_zero_quantity ||
-        order.exceptions.is_mixed_uom ||
         Boolean(order.exceptions.has_substituted_lot) ||
         Boolean(order.exceptions.has_added_lot);
 
@@ -188,11 +187,6 @@ export const TrackingOrderDetailModal: React.FC<TrackingOrderDetailModalProps> =
                                 {order.exceptions.has_excess_consolidation && (
                                     <Badge variant="outline" className="text-[10px] bg-purple-100 text-purple-900 border-purple-300" title="Consolidated quantity exceeds ordered quantity">
                                         Excess Over-Consolidation
-                                    </Badge>
-                                )}
-                                {order.exceptions.is_mixed_uom && (
-                                    <Badge variant="outline" className="text-[10px] bg-blue-100 text-blue-900 border-blue-300" title="Order contains items with multiple units of measure">
-                                        Mixed UOM
                                     </Badge>
                                 )}
                             </div>

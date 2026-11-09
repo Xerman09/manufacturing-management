@@ -3,6 +3,15 @@ export type InventoryRule = "FEFO" | "FIFO" | "N/A" | "-";
 export type HierarchyRollupMode = "multi-level" | "flattened";
 export type ComponentCategoryFilter = "all" | "raw_material" | "packaging" | "labor" | "overhead";
 
+export interface ForexOption {
+    forex_id: number;
+    currency_code: string;
+    currency_name: string;
+    symbol: string;
+    exchange_rate: number;
+    is_active: boolean;
+}
+
 export interface ProductOption {
     product_id: number;
     product_name: string;

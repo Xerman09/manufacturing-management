@@ -27,6 +27,9 @@ export default function OrderAllocationConsolidationTrackingModule() {
         pageSize,
         totalPages,
         totalCount,
+        sortBy,
+        sortOrder,
+        handleSort,
         isLoading,
         isRefreshing,
         loadOrders,
@@ -75,6 +78,9 @@ export default function OrderAllocationConsolidationTrackingModule() {
                 totalPages={totalPages}
                 totalCount={totalCount}
                 onPageChange={setPage}
+                sortBy={sortBy}
+                sortOrder={sortOrder}
+                onSort={handleSort}
             />
 
             {/* Order Detail Modal with Line Grid & Expandable Audits */}

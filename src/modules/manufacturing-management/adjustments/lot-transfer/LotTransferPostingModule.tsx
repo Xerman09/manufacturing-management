@@ -31,7 +31,6 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Building2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { TransferStatusBadge } from "./components/TransferStatusBadge";
@@ -52,7 +51,7 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
   transferId,
 }) => {
   const [activeBranches, setActiveBranches] = useState<BranchOption[]>([]);
-  const [filterBranchId, setFilterBranchId] = useState<number | "all" | null>(null);
+  const [filterBranchId, setFilterBranchId] = useState<number | "all">("all");
   const [transfers, setTransfers] = useState<LotTransfer[]>([]);
   const [loading, setLoading] = useState(false);
   const [postingLoadingId, setPostingLoadingId] = useState<number | null>(null);
@@ -271,11 +270,6 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
   const [cancellationReason, setCancellationReason] = useState("");
 
   const loadTransfers = useCallback(async () => {
-    if (filterBranchId === null) {
-      setTransfers([]);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     try {
       const filter: Parameters<typeof lotTransferService.listTransfers>[0] = {
@@ -393,7 +387,7 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
     }
   };
 
-  
+
   return (
     <div className="flex-1 flex flex-col p-4 space-y-4 max-w-7xl mx-auto w-full">
       {/* Header */}
@@ -414,7 +408,7 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
               variant="outline"
               size="icon"
               onClick={loadTransfers}
-              disabled={loading || filterBranchId === null}
+              disabled={loading}
               className="h-9 w-9"
               title="Refresh posting queue"
             >
@@ -431,20 +425,19 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
           <div className="w-56 shrink-0">
             <SearchableSelect
               options={branchOptions}
-              value={filterBranchId !== null ? filterBranchId : ""}
+              value={filterBranchId}
               onChange={(val) => {
-                if (val === "all") {
+                if (val === "all" || val === 0 || val === "0") {
                   setFilterBranchId("all");
                 } else {
                   const num = Number(val);
-                  setFilterBranchId(Number.isNaN(num) || num <= 0 ? null : num);
+                  setFilterBranchId(Number.isNaN(num) || num <= 0 ? "all" : num);
                 }
               }}
-              placeholder="Select branch..."
+              placeholder="Select a branch..."
               triggerClassName="h-9"
             />
           </div>
-
           {/* Source Lot Filter */}
           <div className="w-48 shrink-0">
             <SearchableSelect
@@ -459,7 +452,6 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
                 }
               }}
               placeholder="All Source Lots"
-              disabled={filterBranchId === null}
               triggerClassName="h-9"
             />
           </div>
@@ -478,7 +470,6 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
                 }
               }}
               placeholder="All Target Lots"
-              disabled={filterBranchId === null}
               triggerClassName="h-9"
             />
           </div>
@@ -488,7 +479,6 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
             <select
               value={datePreset}
               onChange={(e) => setDatePreset(e.target.value as typeof datePreset)}
-              disabled={filterBranchId === null}
               className="w-full h-9 px-3 border rounded-md text-xs bg-background font-medium focus:ring-1 focus:ring-primary focus:outline-none"
               title="Filter by Transfer Date"
             >
@@ -506,8 +496,7 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              disabled={filterBranchId === null}
-              placeholder={filterBranchId === null ? "Select a branch first to search..." : "Search request #, batch, reason..."}
+              placeholder="Search request #, batch, reason..."
               className="pl-9 h-9 text-xs"
             />
           </div>
@@ -585,29 +574,7 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filterBranchId === null ? (
-              <TableRow>
-                <TableCell colSpan={7} className="h-72 text-center">
-                  <motion.div
-                    initial={{ opacity: 0, y: 16, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ duration: 0.28, ease: "easeOut" }}
-                    className="flex flex-col items-center justify-center max-w-md mx-auto text-center p-6 space-y-3.5"
-                  >
-                    <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-sm ring-8 ring-primary/5">
-                      <Building2 className="w-7 h-7 text-primary" />
-                    </div>
-                    <div className="space-y-1">
-                      <h3 className="text-base font-bold text-foreground">Select an Operating Branch</h3>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Please select an active branch from the dropdown above to view submitted lot transfer requests ready for inventory posting.
-                      </p>
-                    </div>
- 
-                  </motion.div>
-                </TableCell>
-              </TableRow>
-            ) : loading && (transfers || []).length === 0 ? (
+            {loading && (transfers || []).length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="h-36 text-center text-muted-foreground" title="Loading posting queue...">
                   <motion.div
@@ -634,7 +601,11 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
                     </div>
                     <span className="font-semibold text-foreground text-sm">No submitted transfers awaiting posting</span>
                     <span className="text-xs text-muted-foreground max-w-sm">
-                      {hasActiveFilters ? "No requests match your selected filter criteria for this branch." : "All submitted lot transfer requests for this branch have been posted or none are currently awaiting execution."}
+                      {hasActiveFilters
+                        ? "No requests match your selected filter criteria."
+                        : filterBranchId === "all"
+                          ? "All submitted lot transfer requests across active branches have been posted or none are currently awaiting execution."
+                          : "All submitted lot transfer requests for this branch have been posted or none are currently awaiting execution."}
                     </span>
                   </motion.div>
                 </TableCell>
@@ -649,8 +620,8 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
                   const requestedByDisplay = (item.requestedByName && item.requestedByName !== "-")
                     ? item.requestedByName
                     : (item.submittedByName && item.submittedByName !== "-")
-                    ? item.submittedByName
-                    : "-";
+                      ? item.submittedByName
+                      : "-";
 
                   return (
                     <motion.tr
@@ -758,7 +729,7 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
                   <div className="text-xs text-muted-foreground">Transfer Date</div>
                   <div className="font-semibold mt-0.5 font-mono">{selectedTransfer.transferDate}</div>
                 </div>
- 
+
                 <div>
                   <div className="text-xs text-muted-foreground">Requested / Submitted By</div>
                   <div className="font-semibold mt-0.5 truncate">
@@ -767,7 +738,7 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
                       : (selectedTransfer.submittedByName || "-")}
                   </div>
                 </div>
- 
+
               </div>
 
               {/* Line items verification */}
@@ -840,7 +811,7 @@ export const LotTransferPostingModule: React.FC<LotTransferPostingModuleProps> =
                 </Table>
               </div>
 
-             
+
             </div>
 
             <DialogFooter className="pt-3 border-t flex items-center justify-between">

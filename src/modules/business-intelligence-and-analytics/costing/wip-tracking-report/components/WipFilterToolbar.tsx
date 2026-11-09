@@ -58,11 +58,12 @@ export function WipFilterToolbar({
 
     const statusOptions = [
         { label: "Active WIP (Default)", value: "ALL_ACTIVE" },
-        { label: "In Production", value: JOB_ORDER_STATUS.IN_PRODUCTION },
-        { label: "Picked (Ready)", value: JOB_ORDER_STATUS.PICKED },
-        { label: "On Hold", value: JOB_ORDER_STATUS.ON_HOLD },
-        { label: "For QA / Reconciliation", value: JOB_ORDER_STATUS.FOR_QA_RECONCILIATION },
         { label: "Draft", value: JOB_ORDER_STATUS.DRAFT },
+        { label: "For Picking", value: JOB_ORDER_STATUS.FOR_PICKING },
+        { label: "Picked (Ready)", value: JOB_ORDER_STATUS.PICKED },
+        { label: "In Production", value: JOB_ORDER_STATUS.IN_PRODUCTION },
+        { label: "On Hold", value: JOB_ORDER_STATUS.ON_HOLD },
+        { label: "For QA & Reconciliation", value: JOB_ORDER_STATUS.FOR_QA_RECONCILIATION },
         { label: "Closed", value: JOB_ORDER_STATUS.CLOSED },
         { label: "All Statuses", value: "ALL" }
     ];

@@ -6,15 +6,18 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
-import { BOMCostNode, BOMCostingReportData } from "../types";
+import { BOMCostNode, BOMCostingReportData, ForexOption } from "../types";
 import { formatUomQuantity, formatStandardCurrency } from "./BOMCostingTreeTable";
 
 interface BOMCostingExportProps {
     data: BOMCostingReportData | null;
+    selectedCurrency?: ForexOption | null;
 }
 
-export default function BOMCostingExport({ data }: BOMCostingExportProps) {
+export default function BOMCostingExport({ data, selectedCurrency }: BOMCostingExportProps) {
     if (!data) return null;
+
+    const currCode = selectedCurrency?.currency_code || "PHP";
 
     const flattenTree = (tree: BOMCostNode[]): BOMCostNode[] => {
         const flatNodes: BOMCostNode[] = [];
@@ -40,9 +43,9 @@ export default function BOMCostingExport({ data }: BOMCostingExportProps) {
         "Base Qty",
         "Req. Qty",
         "Scrap",
-        "Unit Cost (PHP)",
+        `Unit Cost (${currCode})`,
         "Gross (Eff.) Qty",
-        "Ext. Total Cost (PHP)",
+        `Ext. Total Cost (${currCode})`,
         "Share %",
     ];
 
@@ -75,9 +78,9 @@ export default function BOMCostingExport({ data }: BOMCostingExportProps) {
                     formatUomQuantity(n.baseRequiredQty, n.uomName),
                     formatUomQuantity(n.scaledRequiredQty, n.uomName),
                     scrapDisplay,
-                    formatStandardCurrency(n.unitCost, 4),
+                    formatStandardCurrency(n.unitCost, 4, selectedCurrency),
                     formatUomQuantity(n.effectiveQty, n.uomName),
-                    formatStandardCurrency(n.totalLineCost, 4),
+                    formatStandardCurrency(n.totalLineCost, 4, selectedCurrency),
                     `${share}%`,
                 ];
             });
@@ -100,11 +103,12 @@ export default function BOMCostingExport({ data }: BOMCostingExportProps) {
                 [`BOM Standard Costing Report: ${targetProduct.product_name}`],
                 [`Revision: ${targetProduct.version_name}`],
                 [`Batch Size: ${formatUomQuantity(targetProduct.target_quantity, targetProduct.uom_name)} ${targetProduct.uom_name} (Base: ${formatUomQuantity(targetProduct.base_quantity, targetProduct.uom_name)} ${targetProduct.uom_name})`],
-                [`Total Batch Standard Cost: PHP ${formatStandardCurrency(effectiveTotal, 4)}`],
-                [`Per Piece Unit Cost: PHP ${formatStandardCurrency(summary.costPerUnit, 4)} / ${targetProduct.uom_name}`],
-                [`Direct Materials: PHP ${formatStandardCurrency(summary.totalMaterialCost, 4)} (${summary.materialsSharePct.toFixed(4)}%)`],
-                [`Process Direct Labor: PHP ${formatStandardCurrency(summary.directLaborCost, 4)} (${summary.laborSharePct.toFixed(4)}%)`],
-                [`Mfg Overhead: PHP ${formatStandardCurrency(summary.mfgOverheadCost, 4)} (${summary.overheadSharePct.toFixed(4)}%)`],
+                [`Currency Base: ${currCode} (Exchange Rate: ${selectedCurrency?.exchange_rate || 1.0})`],
+                [`Total Batch Standard Cost: ${formatStandardCurrency(effectiveTotal, 4, selectedCurrency)}`],
+                [`Per Piece Unit Cost: ${formatStandardCurrency(summary.costPerUnit, 4, selectedCurrency)} / ${targetProduct.uom_name}`],
+                [`Direct Materials: ${formatStandardCurrency(summary.totalMaterialCost, 4, selectedCurrency)} (${summary.materialsSharePct.toFixed(4)}%)`],
+                [`Process Direct Labor: ${formatStandardCurrency(summary.directLaborCost, 4, selectedCurrency)} (${summary.laborSharePct.toFixed(4)}%)`],
+                [`Mfg Overhead: ${formatStandardCurrency(summary.mfgOverheadCost, 4, selectedCurrency)} (${summary.overheadSharePct.toFixed(4)}%)`],
                 [`Generated At: ${new Date().toLocaleString()}`],
                 [], // blank row before table header
             ];

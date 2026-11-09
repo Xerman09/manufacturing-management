@@ -40,22 +40,46 @@ export function WipTableView({
     // Status Badge Styler
     const renderStatusBadge = (status: string) => {
         switch (status) {
+            case JOB_ORDER_STATUS.DRAFT:
+                return (
+                    <Badge className="bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30 hover:bg-slate-500/20 font-semibold px-2 py-0.5 text-[11px]">
+                        Draft
+                    </Badge>
+                );
+            case JOB_ORDER_STATUS.FOR_PICKING:
+                return (
+                    <Badge className="bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/20 font-semibold px-2 py-0.5 text-[11px]">
+                        For Picking
+                    </Badge>
+                );
+            case JOB_ORDER_STATUS.PICKED:
+                return (
+                    <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20 font-semibold px-2 py-0.5 text-[11px]">
+                        Picked (Ready)
+                    </Badge>
+                );
             case JOB_ORDER_STATUS.IN_PRODUCTION:
                 return (
                     <Badge className="bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30 hover:bg-blue-500/20 font-semibold px-2 py-0.5 text-[11px]">
                         In Production
                     </Badge>
                 );
-            case JOB_ORDER_STATUS.PICKED:
-                return (
-                    <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20 font-semibold px-2 py-0.5 text-[11px]">
-                        Staged (Ready)
-                    </Badge>
-                );
             case JOB_ORDER_STATUS.ON_HOLD:
                 return (
                     <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/20 font-semibold px-2 py-0.5 text-[11px]">
                         On Hold
+                    </Badge>
+                );
+            case JOB_ORDER_STATUS.QA_HOLD:
+                return (
+                    <Badge className="bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30 hover:bg-rose-500/20 font-semibold px-2 py-0.5 text-[11px]">
+                        QA Hold
+                    </Badge>
+                );
+            case JOB_ORDER_STATUS.PRODUCTION_COMPLETED:
+                return (
+                    <Badge className="bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/20 font-semibold px-2 py-0.5 text-[11px]">
+                        Production Completed
                     </Badge>
                 );
             case JOB_ORDER_STATUS.FOR_QA_RECONCILIATION:
@@ -68,6 +92,12 @@ export function WipTableView({
                 return (
                     <Badge className="bg-muted text-muted-foreground border-border font-semibold px-2 py-0.5 text-[11px]">
                         Closed
+                    </Badge>
+                );
+            case JOB_ORDER_STATUS.CANCELLED:
+                return (
+                    <Badge variant="destructive" className="font-semibold px-2 py-0.5 text-[11px]">
+                        Cancelled
                     </Badge>
                 );
             default:

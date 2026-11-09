@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import type { WipMaterialItem, WipMaterialStatus } from "../types";
+import type { WipMaterialItem } from "../types";
 import { formatQty } from "../utils/wip-calculations";
 
 interface WipTableProps {
@@ -32,7 +32,75 @@ type SortField =
     | "consumedQuantity"
     | "returnedQuantity"
     | "remainingWipQuantity"
-    | "status";
+    | "jobOrderStatus";
+
+function getStatusBadge(status?: string, hasDiscrepancy?: boolean) {
+    const s = (status || "").trim().toLowerCase();
+
+    let badgeClass = "bg-muted text-muted-foreground border-border";
+    let icon = <Clock className="h-3 w-3" />;
+    let label = status || "-";
+
+    if (s === "draft") {
+        badgeClass = "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700";
+        icon = <Clock className="h-3 w-3" />;
+        label = "Draft";
+    } else if (s === "for picking" || s === "released" || s === "proceed") {
+        badgeClass = "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-300 dark:border-cyan-800";
+        icon = <Layers className="h-3 w-3" />;
+        label = "For Picking";
+    } else if (s === "picked" || s === "reserved") {
+        badgeClass = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800";
+        icon = <CheckCircle2 className="h-3 w-3" />;
+        label = "Picked";
+    } else if (s === "in production" || s === "ongoing" || s === "in progress") {
+        badgeClass = "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-800";
+        icon = <Factory className="h-3 w-3" />;
+        label = "In Production";
+    } else if (s === "production completed" || s === "finished") {
+        badgeClass = "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800";
+        icon = <CheckCircle2 className="h-3 w-3" />;
+        label = "Production Completed";
+    } else if (s === "for qa and reconciliation" || s === "for qa & reconciliation" || s === "qa & reconciliation") {
+        badgeClass = "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800";
+        icon = <RotateCcw className="h-3 w-3" />;
+        label = "For QA & Reconciliation";
+    } else if (s === "on hold") {
+        badgeClass = "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800";
+        icon = <AlertTriangle className="h-3 w-3" />;
+        label = "On Hold";
+    } else if (s === "qa hold") {
+        badgeClass = "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800";
+        icon = <AlertTriangle className="h-3 w-3" />;
+        label = "QA Hold";
+    } else if (s === "closed" || s === "completed") {
+        badgeClass = "bg-muted text-muted-foreground border-border";
+        icon = <CheckCircle2 className="h-3 w-3" />;
+        label = "Closed";
+    } else if (s === "cancelled") {
+        badgeClass = "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800";
+        icon = <AlertTriangle className="h-3 w-3" />;
+        label = "Cancelled";
+    }
+
+    return (
+        <div className="flex flex-col items-center gap-1">
+            <Badge
+                variant="outline"
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-semibold border ${badgeClass}`}
+            >
+                {icon}
+                <span>{label}</span>
+            </Badge>
+            {hasDiscrepancy && (
+                <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-700 dark:text-amber-300">
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    Discrepancy
+                </span>
+            )}
+        </div>
+    );
+}
 
 export default function WipTable({ items, loading = false, onViewDetail }: WipTableProps) {
     const [sortField, setSortField] = useState<SortField>("jobOrderNo");
@@ -51,17 +119,17 @@ export default function WipTable({ items, loading = false, onViewDetail }: WipTa
 
     const sortedItems = useMemo(() => {
         return [...items].sort((a, b) => {
-            let valA: string | number = a[sortField];
-            let valB: string | number = b[sortField];
+            const valA: string | number = a[sortField];
+            const valB: string | number = b[sortField];
 
             if (typeof valA === "string") {
                 const cmp = valA.localeCompare(String(valB));
                 return sortAsc ? cmp : -cmp;
             }
 
-            valA = Number(valA) || 0;
-            valB = Number(valB) || 0;
-            return sortAsc ? valA - valB : valB - valA;
+            const numA = Number(valA) || 0;
+            const numB = Number(valB) || 0;
+            return sortAsc ? numA - numB : numB - numA;
         });
     }, [items, sortField, sortAsc]);
 
@@ -72,60 +140,6 @@ export default function WipTable({ items, loading = false, onViewDetail }: WipTa
     const paginatedItems = useMemo(() => {
         return sortedItems.slice((page - 1) * pageSize, page * pageSize);
     }, [sortedItems, page, pageSize]);
-
-    const getStatusBadge = (status: WipMaterialStatus, hasDiscrepancy: boolean) => {
-        if (status === "EXCEPTION_OVER_CONSUMED" || hasDiscrepancy) {
-            return (
-                <Badge variant="destructive" className="gap-1 text-[11px] font-semibold py-0.5">
-                    <AlertTriangle className="h-3 w-3" />
-                    Over-Consumed
-                </Badge>
-            );
-        }
-        switch (status) {
-            case "RESERVED":
-                return (
-                    <Badge variant="outline" className="gap-1 text-[11px] border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10 py-0.5">
-                        <Clock className="h-3 w-3" />
-                        Reserved
-                    </Badge>
-                );
-            case "ISSUED_TO_PRODUCTION":
-                return (
-                    <Badge variant="outline" className="gap-1 text-[11px] border-indigo-500/40 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 py-0.5">
-                        <Factory className="h-3 w-3" />
-                        On Floor
-                    </Badge>
-                );
-            case "PARTIALLY_CONSUMED":
-                return (
-                    <Badge variant="outline" className="gap-1 text-[11px] border-blue-500/40 text-blue-600 dark:text-blue-400 bg-blue-500/10 py-0.5">
-                        <Layers className="h-3 w-3" />
-                        In Progress
-                    </Badge>
-                );
-            case "CONSUMED":
-                return (
-                    <Badge variant="outline" className="gap-1 text-[11px] border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 py-0.5">
-                        <CheckCircle2 className="h-3 w-3" />
-                        Consumed
-                    </Badge>
-                );
-            case "RETURNED":
-                return (
-                    <Badge variant="outline" className="gap-1 text-[11px] border-slate-500/40 text-slate-600 dark:text-slate-400 bg-slate-500/10 py-0.5">
-                        <RotateCcw className="h-3 w-3" />
-                        Returned
-                    </Badge>
-                );
-            default:
-                return (
-                    <Badge variant="secondary" className="text-[11px] py-0.5">
-                        -
-                    </Badge>
-                );
-        }
-    };
 
     if (loading) {
         return (
@@ -215,7 +229,7 @@ export default function WipTable({ items, loading = false, onViewDetail }: WipTa
                                     <ArrowUpDown className="h-3 w-3" />
                                 </div>
                             </th>
-                            <th className="py-3 px-3 text-center cursor-pointer hover:text-foreground" onClick={() => handleSort("status")}>
+                            <th className="py-3 px-3 text-center cursor-pointer hover:text-foreground" onClick={() => handleSort("jobOrderStatus")}>
                                 <div className="flex items-center justify-center gap-1">
                                     <span>Status</span>
                                     <ArrowUpDown className="h-3 w-3" />
@@ -240,100 +254,96 @@ export default function WipTable({ items, loading = false, onViewDetail }: WipTa
                                         isNegative ? "bg-rose-500/5 dark:bg-rose-950/20" : ""
                                     }`}
                                 >
-                                        {/* Job Order */}
-                                        <td className="py-2.5 px-3">
-                                            <div className="font-semibold text-foreground">{item.jobOrderNo || "-"}</div>
-                                            <div className="text-[11px] text-muted-foreground truncate max-w-[180px]" title={item.targetProductDescription || item.targetProductName}>
-                                                {item.targetProductDescription || item.targetProductName || "-"}
+                                    {/* Job Order */}
+                                    <td className="py-2.5 px-3">
+                                        <div className="font-semibold text-foreground">{item.jobOrderNo || "-"}</div>
+                                        <div className="text-[11px] text-muted-foreground truncate max-w-[180px]" title={item.targetProductDescription || item.targetProductName}>
+                                            {item.targetProductDescription || item.targetProductName || "-"}
+                                        </div>
+                                    </td>
+
+                                    {/* Material */}
+                                    <td className="py-2.5 px-3">
+                                        <div className="font-medium text-foreground">{item.materialName || "-"}</div>
+                                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                            <span>{item.materialCode || "-"}</span>
+                                        </div>
+                                        {item.lots.length > 0 && (
+                                            <div className="text-[10px] text-muted-foreground/80 mt-0.5">
+                                                {item.lots.length} {item.lots.length === 1 ? "batch lot" : "batch lots"}
                                             </div>
-                                            <div className="text-[10px] text-muted-foreground/80">
-                                                JO Status: <span className="font-medium">{item.jobOrderStatus || "-"}</span>
-                                            </div>
-                                        </td>
+                                        )}
+                                    </td>
 
-                                        {/* Material */}
-                                        <td className="py-2.5 px-3">
-                                            <div className="font-medium text-foreground">{item.materialName || "-"}</div>
-                                            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                                                <span>{item.materialCode || "-"}</span>
-                                                 
-                                            </div>
-                                            {item.lots.length > 0 && (
-                                                <div className="text-[10px] text-muted-foreground/80 mt-0.5">
-                                                    {item.lots.length} {item.lots.length === 1 ? "batch lot" : "batch lots"}
-                                                </div>
-                                            )}
-                                        </td>
+                                    {/* UOM */}
+                                    <td className="py-2.5 px-2 text-muted-foreground">
+                                        {item.uomShortcut || "-"}
+                                    </td>
 
-                                        {/* UOM */}
-                                        <td className="py-2.5 px-2 text-muted-foreground">
-                                            {item.uomShortcut || "-"}
-                                        </td>
+                                    {/* Branch */}
+                                    <td className="py-2.5 px-3 text-muted-foreground">
+                                        {item.branchName || "-"}
+                                    </td>
 
-                                        {/* Branch */}
-                                        <td className="py-2.5 px-3 text-muted-foreground">
-                                            {item.branchName || "-"}
-                                        </td>
+                                    {/* Reserved */}
+                                    <td className="py-2.5 px-3 text-right font-mono text-amber-600 dark:text-amber-400">
+                                        {formatQty(item.reservedQuantity)}
+                                    </td>
 
-                                        {/* Reserved */}
-                                        <td className="py-2.5 px-3 text-right font-mono text-amber-600 dark:text-amber-400">
-                                            {formatQty(item.reservedQuantity)}
-                                        </td>
+                                    {/* Issued */}
+                                    <td className="py-2.5 px-3 text-right font-mono font-medium text-indigo-600 dark:text-indigo-400">
+                                        {formatQty(item.issuedQuantity)}
+                                    </td>
 
-                                        {/* Issued */}
-                                        <td className="py-2.5 px-3 text-right font-mono font-medium text-indigo-600 dark:text-indigo-400">
-                                            {formatQty(item.issuedQuantity)}
-                                        </td>
+                                    {/* Consumed */}
+                                    <td className="py-2.5 px-3 text-right font-mono text-foreground">
+                                        {formatQty(item.consumedQuantity)}
+                                    </td>
 
-                                        {/* Consumed */}
-                                        <td className="py-2.5 px-3 text-right font-mono text-foreground">
-                                            {formatQty(item.consumedQuantity)}
-                                        </td>
+                                    {/* Returned */}
+                                    <td className="py-2.5 px-3 text-right font-mono text-muted-foreground">
+                                        {formatQty(item.returnedQuantity)}
+                                    </td>
 
-                                        {/* Returned */}
-                                        <td className="py-2.5 px-3 text-right font-mono text-muted-foreground">
-                                            {formatQty(item.returnedQuantity)}
-                                        </td>
+                                    {/* Losses */}
+                                    <td className="py-2.5 px-3 text-right font-mono text-muted-foreground">
+                                        {formatQty(item.lossQuantity)}
+                                    </td>
 
-                                        {/* Losses */}
-                                        <td className="py-2.5 px-3 text-right font-mono text-muted-foreground">
-                                            {formatQty(item.lossQuantity)}
-                                        </td>
+                                    {/* Remaining Floor WIP */}
+                                    <td className="py-2.5 px-3 text-right font-mono font-bold">
+                                        <span
+                                            className={`px-2 py-0.5 rounded ${
+                                                isNegative
+                                                    ? "bg-rose-500/20 text-rose-600 dark:text-rose-400 ring-1 ring-rose-500/30"
+                                                    : item.remainingWipQuantity > 0
+                                                    ? "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
+                                                    : "text-muted-foreground"
+                                            }`}
+                                        >
+                                            {formatQty(item.remainingWipQuantity)}
+                                        </span>
+                                    </td>
 
-                                        {/* Remaining Floor WIP */}
-                                        <td className="py-2.5 px-3 text-right font-mono font-bold">
-                                            <span
-                                                className={`px-2 py-0.5 rounded ${
-                                                    isNegative
-                                                        ? "bg-rose-500/20 text-rose-600 dark:text-rose-400 ring-1 ring-rose-500/30"
-                                                        : item.remainingWipQuantity > 0
-                                                        ? "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
-                                                        : "text-muted-foreground"
-                                                }`}
-                                            >
-                                                {formatQty(item.remainingWipQuantity)}
-                                            </span>
-                                        </td>
+                                    {/* Status */}
+                                    <td className="py-2.5 px-3 text-center">
+                                        {getStatusBadge(item.jobOrderStatus, item.hasDiscrepancy)}
+                                    </td>
 
-                                        {/* Status */}
-                                        <td className="py-2.5 px-3 text-center">
-                                            {getStatusBadge(item.status, item.hasDiscrepancy)}
-                                        </td>
-
-                                        {/* Action */}
-                                        <td className="py-2.5 px-3 text-center">
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => onViewDetail(item)}
-                                                className="h-7 text-xs gap-1 px-2.5 hover:bg-primary/10 hover:text-primary"
-                                                title="View supporting batch lots, shift logs, and movements"
-                                            >
-                                                <Eye className="h-3.5 w-3.5" />
-                                                <span>Audit</span>
-                                            </Button>
-                                        </td>
+                                    {/* Action */}
+                                    <td className="py-2.5 px-3 text-center">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => onViewDetail(item)}
+                                            className="h-7 text-xs gap-1 px-2.5 hover:bg-primary/10 hover:text-primary"
+                                            title="View supporting batch lots, shift logs, and movements"
+                                        >
+                                            <Eye className="h-3.5 w-3.5" />
+                                            <span>Audit</span>
+                                        </Button>
+                                    </td>
                                 </tr>
                             );
                         })}
