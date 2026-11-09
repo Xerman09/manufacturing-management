@@ -60,13 +60,15 @@ export default function WipFilters({
     }, [materialOptions]);
 
     const statusOptions = [
-        { value: "all", label: "All WIP Statuses" },
-        { value: "ISSUED_TO_PRODUCTION", label: "Issued to Production", badge: "On Floor" },
-        { value: "PARTIALLY_CONSUMED", label: "Partially Consumed", badge: "In Progress" },
-        { value: "RESERVED", label: "Reserved (Warehouse)", badge: "Storage" },
-        { value: "CONSUMED", label: "Consumed", badge: "Completed" },
-        { value: "RETURNED", label: "Returned", badge: "Restocked" },
-        { value: "EXCEPTION", label: "Exceptions / Negative WIP", badge: "Alert" },
+        { value: "all", label: "All Statuses" },
+        { value: "Draft", label: "Draft" },
+        { value: "For Picking", label: "For Picking" },
+        { value: "Picked", label: "Picked" },
+        { value: "In Production", label: "In Production" },
+        { value: "Production Completed", label: "Production Completed" },
+        { value: "For QA and Reconciliation", label: "For QA & Reconciliation" },
+        { value: "On Hold", label: "On Hold" },
+        { value: "Closed", label: "Closed" },
     ];
 
     const hasActiveFilters =
@@ -146,7 +148,7 @@ export default function WipFilters({
                         options={statusOptions}
                         value={filters.status}
                         onValueChange={(val) => onFilterChange("status", val)}
-                        placeholder="Filter by WIP Status..."
+                        placeholder="Filter by Status..."
                         searchPlaceholder="Type Status..."
                     />
                 </div>

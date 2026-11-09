@@ -173,6 +173,7 @@ export function filterWipItems(
     }
 ): WipMaterialItem[] {
     const q = filters.search.trim().toLowerCase();
+    const cleanQ = q.replace(/[\s\-_]+/g, "");
 
     return items.filter((item) => {
         // Job Order filter
@@ -190,13 +191,11 @@ export function filterWipItems(
             if (String(item.materialId) !== filters.materialId) return false;
         }
 
-        // Status filter
+        // Status filter (matches against Job Order status)
         if (filters.status && filters.status !== "all") {
-            if (filters.status === "EXCEPTION") {
-                if (item.status !== "EXCEPTION_OVER_CONSUMED" && !item.hasDiscrepancy) return false;
-            } else if (item.status !== filters.status) {
-                return false;
-            }
+            const filterLower = filters.status.trim().toLowerCase();
+            const itemJoStatusLower = (item.jobOrderStatus || "").trim().toLowerCase();
+            if (itemJoStatusLower !== filterLower) return false;
         }
 
         // Date range filter against Job Order start/end date
@@ -215,18 +214,27 @@ export function filterWipItems(
 
         // Free-text search
         if (q) {
-            const matchJo = item.jobOrderNo.toLowerCase().includes(q);
-            const matchTargetProduct = item.targetProductName.toLowerCase().includes(q);
-            const matchMaterial = item.materialName.toLowerCase().includes(q) || item.materialCode.toLowerCase().includes(q);
-            const matchBranch = item.branchName.toLowerCase().includes(q);
+            const joNo = (item.jobOrderNo || "").toLowerCase();
+            const cleanJoNo = joNo.replace(/[\s\-_]+/g, "");
+            const matchJo = joNo.includes(q) || (cleanQ.length > 0 && cleanJoNo.includes(cleanQ));
+            const matchTargetProduct =
+                (item.targetProductName || "").toLowerCase().includes(q) ||
+                (item.targetProductDescription || "").toLowerCase().includes(q);
+            const matchMaterial =
+                (item.materialName || "").toLowerCase().includes(q) ||
+                (item.materialCode || "").toLowerCase().includes(q);
+            const matchBranch = (item.branchName || "").toLowerCase().includes(q);
+            const matchStatus = (item.jobOrderStatus || "").toLowerCase().includes(q);
             const matchLot = item.lots.some(
-                (l) => l.batchNo.toLowerCase().includes(q) || (l.stagingBin && l.stagingBin.toLowerCase().includes(q))
+                (l) =>
+                    (l.batchNo || "").toLowerCase().includes(q) ||
+                    (l.lotNo || "").toLowerCase().includes(q) ||
+                    Boolean(l.stagingBin && l.stagingBin.toLowerCase().includes(q))
             );
-            if (!matchJo && !matchTargetProduct && !matchMaterial && !matchBranch && !matchLot) {
+            if (!matchJo && !matchTargetProduct && !matchMaterial && !matchBranch && !matchStatus && !matchLot) {
                 return false;
             }
         }
-
         return true;
     });
 }

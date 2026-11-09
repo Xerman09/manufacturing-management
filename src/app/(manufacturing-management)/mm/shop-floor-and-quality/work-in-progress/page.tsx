@@ -104,7 +104,7 @@ export default async function RawMaterialsToFinishedGoodsProjectionPage() {
                                 <BreadcrumbSeparator className="hidden sm:block shrink-0" />
                                 <BreadcrumbItem className="min-w-0 overflow-hidden">
                                     <BreadcrumbPage className="truncate max-w-[56vw] sm:max-w-[60vw] md:max-w-none">
-                                        Raw Materials to Finished Goods Projection
+                                        Work In Progress
                                     </BreadcrumbPage>
                                 </BreadcrumbItem>
                             </BreadcrumbList>
