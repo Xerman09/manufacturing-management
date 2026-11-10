@@ -151,7 +151,7 @@ export default function BOMCostingAnalyticsTab({ data, selectedCurrency }: BOMCo
                 .replace(/^(Mfg Overhead\s*-\s*|Process Direct Labor\s*-\s*|Direct Line Labor\s*-\s*|Maintenance Labor\s*-\s*|Direct Labor\s*-\s*)/i, "")
                 .trim();
             if (cleaned.length > 12) {
-                cleaned = cleaned.substring(0, 11) + "…";
+                cleaned = cleaned.substring(0, 12) + "…";
             }
             const shortName = cleaned || fullName;
 
@@ -308,8 +308,8 @@ export default function BOMCostingAnalyticsTab({ data, selectedCurrency }: BOMCo
             {/* Right Card: TOP COMPONENT COST SHARE DRIVERS (Bar Chart) */}
             <div className="rounded-xl border bg-card p-5 shadow-xs flex flex-col justify-between">
                 <div>
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                        <div className="flex items-center gap-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-4">
+                        <div className="flex items-center gap-2 shrink-0">
                             <BarChart3 className="h-4 w-4 text-sky-500" />
                             <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                                 Top Component Cost Share Drivers
@@ -317,7 +317,7 @@ export default function BOMCostingAnalyticsTab({ data, selectedCurrency }: BOMCo
                         </div>
 
                         {/* Category filter pills */}
-                        <div className="flex items-center gap-1 text-[10px]">
+                        <div className="flex flex-wrap items-center gap-1 text-[10px]">
                             {(["all", "raw_material", "packaging", "labor", "overhead"] as ComponentCategoryFilter[]).map(cat => {
                                 const isSelected = selectedDriverCategory === cat;
                                 return (
@@ -325,7 +325,7 @@ export default function BOMCostingAnalyticsTab({ data, selectedCurrency }: BOMCo
                                         key={cat}
                                         type="button"
                                         onClick={() => setSelectedDriverCategory(cat)}
-                                        className={`px-2 py-0.5 rounded-full font-medium transition-colors ${
+                                        className={`px-2 py-0.5 rounded-full font-medium transition-colors shrink-0 ${
                                             isSelected
                                                 ? "bg-primary text-primary-foreground shadow-xs"
                                                 : "bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -355,6 +355,7 @@ export default function BOMCostingAnalyticsTab({ data, selectedCurrency }: BOMCo
                                         dataKey="name"
                                         axisLine={false}
                                         tickLine={false}
+
                                         tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10, fontWeight: 500 }}
                                         dy={8}
                                     />
@@ -372,6 +373,9 @@ export default function BOMCostingAnalyticsTab({ data, selectedCurrency }: BOMCo
                                         }}
                                     />
                                     <RechartsTooltip
+                                        labelFormatter={(_label, payload) =>
+                                            payload?.[0]?.payload?.fullName || _label
+                                        }
                                         formatter={(
                                             val: TooltipValue,
                                             _name: number | string,
@@ -384,13 +388,13 @@ export default function BOMCostingAnalyticsTab({ data, selectedCurrency }: BOMCo
                                             if (selectedDriverCategory !== "all" && payload?.batchSharePct !== undefined) {
                                                 return [
                                                     `${shareVal.toFixed(4)}% of ${CATEGORY_LABELS[selectedDriverCategory]} (${payload.batchSharePct.toFixed(4)}% of Batch • ${costStr})`,
-                                                    String(payload?.fullName || "Share")
+                                                    "Cost Share"
                                                 ];
                                             }
 
                                             return [
                                                 `${shareVal.toFixed(4)}% (${costStr})`,
-                                                String(payload?.fullName || "Share")
+                                                "Cost Share"
                                             ];
                                         }}
                                         contentStyle={{
