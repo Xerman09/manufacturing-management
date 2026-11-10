@@ -239,6 +239,7 @@ export default function BOMCostingAnalyticsTab({ data, selectedCurrency }: BOMCo
                                         minAngle={6}
                                         paddingAngle={1.5}
                                         dataKey="value"
+                                        nameKey="name"
                                         animationDuration={600}
                                     >
                                         {categoryBreakdown.data.map((entry) => (
@@ -251,10 +252,24 @@ export default function BOMCostingAnalyticsTab({ data, selectedCurrency }: BOMCo
                                         ))}
                                     </Pie>
                                     <RechartsTooltip
-                                        formatter={(val: TooltipValue) => [
-                                            `${formatStandardCurrency(Number(val) || 0, 4, selectedCurrency)} (${categoryBreakdown.total > 0 ? (((Number(val) || 0) / categoryBreakdown.total) * 100).toFixed(4) : "0.0000"}%)`,
-                                            "Extended Cost"
-                                        ]}
+                                        formatter={(
+                                            val: TooltipValue,
+                                            _name: number | string,
+                                            item: { payload?: { name?: string; color?: string; sharePct?: number } }
+                                        ) => {
+                                            const categoryName = item?.payload?.name || String(_name || "Category");
+                                            const costStr = formatStandardCurrency(Number(val) || 0, 4, selectedCurrency);
+                                            const sharePctStr = item?.payload?.sharePct !== undefined
+                                                ? item.payload.sharePct.toFixed(4)
+                                                : (categoryBreakdown.total > 0
+                                                    ? (((Number(val) || 0) / categoryBreakdown.total) * 100).toFixed(4)
+                                                    : "0.0000");
+
+                                            return [
+                                                `${costStr} (${sharePctStr}%)`,
+                                                categoryName
+                                            ];
+                                        }}
                                         contentStyle={{
                                             backgroundColor: "hsl(var(--popover))",
                                             borderColor: "hsl(var(--border))",

@@ -11,7 +11,27 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Briefcase, Package, DollarSign, TrendingDown, AlertCircle, RefreshCw, BarChart2, Search } from "lucide-react";
+import {
+  Briefcase,
+  Package,
+  DollarSign,
+  TrendingDown,
+  AlertCircle,
+  RefreshCw,
+  BarChart2,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Info,
+} from "lucide-react";
+import {
+  Tooltip as UITooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import * as XLSX from "xlsx";
+import { toast } from "sonner";
 import type { JobOrderAllocationData, JobOrderAllocationRow } from "../types";
 import { pesoFmt, numFmt, fmtPesoAxis } from "./OverviewTab";
 
@@ -36,8 +56,31 @@ function SkeletonRow() {
   );
 }
 
+function FormulaTooltip({ formula, description }: { formula: string; description?: string }) {
+  return (
+    <UITooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="View calculation formula"
+          className="text-muted-foreground/40 hover:text-foreground cursor-help p-0.5 rounded transition-colors ml-auto"
+        >
+          <Info className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-xs p-2.5 max-w-xs space-y-1 bg-popover text-popover-foreground border border-border shadow-md">
+        <div className="font-semibold text-foreground text-[11px]">Formula</div>
+        <div className="font-mono text-[11px] text-primary">{formula}</div>
+        {description && <div className="text-[10px] text-muted-foreground pt-0.5">{description}</div>}
+      </TooltipContent>
+    </UITooltip>
+  );
+}
+
 export function JobOrderAllocationTab({ data, loading, error, onRefetch }: Props) {
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const kpis = data?.kpis;
   const rows = useMemo(() => data?.rows ?? [], [data?.rows]);
 
@@ -51,6 +94,14 @@ export function JobOrderAllocationTab({ data, loading, error, onRefetch }: Props
         r.machineName.toLowerCase().includes(q)
     );
   }, [rows, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedRows = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
 
   const isEmpty = !loading && !error && rows.length === 0;
 
@@ -75,6 +126,76 @@ export function JobOrderAllocationTab({ data, loading, error, onRefetch }: Props
   }, [filtered]);
 
   const dynamicChartHeight = Math.max(160, chartData.length * 48);
+
+  function handleExportExcel() {
+    try {
+      if (!filtered.length) {
+        toast.error("No job order allocation records to export.");
+        return;
+      }
+
+      const headers = [
+        "Job Order No",
+        "Finished Good",
+        "Machine",
+        "Output",
+        "UOM",
+        "Rate Per Unit (PHP)",
+        "Depreciation Attributed (PHP)",
+      ];
+
+      const tableRows = filtered.map((r) => [
+        r.jobOrderNo,
+        r.productName,
+        r.machineName,
+        r.productionOutput,
+        r.uom,
+        r.ratePerUnit,
+        r.depreciationAttributed,
+      ]);
+
+      const minWidths = [18, 28, 24, 14, 10, 20, 26];
+
+      // Auto-fit column widths with safety minimums
+      const colWidths = headers.map((header, colIdx) => {
+        let maxLen = header.length;
+        tableRows.forEach((row) => {
+          const val = row[colIdx];
+          const str = val != null ? String(val) : "";
+          if (str.length > maxLen) {
+            maxLen = str.length;
+          }
+        });
+        return { wch: Math.max(maxLen + 4, minWidths[colIdx] || 12) };
+      });
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...tableRows]);
+
+      // Apply explicit column widths
+      ws["!cols"] = colWidths;
+
+      XLSX.utils.book_append_sheet(wb, ws, "Job Order Allocations");
+
+      const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([wbout], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `job_order_depreciation_allocations_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success("Job order allocations exported to Excel successfully.");
+    } catch (err) {
+      console.error("Export Excel error:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to export Excel file.");
+    }
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -108,6 +229,10 @@ export function JobOrderAllocationTab({ data, loading, error, onRefetch }: Props
                   <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                     <Briefcase className="h-4 w-4 text-primary shrink-0" />
                     <span>Job Orders with Output</span>
+                    <FormulaTooltip
+                      formula="Count of distinct Job Orders with Output > 0"
+                      description="Discrete production orders manufactured during the period"
+                    />
                   </div>
                   <div className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums">
                     {kpis ? String(kpis.jobOrdersWithOutput) : "—"}
@@ -119,6 +244,10 @@ export function JobOrderAllocationTab({ data, loading, error, onRefetch }: Props
                   <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                     <Package className="h-4 w-4 text-sky-500 shrink-0" />
                     <span>Total Production Output</span>
+                    <FormulaTooltip
+                      formula="Sum of Job Order output units"
+                      description="Compatible finished units produced; displays Multiple UOMs if mixed"
+                    />
                   </div>
                   <div className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums truncate">
                     {kpis && kpis.totalProductionOutput !== null
@@ -134,6 +263,10 @@ export function JobOrderAllocationTab({ data, loading, error, onRefetch }: Props
                   <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                     <DollarSign className="h-4 w-4 text-emerald-500 shrink-0" />
                     <span>Depreciation Attributed</span>
+                    <FormulaTooltip
+                      formula="Sum of (Job Order Output × Machine Unit Rate)"
+                      description="Total equipment depreciation cost absorbed into Job Orders"
+                    />
                   </div>
                   <div className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums">
                     {kpis ? pesoFmt.format(kpis.depreciationAttributed) : "—"}
@@ -145,6 +278,10 @@ export function JobOrderAllocationTab({ data, loading, error, onRefetch }: Props
                   <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                     <TrendingDown className="h-4 w-4 text-amber-500 shrink-0" />
                     <span>Average Depreciation / Unit</span>
+                    <FormulaTooltip
+                      formula="Total Depreciation Attributed ÷ Total Production Output"
+                      description="Weighted average equipment burden rate per finished unit"
+                    />
                   </div>
                   <div className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums truncate">
                     {kpis?.avgRateUom ? kpis.avgRateUom : "—"}
@@ -158,23 +295,39 @@ export function JobOrderAllocationTab({ data, loading, error, onRefetch }: Props
         </div>
       )}
 
-      {/* In-tab Search */}
-      <div className="flex items-center justify-between gap-3 bg-muted/20 p-2.5 rounded-xl border border-border">
+      {/* In-tab Search & Actions */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-muted/20 p-2.5 rounded-xl border border-border">
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <input
             type="text"
             placeholder="Search job order, product, machine..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="w-full pl-8 pr-3 h-8 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
-        {search && (
-          <span className="text-xs text-muted-foreground font-mono">
-            {filtered.length} of {rows.length} rows
-          </span>
-        )}
+
+        <div className="flex items-center gap-2">
+          {search && (
+            <span className="text-xs text-muted-foreground font-mono">
+              {filtered.length} of {rows.length} rows
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={filtered.length === 0}
+            className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md border border-input bg-background hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer shadow-xs"
+          >
+            <Download className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>Export Excel</span>
+          </button>
+        </div>
       </div>
 
       {/* Table with Right-Aligned Financial Columns and Removed COGM Column */}
@@ -212,7 +365,7 @@ export function JobOrderAllocationTab({ data, loading, error, onRefetch }: Props
                     </td>
                   </tr>
                 )
-                : filtered.map((row: JobOrderAllocationRow, i: number) => (
+                : paginatedRows.map((row: JobOrderAllocationRow, i: number) => (
                   <tr key={`${row.jobOrderId}-${row.machineName}-${i}`} className="hover:bg-muted/30 transition-colors">
                     <td className="px-3 py-2.5 font-mono font-medium">{row.jobOrderNo}</td>
                     <td className="px-3 py-2.5 max-w-[200px] truncate" title={row.productName}>
@@ -260,6 +413,60 @@ export function JobOrderAllocationTab({ data, loading, error, onRefetch }: Props
           </table>
         </div>
       </div>
+
+      {/* Pagination Controls */}
+      {!loading && !error && filtered.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground pt-1">
+          <div>
+            Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length} allocation{filtered.length > 1 ? "s" : ""}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span>Rows per page:</span>
+              <select
+                aria-label="Rows per page"
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="h-7 rounded-md border border-input bg-background px-2 text-xs cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {[10, 20, 50, 100].map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                aria-label="Previous page"
+                className="p-1.5 rounded-md border border-input hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="px-2 py-1 rounded-md border border-input bg-muted/30 font-mono">
+                {currentPage} / {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                aria-label="Next page"
+                className="p-1.5 rounded-md border border-input hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Chart: Proportional Bar Size & Adaptive Height */}
       {!loading && !error && chartData.length > 0 && (

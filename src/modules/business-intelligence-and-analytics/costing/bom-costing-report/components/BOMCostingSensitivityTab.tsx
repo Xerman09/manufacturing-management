@@ -201,8 +201,8 @@ export default function BOMCostingSensitivityTab({ data, selectedCurrency }: BOM
     // };
 
     const formatBadgeVal = (val: number): string => {
-        if (val > 0) return `+${val.toFixed(1)}%`;
-        if (val < 0) return `${val.toFixed(1)}%`;
+        if (val > 0) return `+${val.toFixed(2)}%`;
+        if (val < 0) return `${val.toFixed(2)}%`;
         return `0.0%`;
     };
 
@@ -403,7 +403,7 @@ export default function BOMCostingSensitivityTab({ data, selectedCurrency }: BOM
                                             type="range"
                                             min={-50}
                                             max={100}
-                                            step={1}
+                                            step={0.01}
                                             value={shift}
                                             onChange={(e) => handleShiftChange(item.id, Number(e.target.value))}
                                             className={`w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer ${accentClass}`}
