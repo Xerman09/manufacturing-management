@@ -66,6 +66,8 @@ export interface UseMachineDepreciationOverheadReturn {
   detailsError: string | null;
   detailsPage: number;
   setDetailsPage: (page: number) => void;
+  detailsPageSize: number;
+  setDetailsPageSize: (size: number) => void;
   refetchDetails: () => void;
   // Filters
   filterOptions: FilterOptions | null;
@@ -97,6 +99,7 @@ export function useMachineDepreciationOverhead(): UseMachineDepreciationOverhead
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsPage, setDetailsPage] = useState(1);
+  const [detailsPageSize, setDetailsPageSize] = useState(10);
 
   // Filter options
   const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
@@ -204,7 +207,7 @@ export function useMachineDepreciationOverhead(): UseMachineDepreciationOverhead
       setDetailsLoading(true);
       setDetailsError(null);
     });
-    fetchDepreciationDetails(filters, detailsPage, 20, ctrl.signal)
+    fetchDepreciationDetails(filters, detailsPage, detailsPageSize, ctrl.signal)
       .then(setDetailsData)
       .catch((err) => {
         if (err?.name === "AbortError") return;
@@ -213,7 +216,7 @@ export function useMachineDepreciationOverhead(): UseMachineDepreciationOverhead
       })
       .finally(() => setDetailsLoading(false));
     return () => ctrl.abort();
-  }, [filters, detailsPage, detailsTrigger, activeTab]);
+  }, [filters, detailsPage, detailsPageSize, detailsTrigger, activeTab]);
 
   return {
     filters,
@@ -241,6 +244,8 @@ export function useMachineDepreciationOverhead(): UseMachineDepreciationOverhead
     detailsError,
     detailsPage,
     setDetailsPage,
+    detailsPageSize,
+    setDetailsPageSize,
     refetchDetails,
     filterOptions,
     filterOptionsLoading,

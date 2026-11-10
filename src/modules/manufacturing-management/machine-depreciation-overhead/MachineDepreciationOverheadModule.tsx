@@ -74,6 +74,8 @@ export default function MachineDepreciationOverheadModule() {
     detailsError,
     detailsPage,
     setDetailsPage,
+    detailsPageSize,
+    setDetailsPageSize,
     refetchDetails,
     filterOptions,
     filterOptionsLoading,
@@ -375,7 +377,9 @@ export default function MachineDepreciationOverheadModule() {
               loading={detailsLoading}
               error={detailsError}
               page={detailsPage}
+              pageSize={detailsPageSize}
               onPageChange={setDetailsPage}
+              onPageSizeChange={setDetailsPageSize}
               onRefetch={refetchDetails}
             />
           )}

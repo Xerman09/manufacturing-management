@@ -25,6 +25,11 @@ import {
   ArrowRight,
   Info,
 } from "lucide-react";
+import {
+  Tooltip as UITooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { OverviewData } from "../types";
 
 export const pesoFmt = new Intl.NumberFormat("en-PH", {
@@ -62,6 +67,27 @@ function SkeletonCard() {
       <div className="h-7 bg-muted rounded w-1/2 mt-1" />
       <div className="h-2.5 bg-muted rounded w-3/4 mt-1" />
     </div>
+  );
+}
+
+function FormulaTooltip({ formula, description }: { formula: string; description?: string }) {
+  return (
+    <UITooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="View calculation formula"
+          className="text-muted-foreground/40 hover:text-foreground cursor-help p-0.5 rounded transition-colors ml-auto"
+        >
+          <Info className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-xs p-2.5 max-w-xs space-y-1 bg-popover text-popover-foreground border border-border shadow-md">
+        <div className="font-semibold text-foreground text-[11px]">Formula</div>
+        <div className="font-mono text-[11px] text-primary">{formula}</div>
+        {description && <div className="text-[10px] text-muted-foreground pt-0.5">{description}</div>}
+      </TooltipContent>
+    </UITooltip>
   );
 }
 
@@ -111,6 +137,10 @@ export function OverviewTab({ data, loading, error, onRefetch }: Props) {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                   <TrendingDown className="h-4 w-4 text-primary shrink-0" />
                   <span>UOP Machine Depreciation</span>
+                  <FormulaTooltip
+                    formula="Units Produced × Unit Rate"
+                    description="Sum of period depreciation across active equipment"
+                  />
                 </div>
                 <div className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums">
                   {kpis ? pesoFmt.format(kpis.uopMachineDepreciation) : "—"}
@@ -125,6 +155,10 @@ export function OverviewTab({ data, loading, error, onRefetch }: Props) {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                   <Package className="h-4 w-4 text-sky-500 shrink-0" />
                   <span>UOP Production Output</span>
+                  <FormulaTooltip
+                    formula="Sum of Production Units"
+                    description="Total physical output units; displays Multiple UOMs if mixed"
+                  />
                 </div>
                 <div className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums truncate">
                   {kpis && kpis.uopProductionOutput !== null
@@ -141,6 +175,10 @@ export function OverviewTab({ data, loading, error, onRefetch }: Props) {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                   <DollarSign className="h-4 w-4 text-emerald-500 shrink-0" />
                   <span>Average Depreciation / Unit</span>
+                  <FormulaTooltip
+                    formula="Total Machine Depreciation ÷ Total Production Output"
+                    description="Weighted average equipment burden rate per unit"
+                  />
                 </div>
                 <div className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums truncate">
                   {kpis?.rateUom ?? "—"}
@@ -157,6 +195,10 @@ export function OverviewTab({ data, loading, error, onRefetch }: Props) {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                   <Cpu className="h-4 w-4 text-indigo-500 shrink-0" />
                   <span>Depreciation Attributed to Jobs</span>
+                  <FormulaTooltip
+                    formula="Sum of (Job Order Output × Machine Unit Rate)"
+                    description="Equipment overhead absorbed into Job Order production"
+                  />
                 </div>
                 <div className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums">
                   {kpis ? pesoFmt.format(kpis.attributedToJobs) : "—"}
@@ -178,6 +220,10 @@ export function OverviewTab({ data, loading, error, onRefetch }: Props) {
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <AlertCircle className="h-4 w-4 text-muted-foreground shrink-0" />
                     <span>Attribution Difference</span>
+                    <FormulaTooltip
+                      formula="UOP Machine Depr. − Job-Order Attributed"
+                      description="Reconciliation variance: ₱0.00 is fully absorbed; > ₱0.00 indicates setups, calibrations, or trials"
+                    />
                   </div>
                   {isReconciled ? (
                     <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
@@ -206,6 +252,10 @@ export function OverviewTab({ data, loading, error, onRefetch }: Props) {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                   <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
                   <span>Machines with Output</span>
+                  <FormulaTooltip
+                    formula="Count of active machines with Output > 0"
+                    description="Operating UOP production assets during the selected period"
+                  />
                 </div>
                 <div className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums">
                   {kpis ? String(kpis.machinesWithOutputCount) : "—"}
