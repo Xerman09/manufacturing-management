@@ -394,7 +394,8 @@ export async function validateSupplierMemoCaps(
         }
 
         const matchingLines = lines.filter((line) => normalizedReference(line.referenceNo) === reference);
-        const expectedSign = Number(memo.type) === 1 ? -1 : 1;
+        // type 1 = Credit Memo (+ / addition), type 2 = Debit Memo (- / subtraction)
+        const expectedSign = Number(memo.type) === 1 ? 1 : -1;
         const hasWrongDirection = matchingLines.some((line) => {
             const amount = asNumber(line.amount);
             return amount !== undefined && amount !== 0 && Math.sign(amount) !== expectedSign;
@@ -410,7 +411,7 @@ export async function validateSupplierMemoCaps(
                 lockingTrDocNo: balance.lockingTrDocNo,
                 lockingTrStatus: balance.lockingTrStatus,
                 lockingTrCount: balance.lockingTrCount,
-                message: `${reference} must be applied as a ${expectedSign < 0 ? "credit" : "debit"} amount.`,
+                message: `${reference} must be applied as a ${expectedSign < 0 ? "debit (negative)" : "credit (positive)"} amount.`,
             };
         }
 
