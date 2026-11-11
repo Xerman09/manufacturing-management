@@ -297,18 +297,31 @@ export function CashIssuanceCreateDialog({
                 setSupportingDocumentsUrl(parsedUuid);
                 setTransactionDate(editData.transactionDate ? editData.transactionDate.split('T')[0] : today);
 
-                setPayables(editData.payables.map(p => ({
-                    id: p.id,
-                    referenceNo: p.referenceNo || "",
-                    date: p.date ? p.date.split('T')[0] : today,
-                    amount: p.amount,
-                    memoOriginalAmount: Math.abs(Number(p.amount) || 0),
-                    memoSupplierId: p.isMemo || p.memoId != null ? Number(editData.payeeId) : undefined,
-                    coaId: p.coaId,
-                    divisionId: p.divisionId || undefined,
-                    remarks: p.remarks,
-                    accountTitle: p.accountTitle
-                })));
+                setPayables(editData.payables.map(p => {
+                    let adjustedAmount = p.amount;
+                    const ref = (p.referenceNo || "").trim().toUpperCase();
+                    // Backward & Forward compatibility for memo lines in existing vouchers:
+                    // SDM = Supplier Debit Memo (must be negative / subtraction)
+                    // SCM = Supplier Credit Memo (must be positive / addition)
+                    if (ref.startsWith("SDM-") || p.remarks?.toUpperCase().includes("DEBIT MEMO")) {
+                        adjustedAmount = -Math.abs(Number(p.amount) || 0);
+                    } else if (ref.startsWith("SCM-") || p.remarks?.toUpperCase().includes("CREDIT MEMO")) {
+                        adjustedAmount = Math.abs(Number(p.amount) || 0);
+                    }
+
+                    return {
+                        id: p.id,
+                        referenceNo: p.referenceNo || "",
+                        date: p.date ? p.date.split('T')[0] : today,
+                        amount: adjustedAmount,
+                        memoOriginalAmount: Math.abs(Number(p.amount) || 0),
+                        memoSupplierId: p.isMemo || p.memoId != null ? Number(editData.payeeId) : undefined,
+                        coaId: p.coaId,
+                        divisionId: p.divisionId || undefined,
+                        remarks: p.remarks,
+                        accountTitle: p.accountTitle
+                    };
+                }));
                 setPayments(editData.payments.map(p => ({
                     id: p.id,
                     coaId: p.coaId,
@@ -441,7 +454,8 @@ export function CashIssuanceCreateDialog({
 
             return {
                 ...line,
-                amount: memo.type === 1 ? -Math.abs(parsedAmount) : Math.abs(parsedAmount),
+                // Credit Memo (type 1) = +, Debit Memo (type 2) = -
+                amount: memo.type === 1 ? Math.abs(parsedAmount) : -Math.abs(parsedAmount),
             };
         }));
     }, [memos]);
@@ -681,7 +695,8 @@ export function CashIssuanceCreateDialog({
         if (memoAmountError) {
             return toast.error(memoAmountError);
         }
-        const finalAmount = isCredit ? -Math.abs(requestedAmount) : Math.abs(requestedAmount);
+        // Credit Memo (type 1) = +, Debit Memo (type 2) = -
+        const finalAmount = isCredit ? Math.abs(requestedAmount) : -Math.abs(requestedAmount);
 
         setPayables((previous) => [...previous, {
             isMemo: true,
@@ -1263,7 +1278,7 @@ export function CashIssuanceCreateDialog({
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant="outline"
-                                                        className={`text-[9px] uppercase ${memo.type === 1 ? 'text-emerald-600 border-emerald-200 bg-emerald-50' : 'text-red-600 border-red-200 bg-red-50'}`}>
+                                                        className={`text-[9px] uppercase ${memo.type === 1 ? 'text-blue-600 border-blue-200 bg-blue-50' : 'text-red-600 border-red-200 bg-red-50'}`}>
                                                         {memo.memo_type_name}
                                                     </Badge>
                                                     <div
@@ -1277,8 +1292,8 @@ export function CashIssuanceCreateDialog({
                                                     {isMemoLocked && <div className="mt-1 text-[9px] font-bold text-amber-700">{lockDescription}</div>}
                                                 </TableCell>
                                                 <TableCell
-                                                    className={`text-xs font-black text-right ${memo.type === 1 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                    <div>{memo.type === 1 ? '-' : '+'} ₱{memo.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+                                                    className={`text-xs font-black text-right ${memo.type === 1 ? 'text-blue-600' : 'text-red-600'}`}>
+                                                    <div>{memo.type === 1 ? '+' : '-'} ₱{memo.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
                                                     <div className="text-[9px] font-bold text-muted-foreground">Remaining: ₱{(memo.remaining_amount ?? memo.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
                                                     <Input
                                                         type="number"
