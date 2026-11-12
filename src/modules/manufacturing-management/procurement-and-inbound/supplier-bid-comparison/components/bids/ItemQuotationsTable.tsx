@@ -10,6 +10,14 @@ import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { SupplierBid, ItemQuotation, PriceBreak } from "../../types";
 import { calculateSupplierLandedCost } from "../../engine/landed-cost-calculator";
 
+function generateQuoteId(): string {
+    return "quote-" + Date.now().toString(36);
+}
+
+function generatePriceBreakId(): string {
+    return "break-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
 interface ItemQuotationsTableProps {
     bid: SupplierBid;
 }
@@ -32,7 +40,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
     const handleAddPrice = (itemId: string) => {
         const item = items.find((i) => i.id === itemId);
         const newQuote: ItemQuotation = {
-            id: "quote-" + Date.now().toString(36),
+            id: generateQuoteId(),
             rfqItemId: itemId,
             discountPct: 0,
             priceBreaks: [
@@ -93,7 +101,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                 if (!quote) return b;
                 const lastBreak = quote.priceBreaks[quote.priceBreaks.length - 1];
                 const newBreak: PriceBreak = {
-                    id: "break-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4),
+                    id: generatePriceBreakId(),
                     minQuantity: lastBreak ? lastBreak.minQuantity * 2 : 100,
                     unitPrice: lastBreak ? lastBreak.unitPrice * 0.95 : 0,
                 };
