@@ -49,8 +49,173 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
     const targetBids = filteredProject.bids;
     const targetItems = filteredProject.items;
 
+    // =========================================================================
+    // SHEET 1: Project Setup (Key-Value configuration for 100% round-trip)
+    // =========================================================================
+    const setupSheet = workbook.addWorksheet("Project Setup", {
+        views: [{ showGridLines: true }],
+    });
+    setupSheet.addRow(["PROJECT / RFQ CONFIGURATION & SETUP"]).font = { size: 14, bold: true };
+    const setupHeader = setupSheet.addRow(["Parameter", "Configured Value", "Description / Notes"]);
+    setupHeader.font = { bold: true };
+    setupHeader.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" },
+    };
+
+    const setupParams: [string, string | number, string][] = [
+        ["Project / RFQ Title", filteredProject.rfqTitle || "Untitled", "Official procurement title"],
+        ["Reference No", filteredProject.rfqReference || "-", "RFQ tracking reference number"],
+        ["Target Date", filteredProject.targetDate || "", "Required delivery or canvass closing date (YYYY-MM-DD)"],
+        ["Approved Budget", filteredProject.budget !== null && filteredProject.budget !== undefined ? filteredProject.budget : "", "Approved budget amount in comparison currency"],
+        ["Comparison Currency", filteredProject.comparisonCurrency || "PHP", "Base evaluation currency"],
+        ["Project Status", filteredProject.status || "Draft", "Current workflow stage"],
+        ["Notes", filteredProject.notes || "", "Procurement notes and specifications"],
+        ["FX Risk Buffer (%)", filteredProject.fxRiskBufferPct ?? 3, "Buffer applied on foreign currency CIF for hedging"],
+        ["Cost of Money (% / yr)", filteredProject.costOfMoneyPctPerYear ?? 8, "Annual interest rate applied to payment terms"],
+        ["Default VAT (%)", filteredProject.defaultVatPct ?? 12, "Standard VAT percentage"],
+        ["Count VAT as Cost", filteredProject.countVatAsCost ? "Yes" : "No", "Whether VAT is factored into landed cost"],
+        ["Calc Customs Auto", filteredProject.calcCustomsAuto ? "Yes" : "No", "Automatic calculation of Philippine customs & arrastre fees"],
+        ["Scoring Weight Price (%)", filteredProject.scoringWeightPricePct ?? 50, "Weight percentage for price evaluation"],
+        ["Scoring Weight Quality (%)", filteredProject.scoringWeightQualityPct ?? 35, "Weight percentage for technical & quality evaluation"],
+        ["Scoring Weight Lead Time (%)", filteredProject.scoringWeightLeadTimePct ?? 15, "Weight percentage for lead time evaluation"],
+        ["Award Strategy", filteredProject.awardStrategy || "LOWEST_TOTAL_OPTIMIZED", "Selected award optimization method"],
+        ["Prepared By", filteredProject.preparedBy || "", "Name of procurement specialist"],
+        ["Prepared By Title", filteredProject.preparedByTitle || "Procurement Specialist", "Position title"],
+        ["Reviewed By", filteredProject.reviewedBy || "", "Name of technical reviewer"],
+        ["Reviewed By Title", filteredProject.reviewedByTitle || "Procurement Lead", "Position title"],
+        ["Approved By", filteredProject.approvedBy || "", "Name of approving officer"],
+        ["Approved By Title", filteredProject.approvedByTitle || "Operations Director", "Position title"],
+        ["Justification", filteredProject.justification || "", "Executive justification for award"],
+    ];
+
+    setupParams.forEach(([param, val, desc]) => {
+        setupSheet.addRow([param, val, desc]);
+    });
+    setupSheet.columns = [{ width: 28 }, { width: 38 }, { width: 45 }];
+
+    // =========================================================================
+    // SHEET 2: Exchange Rates (Evaluation exchange rates)
+    // =========================================================================
+    const ratesSheet = workbook.addWorksheet("Exchange Rates", {
+        views: [{ showGridLines: true }],
+    });
+    ratesSheet.addRow(["EVALUATION EXCHANGE RATES"]).font = { size: 14, bold: true };
+    const ratesHeader = ratesSheet.addRow([
+        "Currency Code",
+        `Rate to Comparison Currency (${filteredProject.comparisonCurrency || "PHP"})`,
+    ]);
+    ratesHeader.font = { bold: true };
+    ratesHeader.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" },
+    };
+
+    const ratesToExport = filteredProject.exchangeRates && filteredProject.exchangeRates.length > 0
+        ? filteredProject.exchangeRates
+        : [
+            { currencyCode: "USD", rateToComparison: 56.50 },
+            { currencyCode: "EUR", rateToComparison: 61.20 },
+            { currencyCode: "CNY", rateToComparison: 7.85 },
+            { currencyCode: "JPY", rateToComparison: 0.38 },
+        ];
+
+    ratesToExport.forEach((r) => {
+        ratesSheet.addRow([r.currencyCode, r.rateToComparison]);
+    });
+    ratesSheet.columns = [{ width: 18 }, { width: 36 }];
+
+    // =========================================================================
+    // SHEET 3: Quality Criteria (1.5 Pass/Fail Mandatory & Scored Criteria)
+    // =========================================================================
+    const critSheet = workbook.addWorksheet("Quality Criteria", {
+        views: [{ showGridLines: true }],
+    });
+    critSheet.addRow(["QUALITY CRITERIA & MANDATORY REQUIREMENTS (1.5)"]).font = { size: 14, bold: true };
+    const critHeader = critSheet.addRow([
+        "Criterion Type",
+        "Criterion Name",
+        "Weight (%)",
+        "Sort Order",
+        "Evaluation Rule",
+    ]);
+    critHeader.font = { bold: true };
+    critHeader.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" },
+    };
+
+    (filteredProject.qualityCriteria || []).forEach((c, idx) => {
+        critSheet.addRow([
+            c.criterionType,
+            c.criterionName,
+            c.criterionType === "SCORED" ? c.weightPct : 0,
+            c.sortOrder || idx + 1,
+            c.criterionType === "PASS_FAIL"
+                ? "Mandatory requirement (Pass/Fail) - Disqualifies supplier if Failed"
+                : "Technical evaluation scored parameter (1-5 rating scale)",
+        ]);
+    });
+    critSheet.columns = [{ width: 18 }, { width: 40 }, { width: 14 }, { width: 12 }, { width: 45 }];
+
+    // =========================================================================
+    // SHEET 4: Requested Items (Items with specifications)
+    // =========================================================================
+    const itemsSheet = workbook.addWorksheet("Requested Items", {
+        views: [{ showGridLines: true }],
+    });
+    itemsSheet.addRow(["REQUESTED PROCUREMENT ITEMS & SPECIFICATIONS"]).font = { size: 14, bold: true };
+    const itemsHeader = itemsSheet.addRow([
+        "#",
+        "Item Name",
+        "Specifications",
+        "Quantity",
+        "UOM",
+        "Target Unit Price",
+        "HS Code",
+        "Duty %",
+        "Weight (kg/unit)",
+        "Volume (cbm/unit)",
+    ]);
+    itemsHeader.font = { bold: true };
+    itemsHeader.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" },
+    };
+
+    (filteredProject.items || []).forEach((item, idx) => {
+        itemsSheet.addRow([
+            idx + 1,
+            item.itemName,
+            item.specifications || "",
+            item.quantity,
+            item.uom,
+            item.targetUnitPrice,
+            item.hsCode || "",
+            item.dutyPct || 0,
+            item.weightPerUnitKg || 0,
+            item.cbmPerUnit || 0,
+        ]);
+    });
+    itemsSheet.columns = [
+        { width: 6 },
+        { width: 28 },
+        { width: 35 },
+        { width: 12 },
+        { width: 10 },
+        { width: 18 },
+        { width: 14 },
+        { width: 10 },
+        { width: 16 },
+        { width: 16 },
+    ];
+
     // -------------------------------------------------------------------------
-    // SHEET 1: Comparison
+    // SHEET 5: Comparison
     // -------------------------------------------------------------------------
     const compSheet = workbook.addWorksheet("Bid Comparison", {
         views: [{ showGridLines: true }],
@@ -394,7 +559,7 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
 
         targetBids.forEach((bid, idx) => {
             const res = summary.results[bid.id];
-            const isCompliant = res ? res.qualityPass : true;
+            const isCompliant = res ? !res.isDisqualified : true;
             const qScore = res ? res.qualityScore : 0;
             const qRank = res ? res.ranking : "-";
 
@@ -460,6 +625,7 @@ export const BIDS_CANONICAL_COLUMNS = [
     "Currency",
     "Incoterm",
     "Item",
+    "Specifications",
     "Qty",
     "HS Code",
     "Item Duty %",
@@ -498,7 +664,7 @@ export const BIDS_CANONICAL_COLUMNS = [
 ] as const;
 
 /**
- * Builds the canonical 42-column tabular rows representation of bids and quotations.
+ * Builds the canonical 43-column tabular rows representation of bids and quotations.
  * Fully compatible with the import parser, with optional filtering.
  */
 export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOptions): (string | number)[][] {
@@ -515,6 +681,7 @@ export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOp
                 filteredProject.comparisonCurrency || "PHP", // Currency
                 "DDP", // Incoterm
                 item.itemName,
+                item.specifications || "",
                 item.quantity,
                 item.hsCode || "",
                 item.dutyPct || 0,
@@ -578,6 +745,7 @@ export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOp
                     bid.quoteCurrency || "PHP",
                     bid.incoterm || "DDP",
                     item.itemName,
+                    item.specifications || "",
                     item.quantity,
                     item.hsCode || "",
                     item.dutyPct || 0,
@@ -790,7 +958,7 @@ export function exportRfqQualityToCsv(project: RfqProject, options?: DynamicExpo
 
     targetBids.forEach((bid, idx) => {
         const res = summary.results[bid.id];
-        const isCompliant = res ? res.qualityPass : true;
+        const isCompliant = res ? !res.isDisqualified : true;
         const qScore = res ? res.qualityScore : 0;
         const qRank = res ? res.ranking : "-";
 
@@ -837,3 +1005,128 @@ export function exportRfqToJson(project: RfqProject, options?: DynamicExportOpti
  * Default export alias for backwards compatibility: exports import-compatible bids CSV.
  */
 export const exportRfqToCsv = exportRfqBidsToCsv;
+
+/**
+ * Generates and downloads a clean, full-project template Excel workbook (.xlsx)
+ * pre-populated with project setup, exchange rates, pass/fail quality criteria,
+ * items with specifications, and vendor quotation columns.
+ */
+export async function exportFullProjectTemplate(project?: RfqProject): Promise<void> {
+    const templateProject: RfqProject = project || {
+        id: "rfq-template",
+        rfqTitle: "Procurement Canvass Project Template",
+        rfqReference: "RFQ-2026-CANVASS-TEMPLATE",
+        roundNo: 1,
+        comparisonCurrency: "PHP",
+        budget: 5000000,
+        notes: "Detailed project notes and canvass guidelines.",
+        targetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        fxRiskBufferPct: 3,
+        costOfMoneyPctPerYear: 8,
+        defaultVatPct: 12,
+        countVatAsCost: true,
+        calcCustomsAuto: true,
+        scoringWeightPricePct: 50,
+        scoringWeightQualityPct: 35,
+        scoringWeightLeadTimePct: 15,
+        status: "Draft",
+        version: 1,
+        preparedBy: "",
+        preparedByTitle: "Procurement Specialist",
+        reviewedBy: "",
+        reviewedByTitle: "Procurement Lead",
+        approvedBy: "",
+        approvedByTitle: "Operations Director",
+        justification: "",
+        awardStrategy: "LOWEST_TOTAL_OPTIMIZED",
+        items: [
+            {
+                id: "item-1",
+                itemName: "LED panel light 60x60",
+                specifications: "40W, 4000lm, 4000K Natural White, CRI>80, IP40",
+                quantity: 1200,
+                uom: "PCS",
+                targetUnitPrice: 1350,
+                hsCode: "9405.11",
+                dutyPct: 10,
+                weightPerUnitKg: 3.5,
+                cbmPerUnit: 0.024,
+                sortOrder: 1,
+            },
+            {
+                id: "item-2",
+                itemName: "LED driver",
+                specifications: "Constant current 1050mA, 42V DC, isolated, PF>0.95",
+                quantity: 1200,
+                uom: "PCS",
+                targetUnitPrice: 380,
+                hsCode: "8504.40",
+                dutyPct: 3,
+                weightPerUnitKg: 0.3,
+                cbmPerUnit: 0.001,
+                sortOrder: 2,
+            },
+        ],
+        qualityCriteria: [
+            {
+                id: "crit-1",
+                criterionType: "PASS_FAIL",
+                criterionName: "ISO 9001:2015 / CE / RoHS Certification",
+                weightPct: 0,
+                sortOrder: 1,
+            },
+            {
+                id: "crit-2",
+                criterionType: "PASS_FAIL",
+                criterionName: "Certificate of Analysis (COA) / Factory Test Report per batch",
+                weightPct: 0,
+                sortOrder: 2,
+            },
+            {
+                id: "crit-3",
+                criterionType: "SCORED",
+                criterionName: "Technical Specification Compliance & Photometric Test",
+                weightPct: 40,
+                sortOrder: 3,
+            },
+            {
+                id: "crit-4",
+                criterionType: "SCORED",
+                criterionName: "Warranty Period & After-Sales Replacement Commitment",
+                weightPct: 30,
+                sortOrder: 4,
+            },
+            {
+                id: "crit-5",
+                criterionType: "SCORED",
+                criterionName: "Manufacturing Capacity & Delivery Track Record",
+                weightPct: 30,
+                sortOrder: 5,
+            },
+        ],
+        exchangeRates: [
+            { currencyCode: "USD", rateToComparison: 56.50 },
+            { currencyCode: "EUR", rateToComparison: 61.20 },
+            { currencyCode: "CNY", rateToComparison: 7.85 },
+            { currencyCode: "JPY", rateToComparison: 0.38 },
+        ],
+        customsRates: {
+            cdsCompCurr: 100,
+            birDstCompCurr: 30,
+            containerSecurityUsd: 5,
+            arrastre20ftCompCurr: 4738,
+            arrastre40ftCompCurr: 10869,
+            wharfage20ftCompCurr: 519.35,
+            wharfage40ftCompCurr: 779.05,
+            lclArrastrePerRtCompCurr: 149,
+            lclWharfagePerRtCompCurr: 30.55,
+            lcBankChargePct: 0.125,
+        },
+        ipcBrackets: [],
+        bids: [],
+        awards: [],
+        approvalHistory: [],
+    };
+
+    await exportRfqToExcel(templateProject);
+}

@@ -43,14 +43,24 @@ export const ProjectDetailsCard: React.FC = () => {
                     />
                 </div>
 
-                {/* Row 2: Reference no., Compare in, Budget */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Row 2: Reference no., Target date, Compare in, Budget */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground font-medium">Reference no.</Label>
                         <Input
                             value={currentProject.rfqReference}
                             onChange={(e) => updateProject((prev) => ({ ...prev, rfqReference: e.target.value }))}
                             placeholder="RFQ-2026-118"
+                            className="h-8 text-xs font-mono bg-background"
+                        />
+                    </div>
+
+                    <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground font-medium">Target date</Label>
+                        <Input
+                            type="date"
+                            value={currentProject.targetDate ? currentProject.targetDate.slice(0, 10) : ""}
+                            onChange={(e) => updateProject((prev) => ({ ...prev, targetDate: e.target.value }))}
                             className="h-8 text-xs font-mono bg-background"
                         />
                     </div>

@@ -36,7 +36,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
-import { exportRfqToExcel, exportRfqBidsToCsv, exportRfqComparisonToCsv } from "../../engine/excel-export";
+import {
+    exportRfqToExcel,
+    exportRfqBidsToCsv,
+    exportRfqComparisonToCsv,
+    exportRfqQualityToCsv,
+    exportFullProjectTemplate,
+} from "../../engine/excel-export";
 import { StorageStatusPill } from "./StorageStatusPill";
 import { toast } from "sonner";
  
@@ -69,6 +75,7 @@ export const TopBar: React.FC<TopBarProps> = ({
     const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
     const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const [newTitle, setNewTitle] = useState("");
     const [newRef, setNewRef] = useState("");
@@ -94,8 +101,15 @@ export const TopBar: React.FC<TopBarProps> = ({
     };
 
     const handleDeleteConfirm = async () => {
-        await deleteProject();
-        setIsDeleteDialogOpen(false);
+        setIsDeleting(true);
+        try {
+            const success = await deleteProject();
+            if (success) {
+                setIsDeleteDialogOpen(false);
+            }
+        } finally {
+            setIsDeleting(false);
+        }
     };
 
     const statusBadge = () => {
@@ -262,7 +276,14 @@ export const TopBar: React.FC<TopBarProps> = ({
                                     className="cursor-pointer text-xs gap-2"
                                 >
                                     <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                                    Quick Excel (.xlsx)
+                                    Full Project Excel (.xlsx)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    onClick={() => exportFullProjectTemplate(currentProject || undefined)}
+                                    className="cursor-pointer text-xs gap-2"
+                                >
+                                    <FileSpreadsheet className="h-4 w-4 text-teal-600" />
+                                    Full Project Template (.xlsx)
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                     onClick={() => exportRfqBidsToCsv(currentProject)}
@@ -277,6 +298,13 @@ export const TopBar: React.FC<TopBarProps> = ({
                                 >
                                     <FileText className="h-4 w-4 text-slate-500" />
                                     Quick Comparison Matrix (.csv)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    onClick={() => exportRfqQualityToCsv(currentProject)}
+                                    className="cursor-pointer text-xs gap-2"
+                                >
+                                    <FileSpreadsheet className="h-4 w-4 text-amber-600" />
+                                    Quick Quality Matrix (.csv)
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
@@ -380,24 +408,53 @@ export const TopBar: React.FC<TopBarProps> = ({
             </Dialog>
 
             {/* Delete Confirmation Dialog */}
-            <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-                <DialogContent className="sm:max-w-[400px]">
+            <Dialog
+                open={isDeleteDialogOpen}
+                onOpenChange={(open) => {
+                    if (!isDeleting) setIsDeleteDialogOpen(open);
+                }}
+            >
+                <DialogContent className="sm:max-w-[420px]">
                     <DialogHeader>
-                        <DialogTitle className="text-destructive flex items-center gap-2">
-                            <Trash2 className="h-4 w-4" />
-                            Delete Project?
+                        <DialogTitle className="text-destructive flex items-center gap-2 text-base">
+                            <Trash2 className="h-5 w-5" />
+                            Delete Project Confirmation
                         </DialogTitle>
-                        <DialogDescription>
-                            Are you sure you want to delete &ldquo;{currentProject?.rfqTitle}&rdquo;?
-                            This action will soft-delete the project.
+                        <DialogDescription className="text-xs pt-1.5 leading-relaxed">
+                            Are you sure you want to soft-delete <strong className="text-foreground font-semibold">&ldquo;{currentProject?.rfqTitle || "this project"}&rdquo;</strong>?
+                            <br />
+                            <span className="text-muted-foreground block mt-1">
+                                This will archive the RFQ and its associated bids. Active records will be marked as deleted and can be restored if necessary.
+                            </span>
                         </DialogDescription>
                     </DialogHeader>
-                    <DialogFooter>
-                        <Button variant="outline" size="sm" onClick={() => setIsDeleteDialogOpen(false)}>
+                    <DialogFooter className="gap-2 sm:gap-2 mt-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isDeleting}
+                            onClick={() => setIsDeleteDialogOpen(false)}
+                        >
                             Cancel
                         </Button>
-                        <Button variant="destructive" size="sm" onClick={handleDeleteConfirm}>
-                            Delete
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={isDeleting}
+                            onClick={handleDeleteConfirm}
+                            className="gap-1.5"
+                        >
+                            {isDeleting ? (
+                                <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    Deleting...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    Delete Project
+                                </>
+                            )}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

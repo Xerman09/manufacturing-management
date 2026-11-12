@@ -226,6 +226,8 @@ export interface RfqProject {
     justification: string;
     approvalRemarks?: string;
     rejectionReason?: string;
+    awardStrategy?: AwardStrategy;
+    targetDate?: string;
     createdBy?: number | null;
     createdAt?: string;
     updatedBy?: number | null;

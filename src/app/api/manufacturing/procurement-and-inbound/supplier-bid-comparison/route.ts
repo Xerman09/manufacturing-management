@@ -18,6 +18,7 @@ import {
     DutyMode,
     ShipmentType,
     ProjectStatus,
+    AwardStrategy,
 } from "@/modules/manufacturing-management/procurement-and-inbound/supplier-bid-comparison/types";
 
 export const runtime = "nodejs";
@@ -375,6 +376,10 @@ export async function GET(request: NextRequest) {
                 approvedBy: String(h.approved_by || ""),
                 approvedByTitle: String(h.approved_by_title || ""),
                 justification: String(h.justification || ""),
+                rejectionReason: h.rejection_reason ? String(h.rejection_reason) : undefined,
+                approvalRemarks: h.approval_remarks ? String(h.approval_remarks) : undefined,
+                awardStrategy: (h.award_strategy as AwardStrategy) || "MANUAL",
+                targetDate: h.target_date ? String(h.target_date).slice(0, 10) : undefined,
                 createdBy: h.created_by ? Number(h.created_by) : null,
                 createdAt: h.created_at ? String(h.created_at) : undefined,
                 updatedBy: h.updated_by ? Number(h.updated_by) : null,
@@ -455,6 +460,10 @@ export async function POST(request: NextRequest) {
             approved_by: body.approvedBy || "",
             approved_by_title: body.approvedByTitle || "",
             justification: body.justification || "",
+            rejection_reason: body.rejectionReason || null,
+            approval_remarks: body.approvalRemarks || null,
+            award_strategy: body.awardStrategy || "MANUAL",
+            target_date: body.targetDate ? body.targetDate.slice(0, 10) : null,
             created_by: userId,
         };
 
@@ -550,6 +559,10 @@ export async function PUT(request: NextRequest) {
                     approved_by: project.approvedBy || "",
                     approved_by_title: project.approvedByTitle || "",
                     justification: project.justification || "",
+                    rejection_reason: project.rejectionReason || null,
+                    approval_remarks: project.approvalRemarks || null,
+                    award_strategy: project.awardStrategy || "MANUAL",
+                    target_date: project.targetDate ? project.targetDate.slice(0, 10) : null,
                     created_by: userId,
                 };
 
@@ -628,6 +641,10 @@ export async function PUT(request: NextRequest) {
             approved_by: project.approvedBy || "",
             approved_by_title: project.approvedByTitle || "",
             justification: project.justification || "",
+            rejection_reason: project.rejectionReason || null,
+            approval_remarks: project.approvalRemarks || null,
+            award_strategy: project.awardStrategy || "MANUAL",
+            target_date: project.targetDate ? project.targetDate.slice(0, 10) : null,
             updated_by: userId,
         };
 
@@ -660,6 +677,11 @@ export async function PUT(request: NextRequest) {
                     ? "SUBMIT"
                     : "REOPEN";
 
+            const comment =
+                project.status === "Rejected"
+                    ? (project.rejectionReason || project.justification || "Award rejected")
+                    : (project.approvalRemarks || project.justification || "");
+
             await postItem("mm_rfq_approval_history", {
                 rfq_id: rfqDbId,
                 action,
@@ -667,7 +689,7 @@ export async function PUT(request: NextRequest) {
                 to_status: project.status,
                 actor_id: userId,
                 actor_name: project.reviewedBy || project.preparedBy || "System User",
-                comment: project.justification || "",
+                comment,
             }).catch(() => null);
         }
 
@@ -1238,12 +1260,14 @@ export async function DELETE(request: NextRequest) {
         const userId = getJwtSubFromReq(request);
         const headers = getHeaders();
 
-        // Soft delete header
+        const nowIso = new Date().toISOString();
+
+        // 1. Soft delete project header
         const res = await fetch(`${DIRECTUS_URL}/items/mm_rfq/${rfqId}`, {
             method: "PATCH",
             headers,
             body: JSON.stringify({
-                deleted_at: new Date().toISOString(),
+                deleted_at: nowIso,
                 deleted_by: userId,
             }),
         });
@@ -1255,7 +1279,34 @@ export async function DELETE(request: NextRequest) {
             );
         }
 
-        return NextResponse.json({ success: true, message: "Project deleted successfully" });
+        // 2. Cascade soft-delete active child entities without hard deleting
+        const childCollections = [
+            "mm_rfq_items",
+            "mm_rfq_quality_criteria",
+            "mm_rfq_exchange_rates",
+            "mm_rfq_customs_rates",
+            "mm_rfq_ipc_brackets",
+            "mm_rfq_bids",
+        ];
+
+        for (const col of childCollections) {
+            try {
+                const activeChildren = await fetchCollection<{ id: number }>(
+                    col,
+                    `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true&fields=id`
+                );
+                for (const child of activeChildren) {
+                    await patchItem(col, child.id, {
+                        deleted_at: nowIso,
+                        deleted_by: userId,
+                    }).catch(() => null);
+                }
+            } catch {
+                // Ignore child cascade errors to ensure response succeeds
+            }
+        }
+
+        return NextResponse.json({ success: true, message: "Project soft-deleted successfully" });
     } catch (error) {
         return NextResponse.json(
             { success: false, error: (error as Error).message || "Failed to delete project" },

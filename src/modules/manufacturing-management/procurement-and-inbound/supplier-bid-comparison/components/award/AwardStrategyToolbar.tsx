@@ -7,6 +7,7 @@ import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
 import { optimizeSplitAward } from "../../engine/split-award-optimizer";
 import { ItemAward } from "../../types";
+ 
 import { toast } from "sonner";
 
 export const AwardStrategyToolbar: React.FC = () => {
@@ -49,6 +50,7 @@ export const AwardStrategyToolbar: React.FC = () => {
         updateProject((prev) => ({
             ...prev,
             awards: newAwards,
+            awardStrategy: "ALL_RECOMMENDED",
         }));
         toast.success(`Awarded all items to ${bid?.supplierName}`);
     };
@@ -80,6 +82,7 @@ export const AwardStrategyToolbar: React.FC = () => {
         updateProject((prev) => ({
             ...prev,
             awards: newAwards,
+            awardStrategy: "LOWEST_TOTAL_OPTIMIZED",
         }));
         toast.success(`Optimized award applied across ${opt.participatingBidIds.length} suppliers`);
     };
@@ -121,6 +124,7 @@ export const AwardStrategyToolbar: React.FC = () => {
         updateProject((prev) => ({
             ...prev,
             awards: newAwards,
+            awardStrategy: "CHEAPEST_PER_ITEM",
         }));
         toast.success("Awarded each item to its cheapest individual quote");
     };
@@ -130,6 +134,7 @@ export const AwardStrategyToolbar: React.FC = () => {
         updateProject((prev) => ({
             ...prev,
             awards: [],
+            awardStrategy: "MANUAL",
         }));
         toast.info("Cleared all awards");
     };
@@ -143,7 +148,7 @@ export const AwardStrategyToolbar: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2">
                 <Button
                     size="sm"
-                    variant="outline"
+                    variant={currentProject.awardStrategy === "ALL_RECOMMENDED" ? "default" : "outline"}
                     onClick={handleAwardRecommended}
                     disabled={isLocked || !summary.recommendedBidId}
                     className="h-8 text-xs gap-1.5 font-medium"
@@ -154,7 +159,7 @@ export const AwardStrategyToolbar: React.FC = () => {
 
                 <Button
                     size="sm"
-                    variant="outline"
+                    variant={currentProject.awardStrategy === "LOWEST_TOTAL_OPTIMIZED" ? "default" : "outline"}
                     onClick={handleAwardOptimized}
                     disabled={isLocked || validBids.length === 0}
                     className="h-8 text-xs gap-1.5"
@@ -165,7 +170,7 @@ export const AwardStrategyToolbar: React.FC = () => {
 
                 <Button
                     size="sm"
-                    variant="outline"
+                    variant={currentProject.awardStrategy === "CHEAPEST_PER_ITEM" ? "default" : "outline"}
                     onClick={handleAwardCheapestPerItem}
                     disabled={isLocked || validBids.length === 0}
                     className="h-8 text-xs gap-1.5"

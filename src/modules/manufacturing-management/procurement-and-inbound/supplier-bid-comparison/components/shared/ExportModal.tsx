@@ -262,7 +262,7 @@ export const ExportModal: React.FC<ExportModalProps> = React.memo(
                     )}
                   </div>
                   <p className="text-[11px] text-muted-foreground leading-normal">
-                    Multi-sheet workbook: Matrix, landed costs, quality audit &amp; awards.
+                    Complete multi-sheet workbook: Setup, Rates, Criteria, Items with Specs, Bids &amp; Awards.
                   </p>
                 </div>
 

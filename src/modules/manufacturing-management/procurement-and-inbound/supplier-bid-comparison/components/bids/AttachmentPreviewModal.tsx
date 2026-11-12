@@ -67,7 +67,12 @@ const AttachmentPreviewContent: React.FC<AttachmentPreviewContentProps> = ({
         /\.pdf$/i.test(attachment.fileName)
     );
 
-    const fileSource = attachment.dataUrl || attachment.fileUrl || "";
+    const fileSource =
+        attachment.dataUrl ||
+        attachment.fileUrl ||
+        (attachment.directusFileId && attachment.directusFileId.length === 36
+            ? `/api/manufacturing/procurement-and-inbound/supplier-bid-comparison/attachments?fileId=${attachment.directusFileId}`
+            : "");
 
     // Zoom Controls
     const handleZoomIn = () => setScale((prev) => Math.min(Number((prev + 0.25).toFixed(3)), 5));

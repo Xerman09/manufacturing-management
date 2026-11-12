@@ -23,10 +23,12 @@ import {
   Layers,
   Building2,
   Package,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
-import { exportRfqBidsToCsv, BIDS_CANONICAL_COLUMNS } from "../../engine/excel-export";
+import { exportRfqBidsToCsv, exportFullProjectTemplate, BIDS_CANONICAL_COLUMNS } from "../../engine/excel-export";
 import {
   SupplierBid,
   RequestedItem,
@@ -35,6 +37,10 @@ import {
   InsuranceBasis,
   ShipmentType,
   PassFailResult,
+  AwardStrategy,
+  ExchangeRateEntry,
+  QualityCriterion,
+  RfqProject,
 } from "../../types";
 
 const REQUIRED_COLUMNS_TEXT = BIDS_CANONICAL_COLUMNS.join(", ");
@@ -44,6 +50,34 @@ interface ImportExportModalProps {
   onClose: () => void;
 }
 
+interface ParsedProjectSetup {
+  rfqTitle?: string;
+  rfqReference?: string;
+  notes?: string;
+  targetDate?: string;
+  budget?: number | null;
+  comparisonCurrency?: string;
+  fxRiskBufferPct?: number;
+  costOfMoneyPctPerYear?: number;
+  defaultVatPct?: number;
+  countVatAsCost?: boolean;
+  calcCustomsAuto?: boolean;
+  scoringWeightPricePct?: number;
+  scoringWeightQualityPct?: number;
+  scoringWeightLeadTimePct?: number;
+  awardStrategy?: AwardStrategy;
+  preparedBy?: string;
+  preparedByTitle?: string;
+  reviewedBy?: string;
+  reviewedByTitle?: string;
+  approvedBy?: string;
+  approvedByTitle?: string;
+  justification?: string;
+  exchangeRates?: ExchangeRateEntry[];
+  qualityCriteria?: QualityCriterion[];
+  items?: RequestedItem[];
+}
+
 interface ParsedRow {
   supplier: string;
   type?: string;
@@ -51,6 +85,7 @@ interface ParsedRow {
   currency?: string;
   incoterm?: string;
   item: string;
+  specifications?: string;
   quantity?: number;
   hsCode?: string;
   dutyPct?: number;
@@ -95,15 +130,20 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
 
     const [fileName, setFileName] = useState<string | null>(null);
     const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
+    const [detectedProjectSetup, setDetectedProjectSetup] = useState<ParsedProjectSetup | null>(null);
+    const [importScope, setImportScope] = useState<"full_project" | "bids_only">("full_project");
     const [selectedSuppliers, setSelectedSuppliers] = useState<Set<string>>(new Set());
     const [importStrategy, setImportStrategy] = useState<"merge" | "replace">("merge");
     const [warnings, setWarnings] = useState<string[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
     const [isCopied, setIsCopied] = useState(false);
+    const [showColumnGuide, setShowColumnGuide] = useState(false);
 
     const resetState = useCallback(() => {
       setFileName(null);
       setParsedRows([]);
+      setDetectedProjectSetup(null);
+      setImportScope("full_project");
       setSelectedSuppliers(new Set());
       setImportStrategy("merge");
       setWarnings([]);
@@ -191,17 +231,223 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
         const XLSX = await import("xlsx");
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: "array" });
+        const sheetNames = workbook.SheetNames;
 
+        let projectSetup: ParsedProjectSetup | null = null;
+
+        // ---------------------------------------------------------------------
+        // 1. Detect & Parse "Project Setup" sheet
+        // ---------------------------------------------------------------------
+        const setupSheetName = sheetNames.find((s) => /project.*setup|setup|rfq.*config/i.test(s));
+        if (setupSheetName) {
+          const setupSheet = workbook.Sheets[setupSheetName];
+          const rawSetupRows = XLSX.utils.sheet_to_json(setupSheet, { header: 1 }) as (string | number)[][];
+          projectSetup = projectSetup || {};
+
+          rawSetupRows.forEach((row) => {
+            if (!row || row.length < 2) return;
+            const key = String(row[0] || "").toLowerCase().trim();
+            const val = row[1];
+            if (val === undefined || val === null || val === "") return;
+
+            if (/title/i.test(key)) projectSetup!.rfqTitle = String(val).trim();
+            else if (/reference/i.test(key)) projectSetup!.rfqReference = String(val).trim();
+            else if (/target.*date|deadline/i.test(key)) projectSetup!.targetDate = String(val).trim();
+            else if (/budget/i.test(key)) {
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              if (!isNaN(num)) projectSetup!.budget = num;
+            } else if (/comparison.*currency|base.*currency/i.test(key)) {
+              projectSetup!.comparisonCurrency = String(val).trim().toUpperCase();
+            } else if (/notes/i.test(key)) {
+              projectSetup!.notes = String(val).trim();
+            } else if (/fx.*risk|buffer/i.test(key)) {
+              const num = parseFloat(String(val));
+              if (!isNaN(num)) projectSetup!.fxRiskBufferPct = num;
+            } else if (/cost.*of.*money|interest/i.test(key)) {
+              const num = parseFloat(String(val));
+              if (!isNaN(num)) projectSetup!.costOfMoneyPctPerYear = num;
+            } else if (/default.*vat|vat.*%/i.test(key)) {
+              const num = parseFloat(String(val));
+              if (!isNaN(num)) projectSetup!.defaultVatPct = num;
+            } else if (/count.*vat/i.test(key)) {
+              projectSetup!.countVatAsCost = /yes|true|1/i.test(String(val));
+            } else if (/customs.*auto/i.test(key)) {
+              projectSetup!.calcCustomsAuto = /yes|true|1/i.test(String(val));
+            } else if (/price.*weight/i.test(key)) {
+              const num = parseFloat(String(val));
+              if (!isNaN(num)) projectSetup!.scoringWeightPricePct = num;
+            } else if (/quality.*weight/i.test(key)) {
+              const num = parseFloat(String(val));
+              if (!isNaN(num)) projectSetup!.scoringWeightQualityPct = num;
+            } else if (/lead.*time.*weight/i.test(key)) {
+              const num = parseFloat(String(val));
+              if (!isNaN(num)) projectSetup!.scoringWeightLeadTimePct = num;
+            } else if (/award.*strategy/i.test(key)) {
+              const strat = String(val).trim().toUpperCase();
+              if (["ALL_RECOMMENDED", "LOWEST_TOTAL_OPTIMIZED", "CHEAPEST_PER_ITEM", "MANUAL"].includes(strat)) {
+                projectSetup!.awardStrategy = strat as AwardStrategy;
+              }
+            } else if (/prepared.*by$/i.test(key)) projectSetup!.preparedBy = String(val).trim();
+            else if (/prepared.*by.*title/i.test(key)) projectSetup!.preparedByTitle = String(val).trim();
+            else if (/reviewed.*by$/i.test(key)) projectSetup!.reviewedBy = String(val).trim();
+            else if (/reviewed.*by.*title/i.test(key)) projectSetup!.reviewedByTitle = String(val).trim();
+            else if (/approved.*by$/i.test(key)) projectSetup!.approvedBy = String(val).trim();
+            else if (/approved.*by.*title/i.test(key)) projectSetup!.approvedByTitle = String(val).trim();
+            else if (/justification/i.test(key)) projectSetup!.justification = String(val).trim();
+          });
+        }
+
+        // ---------------------------------------------------------------------
+        // 2. Detect & Parse "Exchange Rates" sheet
+        // ---------------------------------------------------------------------
+        const ratesSheetName = sheetNames.find((s) => /exchange.*rates?|currencies|rates/i.test(s));
+        if (ratesSheetName) {
+          const ratesSheet = workbook.Sheets[ratesSheetName];
+          const rawRows = XLSX.utils.sheet_to_json(ratesSheet) as Record<string, unknown>[];
+          const parsedRates: ExchangeRateEntry[] = [];
+          rawRows.forEach((r) => {
+            let code = "";
+            let rate = 0;
+            for (const [k, v] of Object.entries(r)) {
+              const lk = k.toLowerCase();
+              if (/code|currency/i.test(lk)) code = String(v).trim().toUpperCase();
+              if (/rate|value|php/i.test(lk)) {
+                const n = parseFloat(String(v));
+                if (!isNaN(n)) rate = n;
+              }
+            }
+            if (code && rate > 0) {
+              parsedRates.push({ currencyCode: code, rateToComparison: rate });
+            }
+          });
+          if (parsedRates.length > 0) {
+            projectSetup = projectSetup || {};
+            projectSetup.exchangeRates = parsedRates;
+          }
+        }
+
+        // ---------------------------------------------------------------------
+        // 3. Detect & Parse "Quality Criteria" sheet (1.5 Pass/Fail & Scored)
+        // ---------------------------------------------------------------------
+        const critSheetName = sheetNames.find((s) => /quality.*criteria|compliance|mandatory|criteria/i.test(s));
+        if (critSheetName) {
+          const critSheet = workbook.Sheets[critSheetName];
+          const rawRows = XLSX.utils.sheet_to_json(critSheet) as Record<string, unknown>[];
+          const parsedCriteria: QualityCriterion[] = [];
+          rawRows.forEach((r, idx) => {
+            let type: "PASS_FAIL" | "SCORED" = "SCORED";
+            let name = "";
+            let weight = 0;
+            let sortOrder = idx + 1;
+            for (const [k, v] of Object.entries(r)) {
+              const lk = k.toLowerCase();
+              if (/type/i.test(lk)) {
+                type = /pass|fail|mandatory/i.test(String(v)) ? "PASS_FAIL" : "SCORED";
+              } else if (/name|criterion|requirement|parameter/i.test(lk)) {
+                name = String(v).trim();
+              } else if (/weight/i.test(lk)) {
+                const n = parseFloat(String(v));
+                if (!isNaN(n)) weight = n;
+              } else if (/order|sort/i.test(lk)) {
+                const n = parseInt(String(v), 10);
+                if (!isNaN(n)) sortOrder = n;
+              }
+            }
+            if (name) {
+              parsedCriteria.push({
+                id: `crit-import-${idx + 1}-${Date.now().toString(36)}`,
+                criterionType: type,
+                criterionName: name,
+                weightPct: type === "SCORED" ? weight : 0,
+                sortOrder,
+              });
+            }
+          });
+          if (parsedCriteria.length > 0) {
+            projectSetup = projectSetup || {};
+            projectSetup.qualityCriteria = parsedCriteria;
+          }
+        }
+
+        // ---------------------------------------------------------------------
+        // 4. Detect & Parse "Requested Items" sheet
+        // ---------------------------------------------------------------------
+        const itemsSheetName = sheetNames.find((s) => /requested.*items|items|products|materials/i.test(s));
+        if (itemsSheetName) {
+          const itemsSheet = workbook.Sheets[itemsSheetName];
+          const rawRows = XLSX.utils.sheet_to_json(itemsSheet) as Record<string, unknown>[];
+          const parsedItems: RequestedItem[] = [];
+          rawRows.forEach((r, idx) => {
+            let itemName = "";
+            let specifications = "";
+            let quantity = 100;
+            let uom = "PCS";
+            let targetUnitPrice = 0;
+            let hsCode = "";
+            let dutyPct = 0;
+            let weight = 0;
+            let volume = 0;
+
+            for (const [k, v] of Object.entries(r)) {
+              const lk = k.toLowerCase();
+              if (/item.*name|product/i.test(lk) && !/spec/i.test(lk)) itemName = String(v).trim();
+              else if (/spec/i.test(lk)) specifications = String(v).trim();
+              else if (/qty|quantity/i.test(lk)) {
+                const n = parseFloat(String(v));
+                if (!isNaN(n) && n > 0) quantity = n;
+              } else if (/uom|unit/i.test(lk) && !/price|weight|volume/i.test(lk)) {
+                uom = String(v).trim().toUpperCase();
+              } else if (/target|budget.*unit/i.test(lk)) {
+                const n = parseFloat(String(v));
+                if (!isNaN(n)) targetUnitPrice = n;
+              } else if (/hs.*code/i.test(lk)) hsCode = String(v).trim();
+              else if (/duty/i.test(lk)) {
+                const n = parseFloat(String(v));
+                if (!isNaN(n)) dutyPct = n;
+              } else if (/weight|kg/i.test(lk)) {
+                const n = parseFloat(String(v));
+                if (!isNaN(n)) weight = n;
+              } else if (/volume|cbm/i.test(lk)) {
+                const n = parseFloat(String(v));
+                if (!isNaN(n)) volume = n;
+              }
+            }
+            if (itemName) {
+              parsedItems.push({
+                id: `item-import-${idx + 1}-${Date.now().toString(36)}`,
+                itemName,
+                specifications,
+                quantity,
+                uom: uom || "PCS",
+                targetUnitPrice,
+                hsCode,
+                dutyPct,
+                weightPerUnitKg: weight,
+                cbmPerUnit: volume,
+                sortOrder: idx + 1,
+              });
+            }
+          });
+          if (parsedItems.length > 0) {
+            projectSetup = projectSetup || {};
+            projectSetup.items = parsedItems;
+          }
+        }
+
+        // ---------------------------------------------------------------------
+        // 5. Detect & Parse "Bids & Quotations" sheet
+        // ---------------------------------------------------------------------
         const bestSheetName =
-          workbook.SheetNames.find((s) => /bids|quotation|raw|data|items/i.test(s)) ||
-          workbook.SheetNames[0];
+          sheetNames.find((s) => /bids.*quotations?|bids|quotations?|raw.*data/i.test(s)) ||
+          sheetNames.find((s) => !/setup|rates|criteria|items|comparison|award|quality/i.test(s)) ||
+          sheetNames[0];
         const sheet = workbook.Sheets[bestSheetName];
         const rawRows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, {
           defval: "",
         });
 
-        if (rawRows.length === 0) {
-          toast.error("The uploaded file does not contain any data rows.");
+        if (rawRows.length === 0 && (!projectSetup || !projectSetup.items || projectSetup.items.length === 0)) {
+          toast.error("The uploaded file does not contain any bid quotations or item setup data.");
           setIsProcessing(false);
           return;
         }
@@ -226,6 +472,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
 
           const supplier = getVal(map, "supplier", "suppliername", "vendor").trim();
           const item = getVal(map, "item", "itemname", "product", "description").trim();
+          const specifications = getVal(map, "specifications", "specification", "specs", "technicalspecifications").trim();
           const unitPrice = parseFloat(getVal(map, "unitprice", "price") || "0");
 
           if (!supplier && !item) return;
@@ -248,6 +495,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             currency: (getVal(map, "currency", "quotecurrency") || "USD").toUpperCase(),
             incoterm: (getVal(map, "incoterm", "deliveryterms") || "FOB").toUpperCase(),
             item,
+            specifications: specifications || undefined,
             quantity: parseFloat(getVal(map, "qty", "quantity") || "0") || undefined,
             hsCode: getVal(map, "hscode").trim(),
             dutyPct: parseFloat(getVal(map, "itemduty", "dutypct", "duty") || "0"),
@@ -287,14 +535,23 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             validUntil: getVal(map, "validuntil").trim(),
             qualityScore: parseFloat(getVal(map, "quality15appliedtoallcriteria", "quality", "qualityscore") || "0"),
             notes: getVal(map, "notes").trim(),
-          };          rows.push(row);
+          };
+          rows.push(row);
         });
 
         setParsedRows(rows);
         setSelectedSuppliers(foundSuppliers);
         setWarnings(warnList);
+        setDetectedProjectSetup(projectSetup);
+        if (projectSetup) {
+          setImportScope("full_project");
+        }
+
         if (rows.length > 0) {
-          toast.success(`Parsed ${rows.length} rows across ${foundSuppliers.size} suppliers from ${file.name}`);
+          const setupMsg = projectSetup ? " (with full project setup & criteria)" : "";
+          toast.success(`Parsed ${rows.length} rows across ${foundSuppliers.size} suppliers${setupMsg} from ${file.name}`);
+        } else if (projectSetup && projectSetup.items && projectSetup.items.length > 0) {
+          toast.success(`Parsed project setup with ${projectSetup.items.length} items from ${file.name}`);
         } else {
           toast.error("No valid item quotation rows could be extracted.");
         }
@@ -307,12 +564,17 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
     };
 
     const handleApplyImport = () => {
-      if (!currentProject || rowsToImport.length === 0) return;
+      if (!currentProject) return;
 
       updateProject((prev) => {
-        const nextItems: RequestedItem[] = [...prev.items];
+        let nextItems: RequestedItem[] = [...prev.items];
         // If "replace", clear current bids; otherwise keep existing and merge
         const nextBids: SupplierBid[] = importStrategy === "replace" ? [] : [...prev.bids];
+
+        // If Full Project import scope and detected setup has items, start with those
+        if (importScope === "full_project" && detectedProjectSetup?.items && detectedProjectSetup.items.length > 0) {
+          nextItems = [...detectedProjectSetup.items];
+        }
 
         // 1. Ensure all items mentioned in rows exist in project requested items
         rowsToImport.forEach((row) => {
@@ -324,7 +586,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             matchedItem = {
               id: newItemId,
               itemName: row.item,
-              specifications: "",
+              specifications: row.specifications || "",
               quantity: row.quantity && row.quantity > 0 ? row.quantity : 100,
               uom: "PCS",
               targetUnitPrice: row.unitPrice || 0,
@@ -335,10 +597,17 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
               sortOrder: nextItems.length + 1,
             };
             nextItems.push(matchedItem);
+          } else if (row.specifications && !matchedItem.specifications) {
+            matchedItem.specifications = row.specifications;
           }
         });
 
-        // 2. Group rows to import by supplier
+        // 2. Resolve Quality Criteria to use
+        const targetCriteria = (importScope === "full_project" && detectedProjectSetup?.qualityCriteria && detectedProjectSetup.qualityCriteria.length > 0)
+          ? detectedProjectSetup.qualityCriteria
+          : prev.qualityCriteria || [];
+
+        // 3. Group rows to import by supplier
         const groupedBySupplier = new Map<string, ParsedRow[]>();
         rowsToImport.forEach((row) => {
           const key = row.supplier.trim();
@@ -347,7 +616,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
           groupedBySupplier.set(key, list);
         });
 
-        // 3. Create or update bids
+        // 4. Create or update bids
         groupedBySupplier.forEach((supplierRows, suppName) => {
           const first = supplierRows[0];
           let bid = nextBids.find(
@@ -359,7 +628,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             : "FOB") as Incoterm;
 
           const initialScores: Record<string, { passFailResult: PassFailResult; score: number | null; evidenceRemarks: string }> = {};
-          (prev.qualityCriteria || []).forEach((c) => {
+          targetCriteria.forEach((c) => {
             initialScores[c.id] = {
               passFailResult: c.criterionType === "PASS_FAIL" ? "PASS" : "NOT_CHECKED",
               score:
@@ -497,15 +766,52 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
           });
         });
 
-        return {
+        const updatedProject: RfqProject = {
           ...prev,
           items: nextItems,
           bids: nextBids,
         };
+
+        if (importScope === "full_project" && detectedProjectSetup) {
+          if (detectedProjectSetup.rfqTitle) updatedProject.rfqTitle = detectedProjectSetup.rfqTitle;
+          if (detectedProjectSetup.rfqReference) updatedProject.rfqReference = detectedProjectSetup.rfqReference;
+          if (detectedProjectSetup.notes !== undefined) updatedProject.notes = detectedProjectSetup.notes;
+          if (detectedProjectSetup.targetDate) updatedProject.targetDate = detectedProjectSetup.targetDate;
+          if (detectedProjectSetup.budget !== undefined) updatedProject.budget = detectedProjectSetup.budget;
+          if (detectedProjectSetup.comparisonCurrency) updatedProject.comparisonCurrency = detectedProjectSetup.comparisonCurrency;
+          if (detectedProjectSetup.fxRiskBufferPct !== undefined) updatedProject.fxRiskBufferPct = detectedProjectSetup.fxRiskBufferPct;
+          if (detectedProjectSetup.costOfMoneyPctPerYear !== undefined) updatedProject.costOfMoneyPctPerYear = detectedProjectSetup.costOfMoneyPctPerYear;
+          if (detectedProjectSetup.defaultVatPct !== undefined) updatedProject.defaultVatPct = detectedProjectSetup.defaultVatPct;
+          if (detectedProjectSetup.countVatAsCost !== undefined) updatedProject.countVatAsCost = detectedProjectSetup.countVatAsCost;
+          if (detectedProjectSetup.calcCustomsAuto !== undefined) updatedProject.calcCustomsAuto = detectedProjectSetup.calcCustomsAuto;
+          if (detectedProjectSetup.scoringWeightPricePct !== undefined) updatedProject.scoringWeightPricePct = detectedProjectSetup.scoringWeightPricePct;
+          if (detectedProjectSetup.scoringWeightQualityPct !== undefined) updatedProject.scoringWeightQualityPct = detectedProjectSetup.scoringWeightQualityPct;
+          if (detectedProjectSetup.scoringWeightLeadTimePct !== undefined) updatedProject.scoringWeightLeadTimePct = detectedProjectSetup.scoringWeightLeadTimePct;
+          if (detectedProjectSetup.awardStrategy) updatedProject.awardStrategy = detectedProjectSetup.awardStrategy;
+          if (detectedProjectSetup.preparedBy) updatedProject.preparedBy = detectedProjectSetup.preparedBy;
+          if (detectedProjectSetup.preparedByTitle) updatedProject.preparedByTitle = detectedProjectSetup.preparedByTitle;
+          if (detectedProjectSetup.reviewedBy) updatedProject.reviewedBy = detectedProjectSetup.reviewedBy;
+          if (detectedProjectSetup.reviewedByTitle) updatedProject.reviewedByTitle = detectedProjectSetup.reviewedByTitle;
+          if (detectedProjectSetup.approvedBy) updatedProject.approvedBy = detectedProjectSetup.approvedBy;
+          if (detectedProjectSetup.approvedByTitle) updatedProject.approvedByTitle = detectedProjectSetup.approvedByTitle;
+          if (detectedProjectSetup.justification) updatedProject.justification = detectedProjectSetup.justification;
+          if (detectedProjectSetup.exchangeRates && detectedProjectSetup.exchangeRates.length > 0) {
+            updatedProject.exchangeRates = detectedProjectSetup.exchangeRates;
+          }
+          if (targetCriteria.length > 0) {
+            updatedProject.qualityCriteria = targetCriteria;
+          }
+        }
+
+        return updatedProject;
       });
 
+      const setupSummary = (importScope === "full_project" && detectedProjectSetup)
+        ? ` (including Project Setup, ${detectedProjectSetup.exchangeRates?.length || 0} exchange rates, and ${detectedProjectSetup.qualityCriteria?.length || 0} quality criteria)`
+        : "";
+
       toast.success(
-        `Successfully imported ${rowsToImport.length} quotations across ${selectedSuppliers.size} suppliers (${importStrategy === "replace" ? "Replaced all bids" : "Merged & updated"}).`
+        `Successfully imported ${rowsToImport.length} quotations across ${selectedSuppliers.size} suppliers${setupSummary} (${importStrategy === "replace" ? "Replaced all bids" : "Merged & updated"}).`
       );
       handleClose();
     };
@@ -519,157 +825,332 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
     return (
       <Dialog open={isOpen} onOpenChange={handleClose}>
         <DialogContent
-          style={{ width: "min(1240px, 94vw)", maxWidth: "94vw", height: "80vh" }}
-          className="!w-[94vw] !max-w-[1240px] !max-h-[90vh] flex flex-col p-6 shadow-2xl border-border bg-card"
+          style={
+            parsedRows.length === 0
+              ? { width: "min(720px, 94vw)", maxWidth: "720px" }
+              : { width: "min(1280px, 95vw)", maxWidth: "95vw", height: "88vh" }
+          }
+          className={
+            parsedRows.length === 0
+              ? "!w-[94vw] !max-w-[720px] flex flex-col p-6 shadow-2xl border-border bg-card transition-all"
+              : "!w-[95vw] !max-w-[1280px] !h-[88vh] !max-h-[92vh] flex flex-col p-5 shadow-2xl border-border bg-card transition-all"
+          }
         >
           {/* Header */}
-          <DialogHeader className="space-y-1.5 pb-2 border-b">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                  <Upload className="w-4 h-4" />
+          <DialogHeader className="space-y-1 pb-3 border-b shrink-0">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Upload className="w-5 h-5" />
                 </div>
                 <div>
                   <DialogTitle className="text-base font-bold text-foreground">
-                    Import Bids from CSV or Excel
+                    {parsedRows.length === 0 ? "Import Bids from CSV or Excel" : "Review & Import Bids"}
                   </DialogTitle>
-                  <DialogDescription className="text-xs text-muted-foreground">
-                    Upload vendor quotation sheets to automatically map items, commercial terms, and tiered price breaks.
+                  <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                    {parsedRows.length === 0
+                      ? "Upload vendor quotation sheets to automatically map commercial terms and price breaks."
+                      : "Select suppliers to import and configure your merge strategy."}
                   </DialogDescription>
                 </div>
               </div>
-              {parsedRows.length > 0 && (
-                <div className="flex items-center gap-2">
+
+              {parsedRows.length === 0 ? (
+                <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportFullProjectTemplate(currentProject || undefined)}
+                    className="gap-1.5 text-xs h-7 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/40 hover:bg-emerald-100"
+                    title="Download Complete Multi-Sheet Project Template (Setup, Rates, Criteria, Items with Specs, and Bids)"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                    Full Project Template (.xlsx)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadTemplate}
+                    className="gap-1.5 text-xs h-7 text-foreground"
+                    title="Download Blank CSV Template"
+                  >
+                    <Download className="w-3.5 h-3.5 text-muted-foreground" />
+                    Blank Bids (.csv)
+                  </Button>
+                  {currentProject && currentProject.bids?.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => exportRfqBidsToCsv(currentProject)}
+                      className="gap-1.5 text-xs h-7 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900"
+                      title="Export Current Bids to CSV"
+                    >
+                      <Download className="w-3.5 h-3.5 text-blue-600" />
+                      Current Bids
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 shrink-0">
                   <Badge variant="outline" className="text-xs font-medium border-border gap-1 py-1">
-                    <Building2 className="w-3 h-3 text-muted-foreground" />
+                    <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
                     {detectedSuppliers.length} Suppliers Detected
                   </Badge>
                   <Badge variant="outline" className="text-xs font-medium border-border gap-1 py-1">
-                    <Package className="w-3 h-3 text-muted-foreground" />
+                    <Package className="w-3.5 h-3.5 text-muted-foreground" />
                     {detectedItemsCount} Items Found
+                  </Badge>
+                  <Badge variant="secondary" className="text-xs font-medium gap-1 py-1">
+                    <Layers className="w-3.5 h-3.5" />
+                    {parsedRows.length} Rows
                   </Badge>
                 </div>
               )}
             </div>
           </DialogHeader>
 
-          {/* Modal Body */}
-          <div className="flex-1 overflow-y-auto space-y-4 py-3 pr-1">
-            {/* Top Action / Help Ribbon */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch">
-              {/* Canonical Columns Callout */}
-              <div className="lg:col-span-8 rounded-lg border bg-muted/20 p-3 space-y-1.5 flex flex-col justify-between">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-primary" />
-                    Standard Column Format (42 Columns):
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleCopyColumns}
-                    className="h-6 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                  >
-                    {isCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                    {isCopied ? "Copied" : "Copy Header List"}
-                  </Button>
-                </div>
-                <p className="text-[11px] font-mono text-muted-foreground bg-background p-2 rounded border border-border/50 leading-relaxed select-all max-h-16 overflow-y-auto">
-                  {REQUIRED_COLUMNS_TEXT}
-                </p>
-              </div>
+          {/* Hidden File Input (Always Available) */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
 
-              {/* Offline Export / Template Help Card */}
-              <div className="lg:col-span-4 rounded-lg border bg-muted/15 p-3 flex flex-col justify-between space-y-2">
-                <div>
-                  <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider block">
-                    Prepare Offline Template:
-                  </span>
-                  <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                    Download a clean template or current project bids to edit in Excel or Google Sheets.
+          {/* Modal Body */}
+          {parsedRows.length === 0 ? (
+            /* =========================================================================
+               STATE A: EMPTY / PRE-UPLOAD STATE (Compact, Focused, No White Void)
+               ========================================================================= */
+            <div className="py-4 space-y-4">
+              {/* Hero Dropzone */}
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-border/80 hover:border-primary/70 rounded-xl p-8 text-center cursor-pointer transition-all bg-card hover:bg-muted/10 group flex flex-col items-center justify-center gap-3"
+              >
+                <div className="w-14 h-14 rounded-full bg-primary/10 group-hover:bg-primary/20 group-hover:scale-105 flex items-center justify-center text-primary transition-all shadow-xs">
+                  <FileSpreadsheet className="w-7 h-7" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
+                    Click to select or drag & drop CSV or Excel spreadsheet
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Supports .xlsx, .xls, .csv files up to 10MB • Auto-maps 42 standard bid columns
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              </div>
+
+              {/* Validation Warnings */}
+              {warnings.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 p-3 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                  <div className="flex items-center gap-1.5 font-semibold text-amber-900 dark:text-amber-200">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                    Validation Warnings ({warnings.length})
+                  </div>
+                  <ul className="list-disc list-inside max-h-24 overflow-y-auto space-y-0.5 text-[11px]">
+                    {warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Collapsible Column Guide */}
+              <div className="rounded-lg border bg-muted/15 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowColumnGuide((prev) => !prev)}
+                  className="w-full flex items-center justify-between p-3 text-left hover:bg-muted/20 transition-colors"
+                >
+                  <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-primary" />
+                    Supported Column Format (42 Columns)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-muted-foreground">
+                      {showColumnGuide ? "Hide columns" : "View column list"}
+                    </span>
+                    {showColumnGuide ? (
+                      <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                    )}
+                  </div>
+                </button>
+
+                {showColumnGuide && (
+                  <div className="p-3 pt-0 space-y-2 border-t border-border/40">
+                    <div className="flex items-center justify-between pt-2">
+                      <span className="text-[11px] text-muted-foreground">
+                        Columns can be in any order. Headers are matched case-insensitively.
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleCopyColumns}
+                        className="h-6 text-[11px] gap-1 text-muted-foreground hover:text-foreground shrink-0"
+                      >
+                        {isCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        {isCopied ? "Copied" : "Copy Header List"}
+                      </Button>
+                    </div>
+                    <p className="text-[11px] font-mono text-muted-foreground bg-background p-2.5 rounded border border-border/50 leading-relaxed select-all max-h-28 overflow-y-auto">
+                      {REQUIRED_COLUMNS_TEXT}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* =========================================================================
+               STATE B: POST-UPLOAD STATE (Full-Featured, Expanded Preview & Selection Hub)
+               ========================================================================= */
+            <div className="flex-1 min-h-0 flex flex-col space-y-3 py-2 overflow-hidden">
+              {/* Compact File Summary Strip */}
+              <div className="rounded-lg border bg-muted/20 px-3.5 py-2 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div className="min-w-0 flex items-center gap-2">
+                    <span className="text-xs font-bold text-foreground truncate">
+                      {fileName || "Spreadsheet"}
+                    </span>
+                    <Badge variant="outline" className="text-[10px] bg-background font-mono shrink-0">
+                      {parsedRows.length} rows parsed
+                    </Badge>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleDownloadTemplate}
-                    className="gap-1 text-xs h-7 flex-1 text-foreground"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="h-7 text-xs gap-1"
                   >
-                    <Download className="w-3 h-3 text-muted-foreground" />
-                    Template (.csv)
+                    <Upload className="w-3 h-3" />
+                    Replace File
                   </Button>
-                  {currentProject && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => exportRfqBidsToCsv(currentProject)}
-                      className="gap-1 text-xs h-7 flex-1 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900"
-                    >
-                      <Download className="w-3 h-3 text-blue-600" />
-                      Current Bids (.csv)
-                    </Button>
-                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={resetState}
+                    className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                  >
+                    Clear
+                  </Button>
                 </div>
               </div>
-            </div>
 
-            {/* Drop Zone */}
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-border/80 hover:border-primary/60 rounded-xl p-5 text-center cursor-pointer transition-colors bg-card hover:bg-muted/10 group"
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              <div className="flex flex-col items-center gap-1.5">
-                <div className="w-10 h-10 rounded-full bg-primary/10 group-hover:bg-primary/20 flex items-center justify-center text-primary transition-colors">
-                  <FileSpreadsheet className="w-5 h-5" />
+              {/* Warnings (if any) */}
+              {warnings.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 p-2.5 text-xs text-amber-800 dark:text-amber-300 space-y-1 shrink-0">
+                  <div className="flex items-center gap-1.5 font-semibold text-amber-900 dark:text-amber-200">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                    Validation Warnings ({warnings.length})
+                  </div>
+                  <ul className="list-disc list-inside max-h-16 overflow-y-auto space-y-0.5 text-[11px]">
+                    {warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
                 </div>
-                <div>
-                  <p className="text-xs font-semibold text-foreground">
-                    {fileName ? (
-                      <span className="text-primary font-bold">{fileName}</span>
-                    ) : (
-                      "Click to select or drag & drop CSV or Excel spreadsheet"
+              )}
+
+              {/* Full Project Setup Detected Banner */}
+              {detectedProjectSetup && (
+                <div className="rounded-xl border border-primary/40 bg-primary/5 p-3 space-y-2 shadow-xs shrink-0">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                      </div>
+                      <span className="text-xs font-bold text-foreground">
+                        Full Project Configuration Detected
+                      </span>
+                      <Badge variant="outline" className="text-[10px] bg-background border-primary/40 text-primary font-semibold py-0">
+                        Multi-Sheet
+                      </Badge>
+                    </div>
+
+                    {/* Import Scope Selector */}
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="text-muted-foreground text-[11px] font-medium">Scope:</span>
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="radio"
+                          name="importScope"
+                          value="full_project"
+                          checked={importScope === "full_project"}
+                          onChange={() => setImportScope("full_project")}
+                          className="accent-primary"
+                        />
+                        <span className="font-semibold text-foreground text-xs">Full Project (Setup, Rates, Criteria, Items & Bids)</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="radio"
+                          name="importScope"
+                          value="bids_only"
+                          checked={importScope === "bids_only"}
+                          onChange={() => setImportScope("bids_only")}
+                          className="accent-primary"
+                        />
+                        <span className="text-muted-foreground text-xs">Bids Only</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Badges of detected project details */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-border/40 text-[11px]">
+                    {detectedProjectSetup.rfqTitle && (
+                      <Badge variant="secondary" className="gap-1 font-normal py-0.5 text-[11px]">
+                        <strong>Title:</strong> {detectedProjectSetup.rfqTitle}
+                      </Badge>
                     )}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Supports .xlsx, .xls, .csv files up to 10MB
-                  </p>
+                    {detectedProjectSetup.targetDate && (
+                      <Badge variant="outline" className="gap-1 font-normal bg-background py-0.5 text-[11px]">
+                        <strong>Target Date:</strong> {detectedProjectSetup.targetDate}
+                      </Badge>
+                    )}
+                    {detectedProjectSetup.budget && (
+                      <Badge variant="outline" className="gap-1 font-normal bg-background py-0.5 text-[11px]">
+                        <strong>Budget:</strong> ₱{detectedProjectSetup.budget.toLocaleString()}
+                      </Badge>
+                    )}
+                    {detectedProjectSetup.exchangeRates && detectedProjectSetup.exchangeRates.length > 0 && (
+                      <Badge variant="outline" className="gap-1 font-normal bg-background py-0.5 text-[11px]">
+                        <strong>Exchange Rates:</strong> {detectedProjectSetup.exchangeRates.map((r) => r.currencyCode).join(", ")}
+                      </Badge>
+                    )}
+                    {detectedProjectSetup.qualityCriteria && detectedProjectSetup.qualityCriteria.length > 0 && (
+                      <Badge variant="outline" className="gap-1 font-normal bg-background py-0.5 text-[11px]">
+                        <strong>Quality Criteria:</strong> {detectedProjectSetup.qualityCriteria.length} ({detectedProjectSetup.qualityCriteria.filter((c) => c.criterionType === "PASS_FAIL").length} Pass/Fail)
+                      </Badge>
+                    )}
+                    {detectedProjectSetup.items && detectedProjectSetup.items.length > 0 && (
+                      <Badge variant="outline" className="gap-1 font-normal bg-background py-0.5 text-[11px]">
+                        <strong>Items with Specs:</strong> {detectedProjectSetup.items.length}
+                      </Badge>
+                    )}
+                    {detectedProjectSetup.notes && (
+                      <Badge variant="secondary" className="gap-1 font-normal py-0.5 text-[11px] max-w-[260px] truncate" title={detectedProjectSetup.notes}>
+                        <strong>Notes:</strong> {detectedProjectSetup.notes}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </div>
+              )}
 
-            {/* Warnings List */}
-            {warnings.length > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 p-3 text-xs text-amber-800 dark:text-amber-300 space-y-1">
-                <div className="flex items-center gap-1.5 font-semibold text-amber-900 dark:text-amber-200">
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                  Validation Warnings ({warnings.length})
-                </div>
-                <ul className="list-disc list-inside max-h-24 overflow-y-auto space-y-0.5 text-[11px]">
-                  {warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Dynamic Selective Import Controls (When file is loaded) */}
-            {parsedRows.length > 0 && (
-              <div className="rounded-xl border bg-card p-4 space-y-3.5 shadow-xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5">
+              {/* Supplier Selection & Import Strategy Card */}
+              <div className="rounded-xl border bg-card p-3 space-y-2.5 shadow-xs shrink-0">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 border-b pb-2">
                   <div className="flex items-center gap-2">
-                    <Filter className="w-4 h-4 text-primary" />
+                    <Filter className="w-3.5 h-3.5 text-primary" />
                     <span className="text-xs font-bold text-foreground uppercase tracking-wide">
                       Select What to Import
                     </span>
-                    <Badge variant="secondary" className="text-[11px]">
+                    <Badge variant="secondary" className="text-[10px]">
                       {selectedSuppliers.size} of {detectedSuppliers.length} Suppliers Active
                     </Badge>
                   </div>
@@ -695,30 +1176,30 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
                 </div>
 
                 {/* Suppliers Checkbox Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1.5 max-h-28 overflow-y-auto pr-1">
                   {detectedSuppliers.map((supp) => {
                     const isChecked = selectedSuppliers.has(supp.name);
                     return (
                       <div
                         key={supp.name}
                         onClick={() => handleToggleSupplier(supp.name)}
-                        className={`flex items-center justify-between p-2 rounded-lg border text-xs cursor-pointer transition-all select-none ${
+                        className={`flex items-center justify-between p-1.5 px-2.5 rounded-lg border text-xs cursor-pointer transition-all select-none ${
                           isChecked
                             ? "border-primary/50 bg-primary/5 text-foreground"
                             : "border-border/60 bg-muted/10 text-muted-foreground opacity-60 hover:opacity-100"
                         }`}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <input
                             type="checkbox"
                             checked={isChecked}
                             onChange={() => {}} // handled by parent div
-                            className="w-3.5 h-3.5 rounded border-border text-primary cursor-pointer accent-primary"
+                            className="w-3.5 h-3.5 rounded border-border text-primary cursor-pointer accent-primary shrink-0"
                           />
                           <span className="font-semibold truncate text-[11px]">{supp.name}</span>
                         </div>
-                        <Badge variant="outline" className="text-[10px] font-mono shrink-0 ml-1">
-                          {supp.count} {supp.count === 1 ? "row" : "rows"}
+                        <Badge variant="outline" className="text-[10px] font-mono shrink-0 ml-1 py-0 px-1">
+                          {supp.count}
                         </Badge>
                       </div>
                     );
@@ -726,12 +1207,12 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
                 </div>
 
                 {/* Import Strategy Options */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t text-xs">
                   <div className="flex items-center gap-2 text-muted-foreground">
-                    <Layers className="w-4 h-4 text-muted-foreground" />
-                    <span className="font-medium text-foreground">Import Strategy:</span>
+                    <Layers className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="font-medium text-foreground text-xs">Import Strategy:</span>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-4">
                     <label className="flex items-center gap-1.5 cursor-pointer select-none">
                       <input
                         type="radio"
@@ -741,7 +1222,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
                         onChange={() => setImportStrategy("merge")}
                         className="accent-primary"
                       />
-                      <span className="font-medium text-foreground">Merge & Update</span>
+                      <span className="font-medium text-foreground text-xs">Merge & Update</span>
                       <span className="text-[10px] text-muted-foreground">(Keep existing & add/update)</span>
                     </label>
 
@@ -754,38 +1235,36 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
                         onChange={() => setImportStrategy("replace")}
                         className="accent-primary"
                       />
-                      <span className="font-medium text-destructive">Replace All Bids</span>
+                      <span className="font-medium text-destructive text-xs">Replace All Bids</span>
                       <span className="text-[10px] text-muted-foreground">(Clear previous bids)</span>
                     </label>
                   </div>
                 </div>
               </div>
-            )}
 
-            {/* Parsed Preview Table */}
-            {parsedRows.length > 0 && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+              {/* Full-Height Preview Table */}
+              <div className="flex-1 min-h-[240px] flex flex-col space-y-1.5 overflow-hidden">
+                <div className="flex items-center justify-between text-xs font-semibold text-foreground px-0.5 shrink-0">
                   <div className="flex items-center gap-2">
                     <span>Active Quotation Lines ({rowsToImport.length} of {parsedRows.length} rows)</span>
                     {rowsToImport.length > 0 ? (
-                      <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 gap-1 text-[11px]">
+                      <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 gap-1 text-[10px] py-0">
                         <CheckCircle2 className="w-3 h-3" /> Ready to Import
                       </Badge>
                     ) : (
-                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 gap-1 text-[11px]">
+                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 gap-1 text-[10px] py-0">
                         <AlertCircle className="w-3 h-3" /> No suppliers selected
                       </Badge>
                     )}
                   </div>
                   <span className="text-[11px] text-muted-foreground">
-                    Showing top {Math.min(rowsToImport.length, 12)} rows
+                    Showing all {rowsToImport.length} selected lines
                   </span>
                 </div>
 
-                <div className="rounded-lg border overflow-hidden max-h-52 overflow-y-auto bg-card">
+                <div className="flex-1 overflow-auto rounded-lg border bg-card">
                   <table className="w-full text-xs text-left">
-                    <thead className="bg-muted/40 border-b text-muted-foreground uppercase text-[10px] font-semibold sticky top-0">
+                    <thead className="bg-muted/70 backdrop-blur-xs border-b text-muted-foreground uppercase text-[10px] font-semibold sticky top-0 z-10">
                       <tr>
                         <th className="py-2 px-3">Supplier</th>
                         <th className="py-2 px-2">Item</th>
@@ -797,8 +1276,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/50">
-                      {rowsToImport.slice(0, 12).map((r, i) => (
-                        <tr key={i} className="hover:bg-muted/10 transition-colors">
+                      {rowsToImport.map((r, i) => (
+                        <tr key={i} className="hover:bg-muted/15 transition-colors">
                           <td className="py-1.5 px-3 font-semibold text-foreground">{r.supplier}</td>
                           <td className="py-1.5 px-2 text-muted-foreground">{r.item}</td>
                           <td className="py-1.5 px-2 font-mono text-[11px]">{r.incoterm || "FOB"}</td>
@@ -814,16 +1293,9 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
                           </td>
                         </tr>
                       ))}
-                      {rowsToImport.length > 12 && (
-                        <tr className="bg-muted/10 text-muted-foreground italic text-center">
-                          <td colSpan={7} className="py-2 px-3">
-                            ... and {rowsToImport.length - 12} more selected quotation lines
-                          </td>
-                        </tr>
-                      )}
                       {rowsToImport.length === 0 && (
                         <tr>
-                          <td colSpan={7} className="py-6 text-center text-muted-foreground italic">
+                          <td colSpan={7} className="py-10 text-center text-muted-foreground italic">
                             No rows selected. Check one or more suppliers above to preview and import their bids.
                           </td>
                         </tr>
@@ -832,33 +1304,34 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
                   </table>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Modal Footer */}
-          <DialogFooter className="flex items-center justify-between border-t pt-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={resetState}
-              disabled={!fileName}
-              className="text-xs text-muted-foreground hover:text-foreground h-8"
-            >
-              Clear File
-            </Button>
+          <DialogFooter className="flex items-center justify-between border-t pt-3 shrink-0">
+            <div className="text-xs text-muted-foreground">
+              {parsedRows.length > 0 && (
+                <span>
+                  <strong className="text-foreground">{selectedSuppliers.size}</strong> of {detectedSuppliers.length} suppliers active (
+                  <strong className="text-foreground">{rowsToImport.length}</strong> quotation rows)
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={handleClose} className="h-8 text-xs">
                 Cancel
               </Button>
-              <Button
-                size="sm"
-                onClick={handleApplyImport}
-                disabled={rowsToImport.length === 0 || isProcessing}
-                className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 h-8 text-xs font-semibold px-4"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Apply Import ({rowsToImport.length} rows)
-              </Button>
+              {parsedRows.length > 0 && (
+                <Button
+                  size="sm"
+                  onClick={handleApplyImport}
+                  disabled={rowsToImport.length === 0 || isProcessing}
+                  className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 h-8 text-xs font-semibold px-4"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Apply Import ({rowsToImport.length} rows)
+                </Button>
+              )}
             </div>
           </DialogFooter>
         </DialogContent>

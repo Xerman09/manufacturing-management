@@ -31,8 +31,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
             <style>{`
                 @media print {
                     @page {
-                        size: landscape;
-                        margin: 8mm 8mm 8mm 8mm;
+                        size: auto;
+                        margin: 8mm;
                     }
 
                     html,
@@ -107,6 +107,7 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                     table {
                         width: 100% !important;
                         max-width: 100% !important;
+                        table-layout: auto !important;
                         border-collapse: collapse !important;
                         border: 1.5px solid #334155 !important;
                         font-size: 7.5pt !important;
@@ -129,6 +130,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
 
                     td,
                     th {
+                        min-width: 0 !important;
+                        word-break: break-word !important;
                         padding: 2.5px 3.5px !important;
                         border: 1px solid #475569 !important;
                         color: #0f172a !important;
@@ -209,7 +212,12 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                             <strong className="text-foreground">Reference:</strong> {currentProject.rfqReference || "—"}
                         </div>
                         <div>
-                            <strong className="text-foreground">Date:</strong> {new Date().toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" })}
+                            <strong className="text-foreground">Date:</strong>{" "}
+                            {currentProject.targetDate
+                                ? new Date(currentProject.targetDate).toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" })
+                                : currentProject.createdAt
+                                ? new Date(currentProject.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" })
+                                : new Date().toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" })}
                         </div>
                         <div>
                             <strong className="text-foreground">Currency:</strong> {compCurr} (landed, incl. VAT, duty, freight, fees)

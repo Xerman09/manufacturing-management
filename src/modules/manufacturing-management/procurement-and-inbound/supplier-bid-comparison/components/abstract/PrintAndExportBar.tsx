@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Printer, FileSpreadsheet, FileText, Download } from "lucide-react";
+import { Printer, FileSpreadsheet, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { exportRfqToExcel, exportRfqBidsToCsv } from "../../engine/excel-export";

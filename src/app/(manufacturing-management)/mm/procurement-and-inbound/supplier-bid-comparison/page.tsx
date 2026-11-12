@@ -71,7 +71,7 @@ function buildHeaderUserFromToken(token: string | null | undefined) {
 }
 
 export const metadata = {
-  title: "Supplier Bid Comparison",
+  title: "Supplier Comparison",
 };
 
 export default async function SupplierBidComparisonPage() {

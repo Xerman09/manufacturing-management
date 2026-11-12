@@ -10,6 +10,7 @@ import {
     FileText,
     Image as ImageIcon,
     File,
+    Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,58 +29,78 @@ export const BidAttachmentsCard: React.FC<BidAttachmentsCardProps> = ({ bid }) =
 
     const [previewAttachment, setPreviewAttachment] = useState<BidAttachment | null>(null);
     const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
+    const [isUploading, setIsUploading] = useState<boolean>(false);
 
     const attachments = bid.attachments || [];
 
-    // File Upload Handler (with DataURL extraction for instant preview + UUID directus_file_id)
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Real File Upload Handler via Directus /files API
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files || files.length === 0) return;
 
         const fileList = Array.from(files);
-        let processedCount = 0;
+        setIsUploading(true);
         const newAttachments: BidAttachment[] = [];
+        let uploadErrors = 0;
 
-        fileList.forEach((file) => {
+        for (const file of fileList) {
             if (file.size > 20 * 1024 * 1024) {
                 toast.error(`File "${file.name}" exceeds 20MB limit.`);
-                return;
+                uploadErrors++;
+                continue;
             }
 
-            const reader = new FileReader();
-            reader.onload = (loadEvt) => {
-                const dataUrl = loadEvt.target?.result as string;
+            try {
+                const formData = new FormData();
+                formData.append("file", file);
 
-                // Generate standard 36-char UUID format
-                const uuid = crypto.randomUUID
-                    ? crypto.randomUUID()
-                    : `att-${Date.now().toString(16)}-4000-8000-${Math.random().toString(16).slice(2, 14)}`;
-
-                newAttachments.push({
-                    id: "att-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-                    directusFileId: uuid,
-                    fileName: file.name,
-                    mimeType: file.type || "application/octet-stream",
-                    fileSize: file.size,
-                    documentType: "Quotation Document",
-                    uploadedAt: new Date().toISOString(),
-                    dataUrl,
+                const res = await fetch("/api/manufacturing/procurement-and-inbound/supplier-bid-comparison/attachments", {
+                    method: "POST",
+                    body: formData,
                 });
 
-                processedCount += 1;
-                if (processedCount === fileList.length) {
-                    updateProject((prev) => ({
-                        ...prev,
-                        bids: prev.bids.map((b) =>
-                            b.id === bid.id ? { ...b, attachments: [...(b.attachments || []), ...newAttachments] } : b
-                        ),
-                    }));
-                    toast.success(`Attached ${newAttachments.length} document(s).`);
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => null);
+                    toast.error(`Upload failed for "${file.name}": ${errData?.error || res.statusText}`);
+                    uploadErrors++;
+                    continue;
                 }
-            };
 
-            reader.readAsDataURL(file);
-        });
+                const data = await res.json();
+                if (data.success && data.file) {
+                    const df = data.file;
+                    newAttachments.push({
+                        id: "att-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                        directusFileId: df.id,
+                        fileName: df.fileName,
+                        mimeType: df.mimeType,
+                        fileSize: df.fileSize,
+                        documentType: "Quotation Document",
+                        uploadedAt: new Date().toISOString(),
+                        fileUrl: `/api/manufacturing/procurement-and-inbound/supplier-bid-comparison/attachments?fileId=${df.id}`,
+                    });
+                }
+            } catch (err) {
+                toast.error(`Error uploading "${file.name}": ${(err as Error).message}`);
+                uploadErrors++;
+            }
+        }
+
+        if (newAttachments.length > 0) {
+            updateProject((prev) => ({
+                ...prev,
+                bids: prev.bids.map((b) =>
+                    b.id === bid.id ? { ...b, attachments: [...(b.attachments || []), ...newAttachments] } : b
+                ),
+            }));
+            toast.success(`Successfully uploaded ${newAttachments.length} document(s) to Directus.`);
+        }
+
+        if (uploadErrors > 0 && newAttachments.length === 0) {
+            toast.error("File upload failed. Please try again.");
+        }
+
+        setIsUploading(false);
 
         if (fileInputRef.current) {
             fileInputRef.current.value = "";
@@ -122,10 +143,20 @@ export const BidAttachmentsCard: React.FC<BidAttachmentsCardProps> = ({ bid }) =
                             size="sm"
                             variant="outline"
                             onClick={() => fileInputRef.current?.click()}
+                            disabled={isUploading}
                             className="h-7 text-xs gap-1"
                         >
-                            <Plus className="w-3.5 h-3.5" />
-                            Attach files
+                            {isUploading ? (
+                                <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    Uploading...
+                                </>
+                            ) : (
+                                <>
+                                    <Plus className="w-3.5 h-3.5" />
+                                    Attach files
+                                </>
+                            )}
                         </Button>
                     </div>
                 </CardHeader>
@@ -189,13 +220,17 @@ export const BidAttachmentsCard: React.FC<BidAttachmentsCardProps> = ({ bid }) =
                                                 <Eye className="w-3.5 h-3.5" />
                                             </Button>
 
-                                            {att.dataUrl && (
+                                            {(att.dataUrl || att.fileUrl || att.directusFileId) && (
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
                                                     onClick={() => {
+                                                        const url =
+                                                            att.dataUrl ||
+                                                            att.fileUrl ||
+                                                            `/api/manufacturing/procurement-and-inbound/supplier-bid-comparison/attachments?fileId=${att.directusFileId}`;
                                                         const a = document.createElement("a");
-                                                        a.href = att.dataUrl!;
+                                                        a.href = url;
                                                         a.download = att.fileName;
                                                         document.body.appendChild(a);
                                                         a.click();

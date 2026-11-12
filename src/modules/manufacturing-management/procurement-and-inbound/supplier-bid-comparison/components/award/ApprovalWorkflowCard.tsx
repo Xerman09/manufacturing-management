@@ -83,6 +83,7 @@ export const ApprovalWorkflowCard: React.FC = () => {
         updateProject((prev) => ({
             ...prev,
             status: "Submitted",
+            approvalRemarks: actionComment.trim() || "Submitted for BAC executive approval.",
             approvalHistory: newHistory,
         }));
 
@@ -102,6 +103,7 @@ export const ApprovalWorkflowCard: React.FC = () => {
         updateProject((prev) => ({
             ...prev,
             status: "Approved",
+            approvalRemarks: actionComment.trim() || "Award approved by authority.",
             approvedBy: prev.approvedBy || prev.reviewedBy || "Approving Authority",
             approvalHistory: newHistory,
         }));

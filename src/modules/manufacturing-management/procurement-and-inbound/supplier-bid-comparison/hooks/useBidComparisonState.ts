@@ -5,7 +5,10 @@ import { toast } from "sonner";
 import {
     ProjectStatus,
     RfqProject,
- 
+    RequestedItem,
+    QualityCriterion,
+    SupplierBid,
+    ItemQuotation,
     StorageSyncStatus,
 } from "../types";
 import {
@@ -97,7 +100,7 @@ interface BidComparisonState {
     createNewProject: (title?: string, ref?: string) => void;
     updateProject: (updater: (prev: RfqProject) => RfqProject, allowWhenLocked?: boolean) => void;
     duplicateProject: (newTitle?: string) => void;
-    deleteProject: () => Promise<void>;
+    deleteProject: () => Promise<boolean>;
     saveCurrentProject: () => Promise<void>;
     saveProjectNow: () => Promise<void>;
     emergencyKeepaliveSave: () => void;
@@ -105,6 +108,17 @@ interface BidComparisonState {
 
 const LOCAL_STORAGE_KEY_PREFIX = "mm_rfq_project_";
 const LOCAL_STORAGE_INDEX_KEY = "mm_rfq_projects_index";
+
+function parseDbId(val: unknown): number | null {
+    if (typeof val === "number" && !isNaN(val)) return val;
+    if (typeof val === "string") {
+        const parsed = parseInt(val, 10);
+        if (!isNaN(parsed) && parsed > 0 && String(parsed) === val.trim()) {
+            return parsed;
+        }
+    }
+    return null;
+}
 
 function createEmptyProject(title = "New Canvass Project", ref = ""): RfqProject {
     const id = "rfq-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -194,6 +208,10 @@ function computeProjectFingerprint(p: RfqProject): string {
         appr: p.approvedBy,
         apprT: p.approvedByTitle,
         just: p.justification,
+        strat: p.awardStrategy,
+        tgt: p.targetDate,
+        rej: p.rejectionReason,
+        appRem: p.approvalRemarks,
     });
 }
 
@@ -452,20 +470,63 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         if (!currentProject) return;
 
         const nextRound = (currentProject.roundNo || 1) + 1;
+        const parentId = parseDbId(currentProject.dbId) || parseDbId(currentProject.id) || null;
+        const newClientId = "rfq-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+        // Strip dbId from items so they become new rows upon saving
+        const cleanItems: RequestedItem[] = (currentProject.items || []).map((it) => ({
+            ...it,
+            dbId: undefined,
+        }));
+
+        // Strip dbId from quality criteria
+        const cleanQualityCriteria: QualityCriterion[] = (currentProject.qualityCriteria || []).map((qc) => ({
+            ...qc,
+            dbId: undefined,
+        }));
+
+        // Strip dbId from bids, quotations, and price breaks
+        const cleanBids: SupplierBid[] = (currentProject.bids || []).map((b) => {
+            const cleanQuotes: Record<string, ItemQuotation> = {};
+            if (b.quotations) {
+                Object.entries(b.quotations).forEach(([itemId, q]) => {
+                    cleanQuotes[itemId] = {
+                        ...q,
+                        dbId: undefined,
+                        priceBreaks: (q.priceBreaks || []).map((pb) => ({
+                            ...pb,
+                            dbId: undefined,
+                        })),
+                    };
+                });
+            }
+
+            return {
+                ...b,
+                dbId: undefined,
+                quotations: cleanQuotes,
+                scores: { ...(b.scores || {}) },
+                attachments: [], // Clear attachments on duplication
+            };
+        });
+
         const duplicated: RfqProject = {
             ...currentProject,
-            id: "rfq-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-            parentRfqId: currentProject.dbId || null,
+            id: newClientId,
+            dbId: undefined, // CRITICAL: Must be undefined so it never points to or overwrites parent ID!
+            parentRfqId: parentId,
             roundNo: nextRound,
             rfqTitle: newTitle || `${currentProject.rfqTitle} - Round ${nextRound}`,
             status: "Draft",
             version: 1,
+            rejectionReason: undefined,
+            approvalRemarks: undefined,
+            awardStrategy: "MANUAL",
+            items: cleanItems,
+            qualityCriteria: cleanQualityCriteria,
+            bids: cleanBids,
             awards: [], // Reset awards
             approvalHistory: [], // Reset history
-            bids: currentProject.bids.map((b) => ({
-                ...b,
-                attachments: [], // Clear attachments on duplication
-            })),
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
         };
@@ -488,6 +549,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             projectsList: updatedList,
             storageStatus: "SHARED_LIVE",
             lastSavedTimestamp: getPhilippineTimestamp(),
+            isDirty: true,
         });
 
         if (typeof window !== "undefined") {
@@ -496,16 +558,49 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         }
 
         toast.success(`Duplicated as Round ${nextRound}`);
+
+        // Trigger immediate save so the duplicate creates its own distinct row in mm_rfq
+        get().saveProjectNow();
     },
 
-    deleteProject: async () => {
+    deleteProject: async (): Promise<boolean> => {
         const { currentProject, projectsList } = get();
-        if (!currentProject) return;
+        if (!currentProject) return false;
 
-        const remaining = projectsList.filter((p) => p.id !== currentProject.id);
+        const serverDbId = parseDbId(currentProject.dbId) || parseDbId(currentProject.id);
+
+        if (serverDbId) {
+            try {
+                const res = await fetch(`/api/manufacturing/procurement-and-inbound/supplier-bid-comparison?id=${encodeURIComponent(serverDbId)}`, {
+                    method: "DELETE",
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => null);
+                    toast.error(data?.error || `Failed to soft-delete project on server (${res.status})`);
+                    return false;
+                }
+            } catch (err) {
+                toast.error("Network error while deleting project: " + ((err as Error).message || "Offline"));
+                return false;
+            }
+        }
+
+        const currentClientId = String(currentProject.id);
+        const currentDbIdStr = serverDbId ? String(serverDbId) : null;
+
+        // ONLY filter out this specific project (by its own client ID or its own server DB ID)
+        const remaining = projectsList.filter((p) => {
+            const pid = String(p.id);
+            if (pid === currentClientId) return false;
+            if (currentDbIdStr && pid === currentDbIdStr) return false;
+            return true;
+        });
 
         if (typeof window !== "undefined") {
             localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + currentProject.id);
+            if (serverDbId) {
+                localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + serverDbId);
+            }
             localStorage.setItem(LOCAL_STORAGE_INDEX_KEY, JSON.stringify(remaining));
         }
 
@@ -522,7 +617,8 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             get().createNewProject();
         }
 
-        toast.success("Project deleted successfully");
+        toast.success(`Project "${currentProject.rfqTitle}" soft-deleted successfully`);
+        return true;
     },
 
     saveCurrentProject: async () => {
