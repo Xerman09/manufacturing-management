@@ -466,7 +466,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                         <div className="p-2.5 rounded-md bg-muted/40 border border-border/60 text-xs text-muted-foreground flex items-center gap-2">
                             <Info className="h-4 w-4 text-primary shrink-0" />
                             <span>
-                                Shipment: <strong className="text-foreground">{landedResult.totalVolumeM3.toFixed(2)} m³</strong>, <strong className="text-foreground">{landedResult.totalWeightKg.toLocaleString()} kg</strong> → <strong className="text-foreground">{containerSummary}</strong> (estimated; 20&apos; ≈ 28 m³, 40&apos; ≈ 58 m³ usable) · dutiable value per declaration <strong className="text-foreground">₱{dutiablePerDecl.toLocaleString()}</strong>.
+                                Shipment: <strong className="text-foreground">{landedResult.totalVolumeM3.toFixed(3)} m³</strong>, <strong className="text-foreground">{landedResult.totalWeightKg.toLocaleString()} kg</strong> → <strong className="text-foreground">{containerSummary}</strong> (estimated; 20&apos; ≈ 28 m³, 40&apos; ≈ 58 m³ usable) · dutiable value per declaration <strong className="text-foreground">₱{dutiablePerDecl.toLocaleString()}</strong>.
                             </span>
                         </div>
 

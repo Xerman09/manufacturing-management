@@ -5,23 +5,58 @@ import { toast } from "sonner";
 import {
     ProjectStatus,
     RfqProject,
-    RequestedItem,
-    SupplierBid,
+ 
     StorageSyncStatus,
 } from "../types";
 import {
     DEFAULT_CUSTOMS_RATES,
     DEFAULT_IPC_BRACKETS,
     DEFAULT_QUALITY_CRITERIA,
-    DEFAULT_PASS_FAIL_REQUIREMENTS,
+ 
 } from "../constants/default-customs-rates";
 import { getPhilippineTimestamp } from "../utils/timestamp";
+export interface MasterLookupSupplier {
+    id: number;
+    supplierName: string;
+    contactPerson: string;
+    emailAddress: string;
+    phoneNumber: string;
+    country: string;
+    isForeign: boolean;
+    supplierType: string;
+    currency: string;
+    paymentTerms: string;
+    deliveryTerms: string;
+    [key: string]: unknown;
+}
+
+export interface MasterLookupProduct {
+    productId: number;
+    productName: string;
+    productCode: string;
+    uom: string;
+    targetUnitPrice: number;
+    weightKg: number;
+    cbmLength: number;
+    cbmWidth: number;
+    cbmHeight: number;
+    [key: string]: unknown;
+}
+
+export interface MasterLookupForex {
+    currencyCode: string;
+    currencyName: string;
+    exchangeRate: number;
+    effectiveDate: string;
+    [key: string]: unknown;
+}
+
 interface MasterLookupData {
-    suppliers: any[];
-    products: any[];
+    suppliers: MasterLookupSupplier[];
+    products: MasterLookupProduct[];
     units: Array<{ unitId: number; unitName: string; unitShortcut: string }>;
-    forex: any[];
-    evaluations: any[];
+    forex: MasterLookupForex[];
+    evaluations: Record<string, unknown>[];
 }
 
 interface BidComparisonState {
@@ -58,7 +93,7 @@ interface BidComparisonState {
     setActiveBidId: (id: string | null) => void;
     fetchProjects: () => Promise<void>;
     fetchLookups: () => Promise<void>;
-    selectProject: (projectId: string) => void;
+    selectProject: (projectId: string) => Promise<void>;
     createNewProject: (title?: string, ref?: string) => void;
     updateProject: (updater: (prev: RfqProject) => RfqProject, allowWhenLocked?: boolean) => void;
     duplicateProject: (newTitle?: string) => void;
@@ -221,13 +256,13 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             if (res.ok) {
                 const data = await res.json();
                 if (data.projects && data.projects.length > 0) {
-                    const formatted = data.projects.map((p: any) => ({
-                        id: String(p.id),
-                        rfqTitle: p.rfq_title || "Untitled",
-                        rfqReference: p.rfq_reference || "-",
-                        status: p.status || "Draft",
-                        roundNo: p.round_no || 1,
-                        updatedAt: p.updated_at,
+                    const formatted = data.projects.map((p: Record<string, unknown>) => ({
+                        id: String(p.id ?? ""),
+                        rfqTitle: String(p.rfq_title || "Untitled"),
+                        rfqReference: String(p.rfq_reference || "-"),
+                        status: (p.status as ProjectStatus) || "Draft",
+                        roundNo: Number(p.round_no) || 1,
+                        updatedAt: p.updated_at ? String(p.updated_at) : undefined,
                     }));
                     set({ projectsList: formatted, storageStatus: "SHARED_LIVE" });
                     return;
@@ -251,8 +286,11 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         }
     },
 
-    selectProject: (projectId: string) => {
+    selectProject: async (projectId: string) => {
         lastSavedContentHash = "";
+        let loadedFromLocal = false;
+
+        // 1. Instant hydration from localStorage if available
         if (typeof window !== "undefined") {
             const saved = localStorage.getItem(LOCAL_STORAGE_KEY_PREFIX + projectId);
             if (saved) {
@@ -264,11 +302,45 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                         storageStatus: parsed.status === "Approved" || parsed.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
                         lastSavedTimestamp: getPhilippineTimestamp(),
                     });
-                    return;
+                    loadedFromLocal = true;
                 } catch {
                     // JSON parse error
                 }
             }
+        }
+
+        // 2. Fetch live project from Directus API
+        try {
+            const res = await fetch(`/api/manufacturing/procurement-and-inbound/supplier-bid-comparison?id=${encodeURIComponent(projectId)}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.project) {
+                    const proj: RfqProject = data.project;
+                    set({
+                        currentProject: proj,
+                        activeBidId: proj.bids && proj.bids.length > 0 ? proj.bids[0].id : null,
+                        storageStatus: proj.status === "Approved" || proj.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
+                        lastSavedTimestamp: getPhilippineTimestamp(),
+                    });
+
+                    // Sync to localStorage
+                    if (typeof window !== "undefined") {
+                        try {
+                            localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + proj.id, JSON.stringify(proj));
+                        } catch {
+                            // localStorage quota or disabled
+                        }
+                    }
+                    return;
+                }
+            }
+        } catch {
+            // Network failure or offline
+        }
+
+        // 3. Fallback: if not loaded from local and backend failed, create empty project so UI never hangs
+        if (!loadedFromLocal && !get().currentProject) {
+            get().createNewProject();
         }
     },
 
@@ -445,7 +517,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         });
 
         if (nextProj) {
-            get().selectProject(nextProj.id);
+            await get().selectProject(nextProj.id);
         } else {
             get().createNewProject();
         }
@@ -458,7 +530,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
     },
 
     saveProjectNow: async () => {
-        const { currentProject, isSaving } = get();
+        const { currentProject } = get();
         if (!currentProject) return;
 
         // Cancel scheduled debounce/maxWait timers as we are saving immediately

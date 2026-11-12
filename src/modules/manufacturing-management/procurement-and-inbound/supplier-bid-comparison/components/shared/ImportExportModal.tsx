@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -19,10 +19,14 @@ import {
   CheckCircle2,
   Copy,
   Check,
+  Filter,
+  Layers,
+  Building2,
+  Package,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
-import { exportRfqToExcel, exportRfqBidsToCsv, BIDS_CANONICAL_COLUMNS } from "../../engine/excel-export";
+import { exportRfqBidsToCsv, BIDS_CANONICAL_COLUMNS } from "../../engine/excel-export";
 import {
   SupplierBid,
   RequestedItem,
@@ -91,6 +95,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
 
     const [fileName, setFileName] = useState<string | null>(null);
     const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
+    const [selectedSuppliers, setSelectedSuppliers] = useState<Set<string>>(new Set());
+    const [importStrategy, setImportStrategy] = useState<"merge" | "replace">("merge");
     const [warnings, setWarnings] = useState<string[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
     const [isCopied, setIsCopied] = useState(false);
@@ -98,6 +104,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
     const resetState = useCallback(() => {
       setFileName(null);
       setParsedRows([]);
+      setSelectedSuppliers(new Set());
+      setImportStrategy("merge");
       setWarnings([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }, []);
@@ -118,6 +126,59 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
       setTimeout(() => setIsCopied(false), 2000);
     };
 
+    // Detected unique suppliers and items from parsed rows
+    const detectedSuppliers = useMemo(() => {
+      const suppMap = new Map<string, { name: string; count: number; currency: string; type: string }>();
+      parsedRows.forEach((r) => {
+        const sName = r.supplier.trim();
+        const existing = suppMap.get(sName);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          suppMap.set(sName, {
+            name: sName,
+            count: 1,
+            currency: r.currency || "PHP",
+            type: r.type || "International",
+          });
+        }
+      });
+      return Array.from(suppMap.values());
+    }, [parsedRows]);
+
+    const detectedItemsCount = useMemo(() => {
+      const items = new Set<string>();
+      parsedRows.forEach((r) => {
+        if (r.item) items.add(r.item.toLowerCase().trim());
+      });
+      return items.size;
+    }, [parsedRows]);
+
+    // Active rows to be imported based on selected suppliers
+    const rowsToImport = useMemo(() => {
+      return parsedRows.filter((r) => selectedSuppliers.has(r.supplier.trim()));
+    }, [parsedRows, selectedSuppliers]);
+
+    const handleToggleSupplier = (suppName: string) => {
+      setSelectedSuppliers((prev) => {
+        const next = new Set(prev);
+        if (next.has(suppName)) {
+          next.delete(suppName);
+        } else {
+          next.add(suppName);
+        }
+        return next;
+      });
+    };
+
+    const handleSelectAllSuppliers = () => {
+      setSelectedSuppliers(new Set(detectedSuppliers.map((s) => s.name)));
+    };
+
+    const handleDeselectAllSuppliers = () => {
+      setSelectedSuppliers(new Set());
+    };
+
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -127,17 +188,15 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
       setWarnings([]);
 
       try {
-        // Dynamic import of xlsx ensures zero bundle blocking during modal open/close
         const XLSX = await import("xlsx");
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: "array" });
 
-        // Auto-detect best sheet: prefer sheet with 'bids', 'quotation', 'data', or 'raw'
         const bestSheetName =
           workbook.SheetNames.find((s) => /bids|quotation|raw|data|items/i.test(s)) ||
           workbook.SheetNames[0];
         const sheet = workbook.Sheets[bestSheetName];
-        const rawRows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, {
+        const rawRows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, {
           defval: "",
         });
 
@@ -149,20 +208,25 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
 
         const rows: ParsedRow[] = [];
         const warnList: string[] = [];
+        const foundSuppliers = new Set<string>();
+
+        const getVal = (m: Record<string, unknown>, ...keys: string[]): string => {
+          for (const k of keys) {
+            const v = m[k];
+            if (v !== undefined && v !== null && v !== "") return String(v);
+          }
+          return "";
+        };
 
         rawRows.forEach((raw, idx) => {
-          const map: Record<string, any> = {};
+          const map: Record<string, unknown> = {};
           for (const [k, v] of Object.entries(raw)) {
             map[normalizeKey(k)] = v;
           }
 
-          const supplier = String(
-            map["supplier"] || map["suppliername"] || map["vendor"] || ""
-          ).trim();
-          const item = String(
-            map["item"] || map["itemname"] || map["product"] || map["description"] || ""
-          ).trim();
-          const unitPrice = parseFloat(map["unitprice"] || map["price"] || "0");
+          const supplier = getVal(map, "supplier", "suppliername", "vendor").trim();
+          const item = getVal(map, "item", "itemname", "product", "description").trim();
+          const unitPrice = parseFloat(getVal(map, "unitprice", "price") || "0");
 
           if (!supplier && !item) return;
 
@@ -175,80 +239,83 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             return;
           }
 
+          foundSuppliers.add(supplier);
+
           const row: ParsedRow = {
             supplier,
-            type: String(map["type"] || map["suppliertype"] || "International").trim(),
-            country: String(map["country"] || map["origincountry"] || "CN").trim(),
-            currency: String(map["currency"] || map["quotecurrency"] || "USD").trim().toUpperCase(),
-            incoterm: String(map["incoterm"] || map["deliveryterms"] || "FOB").trim().toUpperCase(),
+            type: getVal(map, "type", "suppliertype") || "International",
+            country: getVal(map, "country", "origincountry") || "CN",
+            currency: (getVal(map, "currency", "quotecurrency") || "USD").toUpperCase(),
+            incoterm: (getVal(map, "incoterm", "deliveryterms") || "FOB").toUpperCase(),
             item,
-            quantity: parseFloat(map["qty"] || map["quantity"] || "0") || undefined,
-            hsCode: String(map["hscode"] || "").trim(),
-            dutyPct: parseFloat(map["itemduty"] || map["dutypct"] || map["duty"] || "0"),
-            weightKg: parseFloat(map["kgunit"] || map["weightperunitkg"] || map["weightkg"] || "0"),
-            volumeCbm: parseFloat(map["cbmunit"] || map["volumeperunitcbm"] || map["volumecbm"] || "0"),
+            quantity: parseFloat(getVal(map, "qty", "quantity") || "0") || undefined,
+            hsCode: getVal(map, "hscode").trim(),
+            dutyPct: parseFloat(getVal(map, "itemduty", "dutypct", "duty") || "0"),
+            weightKg: parseFloat(getVal(map, "kgunit", "weightperunitkg", "weightkg") || "0"),
+            volumeCbm: parseFloat(getVal(map, "cbmunit", "volumeperunitcbm", "volumecbm") || "0"),
             unitPrice: isNaN(unitPrice) ? 0 : unitPrice,
-            minQty: parseFloat(map["minqty"] || map["minimumquantity"] || map["moq"] || "0"),
-            discountPct: parseFloat(map["discount"] || map["discountpct"] || "0"),
-            freightBasis: String(map["freightbasis"] || "LUMP_SUM").trim(),
-            freightAmount: parseFloat(map["freight"] || map["freightcost"] || "0"),
-            freightMin: parseFloat(map["freightmin"] || map["freightminimum"] || "0"),
-            freightCurrency: String(map["freightcurrency"] || map["currency"] || "USD").trim().toUpperCase(),
-            insuranceBasis: String(map["insurancebasis"] || "PCT_GOODS_AND_FREIGHT").trim(),
-            insuranceAmount: parseFloat(map["insurance"] || "0.3"),
-            ftaCode: String(map["fta"] || "").trim(),
-            ftaDutyPct: parseFloat(map["ftaduty"] || "0"),
-            vatPct: parseFloat(map["vat"] || map["vatpct"] || "12"),
+            minQty: parseFloat(getVal(map, "minqty", "minimumquantity", "moq") || "0"),
+            discountPct: parseFloat(getVal(map, "discount", "discountpct") || "0"),
+            freightBasis: getVal(map, "freightbasis") || "LUMP_SUM",
+            freightAmount: parseFloat(getVal(map, "freight", "freightcost") || "0"),
+            freightMin: parseFloat(getVal(map, "freightmin", "freightminimum") || "0"),
+            freightCurrency: (getVal(map, "freightcurrency", "currency") || "USD").toUpperCase(),
+            insuranceBasis: getVal(map, "insurancebasis") || "PCT_GOODS_AND_FREIGHT",
+            insuranceAmount: parseFloat(getVal(map, "insurance") || "0.3"),
+            ftaCode: getVal(map, "fta").trim(),
+            ftaDutyPct: parseFloat(getVal(map, "ftaduty") || "0"),
+            vatPct: parseFloat(getVal(map, "vat", "vatpct") || "12"),
             pricesIncludeVat:
-              String(map["pricesinclvat"] || map["pricesincludingvat"] || "").toLowerCase() === "true" ||
-              String(map["pricesinclvat"] || "").toLowerCase() === "yes",
-            brokerageFee: parseFloat(map["brokerage"] || "0"),
-            otherPortCharges: parseFloat(map["customsotherportcharges"] || map["customs"] || map["otherportcharges"] || "0"),
-            inlandTrucking: parseFloat(map["inland"] || map["inlandtrucking"] || "0"),
-            bankFee: parseFloat(map["bankfee"] || "0"),
-            shipmentType: String(map["shipmenttypefcllclairauto"] || map["shipmenttype"] || "AUTO").trim().toUpperCase(),
-            containers20ft: parseInt(map["containers20ft"] || "0", 10),
-            containers40ft: parseInt(map["containers40ft"] || "0", 10),
-            numShipments: parseInt(map["shipments"] || map["numberofshipments"] || "1", 10) || 1,
+              getVal(map, "pricesinclvat", "pricesincludingvat").toLowerCase() === "true" ||
+              getVal(map, "pricesinclvat").toLowerCase() === "yes",
+            brokerageFee: parseFloat(getVal(map, "brokerage") || "0"),
+            otherPortCharges: parseFloat(getVal(map, "customsotherportcharges", "customs", "otherportcharges") || "0"),
+            inlandTrucking: parseFloat(getVal(map, "inland", "inlandtrucking") || "0"),
+            bankFee: parseFloat(getVal(map, "bankfee") || "0"),
+            shipmentType: (getVal(map, "shipmenttypefcllclairauto", "shipmenttype") || "AUTO").toUpperCase(),
+            containers20ft: parseInt(getVal(map, "containers20ft") || "0", 10),
+            containers40ft: parseInt(getVal(map, "containers40ft") || "0", 10),
+            numShipments: parseInt(getVal(map, "shipments", "numberofshipments") || "1", 10) || 1,
             paidByLc:
-              String(map["paidbylc"] || "").toLowerCase() === "true" ||
-              String(map["paidbylc"] || "").toLowerCase() === "yes",
-            leadTimeDays: parseInt(map["leaddays"] || map["leadtimedays"] || "0", 10),
-            downPaymentPct: parseFloat(map["down"] || map["downpaymentpct"] || "0"),
-            netDays: parseInt(map["netdays"] || map["balanceduedays"] || "0", 10),
-            earlyPayDiscountPct: parseFloat(map["earlypay"] || map["earlypaydiscountpct"] || "0"),
-            earlyPayDays: parseInt(map["earlypaydays"] || map["earlypaymentdiscountdays"] || "0", 10),
-            validUntil: String(map["validuntil"] || "").trim(),
-            qualityScore: parseFloat(map["quality15appliedtoallcriteria"] || map["quality"] || map["qualityscore"] || "0"),
-            notes: String(map["notes"] || "").trim(),
-          };
-
-          rows.push(row);
+              getVal(map, "paidbylc").toLowerCase() === "true" ||
+              getVal(map, "paidbylc").toLowerCase() === "yes",
+            leadTimeDays: parseInt(getVal(map, "leaddays", "leadtimedays") || "0", 10),
+            downPaymentPct: parseFloat(getVal(map, "down", "downpaymentpct") || "0"),
+            netDays: parseInt(getVal(map, "netdays", "balanceduedays") || "0", 10),
+            earlyPayDiscountPct: parseFloat(getVal(map, "earlypay", "earlypaydiscountpct") || "0"),
+            earlyPayDays: parseInt(getVal(map, "earlypaydays", "earlypaymentdiscountdays") || "0", 10),
+            validUntil: getVal(map, "validuntil").trim(),
+            qualityScore: parseFloat(getVal(map, "quality15appliedtoallcriteria", "quality", "qualityscore") || "0"),
+            notes: getVal(map, "notes").trim(),
+          };          rows.push(row);
         });
 
         setParsedRows(rows);
+        setSelectedSuppliers(foundSuppliers);
         setWarnings(warnList);
         if (rows.length > 0) {
-          toast.success(`Successfully parsed ${rows.length} rows from ${file.name}`);
+          toast.success(`Parsed ${rows.length} rows across ${foundSuppliers.size} suppliers from ${file.name}`);
         } else {
           toast.error("No valid item quotation rows could be extracted.");
         }
-      } catch (err: any) {
-        toast.error(`Error parsing file: ${err.message || "Invalid format"}`);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : "Invalid format";
+        toast.error(`Error parsing file: ${errMsg}`);
       } finally {
         setIsProcessing(false);
       }
     };
 
     const handleApplyImport = () => {
-      if (!currentProject || parsedRows.length === 0) return;
+      if (!currentProject || rowsToImport.length === 0) return;
 
       updateProject((prev) => {
         const nextItems: RequestedItem[] = [...prev.items];
-        const nextBids: SupplierBid[] = [...prev.bids];
+        // If "replace", clear current bids; otherwise keep existing and merge
+        const nextBids: SupplierBid[] = importStrategy === "replace" ? [] : [...prev.bids];
 
-        // 1. Ensure all items mentioned in parsed rows exist in project requested items
-        parsedRows.forEach((row) => {
+        // 1. Ensure all items mentioned in rows exist in project requested items
+        rowsToImport.forEach((row) => {
           let matchedItem = nextItems.find(
             (it) => it.itemName.toLowerCase().trim() === row.item.toLowerCase().trim()
           );
@@ -271,9 +338,9 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
           }
         });
 
-        // 2. Group parsed rows by supplier
+        // 2. Group rows to import by supplier
         const groupedBySupplier = new Map<string, ParsedRow[]>();
-        parsedRows.forEach((row) => {
+        rowsToImport.forEach((row) => {
           const key = row.supplier.trim();
           const list = groupedBySupplier.get(key) || [];
           list.push(row);
@@ -354,7 +421,6 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             };
             nextBids.push(bid);
           } else {
-            // Update terms on existing bid if provided in file
             if (first.incoterm) bid.incoterm = incoterm;
             if (first.currency) bid.quoteCurrency = first.currency;
             if (first.leadTimeDays) bid.leadTimeDays = first.leadTimeDays;
@@ -399,7 +465,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             }
           }
 
-          // Group rows for this supplier by matched item to support multiple price breaks
+          // Group rows for this supplier by item
           const itemRowsMap = new Map<string, ParsedRow[]>();
           supplierRows.forEach((row) => {
             const matchedItem = nextItems.find(
@@ -438,7 +504,9 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
         };
       });
 
-      toast.success(`Successfully imported ${parsedRows.length} item lines across suppliers.`);
+      toast.success(
+        `Successfully imported ${rowsToImport.length} quotations across ${selectedSuppliers.size} suppliers (${importStrategy === "replace" ? "Replaced all bids" : "Merged & updated"}).`
+      );
       handleClose();
     };
 
@@ -450,83 +518,106 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
 
     return (
       <Dialog open={isOpen} onOpenChange={handleClose}>
-        <DialogContent className="max-w-3xl max-h-[88vh] flex flex-col p-6">
-          <DialogHeader className="space-y-1.5">
-            <DialogTitle className="text-base font-semibold flex items-center gap-2">
-              <Upload className="w-4 h-4 text-primary" />
-              <span>Import bids from CSV or Excel</span>
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
-              One row per supplier × item × price break. Suppliers and items are matched by name; new ones are created.
-            </DialogDescription>
+        <DialogContent
+          style={{ width: "min(1240px, 94vw)", maxWidth: "94vw", height: "80vh" }}
+          className="!w-[94vw] !max-w-[1240px] !max-h-[90vh] flex flex-col p-6 shadow-2xl border-border bg-card"
+        >
+          {/* Header */}
+          <DialogHeader className="space-y-1.5 pb-2 border-b">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                  <Upload className="w-4 h-4" />
+                </div>
+                <div>
+                  <DialogTitle className="text-base font-bold text-foreground">
+                    Import Bids from CSV or Excel
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-muted-foreground">
+                    Upload vendor quotation sheets to automatically map items, commercial terms, and tiered price breaks.
+                  </DialogDescription>
+                </div>
+              </div>
+              {parsedRows.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs font-medium border-border gap-1 py-1">
+                    <Building2 className="w-3 h-3 text-muted-foreground" />
+                    {detectedSuppliers.length} Suppliers Detected
+                  </Badge>
+                  <Badge variant="outline" className="text-xs font-medium border-border gap-1 py-1">
+                    <Package className="w-3 h-3 text-muted-foreground" />
+                    {detectedItemsCount} Items Found
+                  </Badge>
+                </div>
+              )}
+            </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto space-y-4 py-2 pr-1">
-            {/* Required Column Schema Callout */}
-            <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
-                  Columns (any order, headers required):
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleCopyColumns}
-                  className="h-6 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                >
-                  {isCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                  {isCopied ? "Copied" : "Copy Header List"}
-                </Button>
+          {/* Modal Body */}
+          <div className="flex-1 overflow-y-auto space-y-4 py-3 pr-1">
+            {/* Top Action / Help Ribbon */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch">
+              {/* Canonical Columns Callout */}
+              <div className="lg:col-span-8 rounded-lg border bg-muted/20 p-3 space-y-1.5 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-primary" />
+                    Standard Column Format (42 Columns):
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleCopyColumns}
+                    className="h-6 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
+                  >
+                    {isCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                    {isCopied ? "Copied" : "Copy Header List"}
+                  </Button>
+                </div>
+                <p className="text-[11px] font-mono text-muted-foreground bg-background p-2 rounded border border-border/50 leading-relaxed select-all max-h-16 overflow-y-auto">
+                  {REQUIRED_COLUMNS_TEXT}
+                </p>
               </div>
-              <p className="text-[11px] font-mono text-muted-foreground bg-background p-2 rounded border border-border/50 leading-relaxed select-all">
-                {REQUIRED_COLUMNS_TEXT}
-              </p>
-            </div>
 
-            {/* Action Row: Export Current / Download Template */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg bg-muted/10 border gap-2.5">
-              <div className="text-xs text-muted-foreground">
-                Export current project bids or download a clean template to edit offline in Excel or Google Sheets.
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                {currentProject && (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => exportRfqToExcel(currentProject)}
-                      className="gap-1 text-xs h-7 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800"
-                    >
-                      <Download className="w-3 h-3 text-emerald-600" />
-                      Export Current (.xlsx)
-                    </Button>
+              {/* Offline Export / Template Help Card */}
+              <div className="lg:col-span-4 rounded-lg border bg-muted/15 p-3 flex flex-col justify-between space-y-2">
+                <div>
+                  <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider block">
+                    Prepare Offline Template:
+                  </span>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                    Download a clean template or current project bids to edit in Excel or Google Sheets.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadTemplate}
+                    className="gap-1 text-xs h-7 flex-1 text-foreground"
+                  >
+                    <Download className="w-3 h-3 text-muted-foreground" />
+                    Template (.csv)
+                  </Button>
+                  {currentProject && (
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => exportRfqBidsToCsv(currentProject)}
-                      className="gap-1 text-xs h-7 text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-800"
+                      className="gap-1 text-xs h-7 flex-1 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900"
                     >
                       <Download className="w-3 h-3 text-blue-600" />
-                      Export Current (.csv)
+                      Current Bids (.csv)
                     </Button>
-                  </>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleDownloadTemplate}
-                  className="gap-1 text-xs h-7 text-muted-foreground hover:text-foreground"
-                >
-                  <Download className="w-3 h-3" />
-                  Template (.csv)
-                </Button>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* File Upload Drop Zone */}
+            {/* Drop Zone */}
             <div
               onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-border/80 hover:border-primary/60 rounded-xl p-6 text-center cursor-pointer transition-colors bg-card hover:bg-muted/10"
+              className="border-2 border-dashed border-border/80 hover:border-primary/60 rounded-xl p-5 text-center cursor-pointer transition-colors bg-card hover:bg-muted/10 group"
             >
               <input
                 type="file"
@@ -535,16 +626,20 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
                 onChange={handleFileUpload}
                 className="hidden"
               />
-              <div className="flex flex-col items-center gap-2">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+              <div className="flex flex-col items-center gap-1.5">
+                <div className="w-10 h-10 rounded-full bg-primary/10 group-hover:bg-primary/20 flex items-center justify-center text-primary transition-colors">
                   <FileSpreadsheet className="w-5 h-5" />
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-foreground">
-                    {fileName ? fileName : "Click to select or drag & drop CSV or Excel file"}
+                    {fileName ? (
+                      <span className="text-primary font-bold">{fileName}</span>
+                    ) : (
+                      "Click to select or drag & drop CSV or Excel spreadsheet"
+                    )}
                   </p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Supports .csv, .xlsx, .xls up to 10MB
+                    Supports .xlsx, .xls, .csv files up to 10MB
                   </p>
                 </div>
               </div>
@@ -565,44 +660,171 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
               </div>
             )}
 
+            {/* Dynamic Selective Import Controls (When file is loaded) */}
+            {parsedRows.length > 0 && (
+              <div className="rounded-xl border bg-card p-4 space-y-3.5 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-primary" />
+                    <span className="text-xs font-bold text-foreground uppercase tracking-wide">
+                      Select What to Import
+                    </span>
+                    <Badge variant="secondary" className="text-[11px]">
+                      {selectedSuppliers.size} of {detectedSuppliers.length} Suppliers Active
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleSelectAllSuppliers}
+                      className="h-6 text-[11px] text-primary hover:text-primary/80"
+                    >
+                      Select All
+                    </Button>
+                    <span className="text-muted-foreground text-xs">•</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleDeselectAllSuppliers}
+                      className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
+                    >
+                      Deselect All
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Suppliers Checkbox Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {detectedSuppliers.map((supp) => {
+                    const isChecked = selectedSuppliers.has(supp.name);
+                    return (
+                      <div
+                        key={supp.name}
+                        onClick={() => handleToggleSupplier(supp.name)}
+                        className={`flex items-center justify-between p-2 rounded-lg border text-xs cursor-pointer transition-all select-none ${
+                          isChecked
+                            ? "border-primary/50 bg-primary/5 text-foreground"
+                            : "border-border/60 bg-muted/10 text-muted-foreground opacity-60 hover:opacity-100"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {}} // handled by parent div
+                            className="w-3.5 h-3.5 rounded border-border text-primary cursor-pointer accent-primary"
+                          />
+                          <span className="font-semibold truncate text-[11px]">{supp.name}</span>
+                        </div>
+                        <Badge variant="outline" className="text-[10px] font-mono shrink-0 ml-1">
+                          {supp.count} {supp.count === 1 ? "row" : "rows"}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Import Strategy Options */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t text-xs">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Layers className="w-4 h-4 text-muted-foreground" />
+                    <span className="font-medium text-foreground">Import Strategy:</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="radio"
+                        name="importStrategy"
+                        value="merge"
+                        checked={importStrategy === "merge"}
+                        onChange={() => setImportStrategy("merge")}
+                        className="accent-primary"
+                      />
+                      <span className="font-medium text-foreground">Merge & Update</span>
+                      <span className="text-[10px] text-muted-foreground">(Keep existing & add/update)</span>
+                    </label>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="radio"
+                        name="importStrategy"
+                        value="replace"
+                        checked={importStrategy === "replace"}
+                        onChange={() => setImportStrategy("replace")}
+                        className="accent-primary"
+                      />
+                      <span className="font-medium text-destructive">Replace All Bids</span>
+                      <span className="text-[10px] text-muted-foreground">(Clear previous bids)</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Parsed Preview Table */}
             {parsedRows.length > 0 && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs font-semibold text-foreground">
-                  <span>Parsed Quotations ({parsedRows.length} rows)</span>
-                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 gap-1 text-[11px]">
-                    <CheckCircle2 className="w-3 h-3" /> Ready to Import
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <span>Active Quotation Lines ({rowsToImport.length} of {parsedRows.length} rows)</span>
+                    {rowsToImport.length > 0 ? (
+                      <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 gap-1 text-[11px]">
+                        <CheckCircle2 className="w-3 h-3" /> Ready to Import
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 gap-1 text-[11px]">
+                        <AlertCircle className="w-3 h-3" /> No suppliers selected
+                      </Badge>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">
+                    Showing top {Math.min(rowsToImport.length, 12)} rows
+                  </span>
                 </div>
-                <div className="rounded-lg border overflow-hidden max-h-48 overflow-y-auto bg-card">
+
+                <div className="rounded-lg border overflow-hidden max-h-52 overflow-y-auto bg-card">
                   <table className="w-full text-xs text-left">
                     <thead className="bg-muted/40 border-b text-muted-foreground uppercase text-[10px] font-semibold sticky top-0">
                       <tr>
-                        <th className="py-1.5 px-3">Supplier</th>
-                        <th className="py-1.5 px-2">Item</th>
-                        <th className="py-1.5 px-2">Incoterm</th>
-                        <th className="py-1.5 px-2 text-right">Price</th>
-                        <th className="py-1.5 px-2">Currency</th>
-                        <th className="py-1.5 px-2 text-center">Lead Time</th>
+                        <th className="py-2 px-3">Supplier</th>
+                        <th className="py-2 px-2">Item</th>
+                        <th className="py-2 px-2">Incoterm</th>
+                        <th className="py-2 px-2 text-right">Quoted Price</th>
+                        <th className="py-2 px-2">Currency</th>
+                        <th className="py-2 px-2 text-center">Lead Time</th>
+                        <th className="py-2 px-2 text-center">Discount %</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/50">
-                      {parsedRows.slice(0, 10).map((r, i) => (
-                        <tr key={i} className="hover:bg-muted/10">
-                          <td className="py-1.5 px-3 font-medium text-foreground">{r.supplier}</td>
+                      {rowsToImport.slice(0, 12).map((r, i) => (
+                        <tr key={i} className="hover:bg-muted/10 transition-colors">
+                          <td className="py-1.5 px-3 font-semibold text-foreground">{r.supplier}</td>
                           <td className="py-1.5 px-2 text-muted-foreground">{r.item}</td>
-                          <td className="py-1.5 px-2 font-mono text-[11px]">{r.incoterm}</td>
+                          <td className="py-1.5 px-2 font-mono text-[11px]">{r.incoterm || "FOB"}</td>
                           <td className="py-1.5 px-2 text-right font-mono font-medium text-foreground">
-                            {r.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {r.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                           </td>
-                          <td className="py-1.5 px-2 text-muted-foreground">{r.currency}</td>
-                          <td className="py-1.5 px-2 text-center text-muted-foreground">{r.leadTimeDays ? `${r.leadTimeDays}d` : "-"}</td>
+                          <td className="py-1.5 px-2 font-mono text-muted-foreground">{r.currency}</td>
+                          <td className="py-1.5 px-2 text-center text-muted-foreground">
+                            {r.leadTimeDays ? `${r.leadTimeDays}d` : "-"}
+                          </td>
+                          <td className="py-1.5 px-2 text-center font-mono">
+                            {r.discountPct && r.discountPct > 0 ? `${r.discountPct}%` : "-"}
+                          </td>
                         </tr>
                       ))}
-                      {parsedRows.length > 10 && (
+                      {rowsToImport.length > 12 && (
                         <tr className="bg-muted/10 text-muted-foreground italic text-center">
-                          <td colSpan={6} className="py-1.5 px-3">
-                            ... and {parsedRows.length - 10} more rows
+                          <td colSpan={7} className="py-2 px-3">
+                            ... and {rowsToImport.length - 12} more selected quotation lines
+                          </td>
+                        </tr>
+                      )}
+                      {rowsToImport.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="py-6 text-center text-muted-foreground italic">
+                            No rows selected. Check one or more suppliers above to preview and import their bids.
                           </td>
                         </tr>
                       )}
@@ -613,6 +835,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             )}
           </div>
 
+          {/* Modal Footer */}
           <DialogFooter className="flex items-center justify-between border-t pt-3">
             <Button
               variant="ghost"
@@ -630,11 +853,11 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
               <Button
                 size="sm"
                 onClick={handleApplyImport}
-                disabled={parsedRows.length === 0 || isProcessing}
-                className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 h-8 text-xs font-semibold"
+                disabled={rowsToImport.length === 0 || isProcessing}
+                className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5 h-8 text-xs font-semibold px-4"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                Apply Import ({parsedRows.length} rows)
+                Apply Import ({rowsToImport.length} rows)
               </Button>
             </div>
           </DialogFooter>

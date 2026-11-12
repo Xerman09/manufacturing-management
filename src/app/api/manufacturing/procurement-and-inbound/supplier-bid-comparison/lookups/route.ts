@@ -70,46 +70,49 @@ export async function GET() {
 
         const unitsList = unitsRes.data || [];
         const unitsMap = new Map<number, string>(
-            unitsList.map((u: any) => [u.unit_id, u.unit_shortcut || u.unit_name || "pcs"])
+            unitsList.map((u: Record<string, unknown>) => [
+                Number(u.unit_id),
+                String(u.unit_shortcut || u.unit_name || "pcs"),
+            ])
         );
 
-        const mappedProducts = (productsRes.data || []).map((p: any) => ({
-            productId: p.product_id,
-            productName: p.product_name || "Unnamed Product",
-            productCode: p.product_code || "",
-            uom: unitsMap.get(p.unit_of_measurement) || "pcs",
-            targetUnitPrice: p.cost_per_unit || p.estimated_unit_cost || 0,
-            weightKg: p.net_weight || p.weight || 0,
-            cbmLength: p.cbm_length || 0,
-            cbmWidth: p.cbm_width || 0,
-            cbmHeight: p.cbm_height || 0,
+        const mappedProducts = (productsRes.data || []).map((p: Record<string, unknown>) => ({
+            productId: Number(p.product_id),
+            productName: String(p.product_name || "Unnamed Product"),
+            productCode: String(p.product_code || ""),
+            uom: unitsMap.get(Number(p.unit_of_measurement)) || "pcs",
+            targetUnitPrice: Number(p.cost_per_unit || p.estimated_unit_cost || 0),
+            weightKg: Number(p.net_weight || p.weight || 0),
+            cbmLength: Number(p.cbm_length || 0),
+            cbmWidth: Number(p.cbm_width || 0),
+            cbmHeight: Number(p.cbm_height || 0),
         }));
 
-        const mappedSuppliers = (suppliersRes.data || []).map((s: any) => ({
-            id: s.id,
-            supplierName: s.supplier_name,
-            contactPerson: s.contact_person || "",
-            emailAddress: s.email_address || "",
-            phoneNumber: s.phone_number || "",
-            country: s.country || (s.is_foreign ? "China" : "Philippines"),
+        const mappedSuppliers = (suppliersRes.data || []).map((s: Record<string, unknown>) => ({
+            id: Number(s.id),
+            supplierName: String(s.supplier_name || ""),
+            contactPerson: String(s.contact_person || ""),
+            emailAddress: String(s.email_address || ""),
+            phoneNumber: String(s.phone_number || ""),
+            country: String(s.country || (s.is_foreign ? "China" : "Philippines")),
             isForeign: Boolean(s.is_foreign),
             supplierType: s.is_foreign ? "INTERNATIONAL" : "LOCAL",
-            currency: s.currency || (s.is_foreign ? "USD" : "PHP"),
-            paymentTerms: s.payment_terms || "",
-            deliveryTerms: s.delivery_terms || "",
+            currency: String(s.currency || (s.is_foreign ? "USD" : "PHP")),
+            paymentTerms: String(s.payment_terms || ""),
+            deliveryTerms: String(s.delivery_terms || ""),
         }));
 
-        const mappedUnits = (unitsRes.data || []).map((u: any) => ({
-            unitId: u.unit_id,
-            unitName: u.unit_name || "",
-            unitShortcut: u.unit_shortcut || u.unit_name || "pcs",
+        const mappedUnits = (unitsRes.data || []).map((u: Record<string, unknown>) => ({
+            unitId: Number(u.unit_id),
+            unitName: String(u.unit_name || ""),
+            unitShortcut: String(u.unit_shortcut || u.unit_name || "pcs"),
         }));
 
-        const mappedForex = (forexRes.data || []).map((f: any) => ({
-            currencyCode: f.currency_code,
-            currencyName: f.currency_name,
+        const mappedForex = (forexRes.data || []).map((f: Record<string, unknown>) => ({
+            currencyCode: String(f.currency_code || ""),
+            currencyName: String(f.currency_name || ""),
             exchangeRate: Number(f.exchange_rate) || 1.0,
-            effectiveDate: f.effective_date,
+            effectiveDate: String(f.effective_date || ""),
         }));
 
         return NextResponse.json({

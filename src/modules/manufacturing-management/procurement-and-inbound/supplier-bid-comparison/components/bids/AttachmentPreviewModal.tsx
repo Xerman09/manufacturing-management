@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import {
     Dialog,
     DialogContent,
@@ -28,9 +28,13 @@ interface AttachmentPreviewModalProps {
     onClose: () => void;
 }
 
-export const AttachmentPreviewModal: React.FC<AttachmentPreviewModalProps> = ({
+interface AttachmentPreviewContentProps {
+    attachment: BidAttachment;
+    onClose: () => void;
+}
+
+const AttachmentPreviewContent: React.FC<AttachmentPreviewContentProps> = ({
     attachment,
-    isOpen,
     onClose,
 }) => {
     // Zoom state
@@ -53,14 +57,6 @@ export const AttachmentPreviewModal: React.FC<AttachmentPreviewModalProps> = ({
         setIsDragging(false);
     }, []);
 
-    useEffect(() => {
-        if (isOpen) {
-            resetTransform();
-        }
-    }, [isOpen, attachment, resetTransform]);
-
-    if (!isOpen || !attachment) return null;
-
     const isImage = Boolean(
         attachment.mimeType?.startsWith("image/") ||
         /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(attachment.fileName)
@@ -74,8 +70,8 @@ export const AttachmentPreviewModal: React.FC<AttachmentPreviewModalProps> = ({
     const fileSource = attachment.dataUrl || attachment.fileUrl || "";
 
     // Zoom Controls
-    const handleZoomIn = () => setScale((prev) => Math.min(Number((prev + 0.25).toFixed(2)), 5));
-    const handleZoomOut = () => setScale((prev) => Math.max(Number((prev - 0.25).toFixed(2)), 0.25));
+    const handleZoomIn = () => setScale((prev) => Math.min(Number((prev + 0.25).toFixed(3)), 5));
+    const handleZoomOut = () => setScale((prev) => Math.max(Number((prev - 0.25).toFixed(3)), 0.25));
 
     // Continuous clockwise rotation (+90deg per click)
     // Going from 270° to 360° continues rotating smoothly clockwise instead of snapping
@@ -136,8 +132,12 @@ export const AttachmentPreviewModal: React.FC<AttachmentPreviewModalProps> = ({
     const normalizedAngle = ((cumulativeRotation % 360) + 360) % 360;
 
     return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-[94vw] w-[94vw] max-w-[1400px] h-[92vh] flex flex-col p-0 gap-0 overflow-hidden bg-background border shadow-2xl">
+        <Dialog open={true} onOpenChange={onClose}>
+            <DialogContent
+                showCloseButton={false}
+                style={{ width: "min(1440px, 95vw)", maxWidth: "95vw", height: "92vh" }}
+                className="!w-[95vw] !max-w-[1440px] !h-[92vh] flex flex-col p-0 gap-0 overflow-hidden bg-background border shadow-2xl"
+            >
                 {/* Header Toolbar */}
                 <DialogHeader className="py-2.5 px-4 border-b flex flex-row items-center justify-between space-y-0 bg-muted/30 shrink-0">
                     <div className="flex items-center gap-2 min-w-0 pr-4">
@@ -261,9 +261,8 @@ export const AttachmentPreviewModal: React.FC<AttachmentPreviewModalProps> = ({
                     onMouseUp={isImage ? handleMouseUp : undefined}
                     onMouseLeave={isImage ? handleMouseUp : undefined}
                     onWheel={isImage ? handleWheel : undefined}
-                    className={`flex-1 relative overflow-hidden bg-neutral-900/90 dark:bg-black/95 flex items-center justify-center p-4 select-none ${
-                        isImage ? (isDragging ? "cursor-grabbing" : "cursor-grab") : ""
-                    }`}
+                    className={`flex-1 relative overflow-hidden bg-neutral-900/90 dark:bg-black/95 flex items-center justify-center p-4 select-none ${isImage ? (isDragging ? "cursor-grabbing" : "cursor-grab") : ""
+                        }`}
                 >
                     {isImage ? (
                         fileSource ? (
@@ -321,5 +320,21 @@ export const AttachmentPreviewModal: React.FC<AttachmentPreviewModalProps> = ({
                 </div>
             </DialogContent>
         </Dialog>
+    );
+};
+
+export const AttachmentPreviewModal: React.FC<AttachmentPreviewModalProps> = ({
+    attachment,
+    isOpen,
+    onClose,
+}) => {
+    if (!isOpen || !attachment) return null;
+
+    return (
+        <AttachmentPreviewContent
+            key={`${attachment.id || attachment.directusFileId || attachment.fileName}`}
+            attachment={attachment}
+            onClose={onClose}
+        />
     );
 };

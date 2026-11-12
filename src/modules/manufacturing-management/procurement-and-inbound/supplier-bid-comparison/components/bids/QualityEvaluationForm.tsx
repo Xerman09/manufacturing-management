@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Star, ShieldAlert, CheckCircle2, XCircle, HelpCircle } from "lucide-react";
+import { Star} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";

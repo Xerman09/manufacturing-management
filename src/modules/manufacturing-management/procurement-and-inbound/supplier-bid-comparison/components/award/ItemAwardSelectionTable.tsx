@@ -11,11 +11,16 @@ import { cn } from "@/lib/utils";
 
 export const ItemAwardSelectionTable: React.FC = () => {
     const { currentProject, updateProject } = useBidComparisonStore();
-    if (!currentProject) return null;
+
+    const summary = React.useMemo(
+        () => (currentProject ? evaluateAndCompareSuppliers(currentProject) : null),
+        [currentProject]
+    );
+
+    if (!currentProject || !summary) return null;
 
     const items = currentProject.items || [];
     const compCurr = currentProject.comparisonCurrency || "PHP";
-    const summary = React.useMemo(() => evaluateAndCompareSuppliers(currentProject), [currentProject]);
     const isLocked = currentProject.status === "Submitted" || currentProject.status === "Approved";
 
     const awards = currentProject.awards || [];
@@ -119,7 +124,7 @@ export const ItemAwardSelectionTable: React.FC = () => {
                                         <td className="py-2.5 px-3">
                                             <span className="font-semibold block">{item.itemName}</span>
                                             <span className="text-[10px] text-muted-foreground block truncate">
-                                                Target: {compCurr} {item.targetUnitPrice.toLocaleString()}
+                                                Target: {compCurr} {item.targetUnitPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                             </span>
                                         </td>
                                         <td className="py-2.5 px-3 font-mono font-medium">
@@ -165,7 +170,7 @@ export const ItemAwardSelectionTable: React.FC = () => {
                                                                         {isDq ? " [DQ]" : isExp ? " [Expired]" : ""}
                                                                     </span>
                                                                     <span className="font-mono text-muted-foreground">
-                                                                        ₱{cost.toLocaleString()} / {item.uom}
+                                                                        ₱{cost.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} / {item.uom}
                                                                     </span>
                                                                 </div>
                                                             </SelectItem>
@@ -177,19 +182,19 @@ export const ItemAwardSelectionTable: React.FC = () => {
 
                                         {/* Landed Unit Cost */}
                                         <td className="py-2.5 px-3 text-right font-mono font-semibold">
-                                            {landedUnit > 0 ? `₱${landedUnit.toLocaleString()}` : "-"}
+                                            {landedUnit > 0 ? `₱${landedUnit.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "-"}
                                         </td>
 
                                         {/* Landed Total */}
                                         <td className="py-2.5 px-3 text-right font-mono font-bold text-foreground">
-                                            {landedTotal > 0 ? `₱${landedTotal.toLocaleString()}` : "-"}
+                                            {landedTotal > 0 ? `₱${landedTotal.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "-"}
                                         </td>
 
                                         {/* Target Variance */}
                                         <td className="py-2.5 px-3 text-right font-mono text-[11px]">
                                             {landedTotal > 0 ? (
                                                 <span className={variance <= 0 ? "text-emerald-600" : "text-rose-600"}>
-                                                    {variance <= 0 ? "-" : "+"}₱{Math.abs(variance).toLocaleString()}
+                                                    {variance <= 0 ? "-" : "+"}₱{Math.abs(variance).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                                 </span>
                                             ) : (
                                                 "-"
@@ -208,12 +213,12 @@ export const ItemAwardSelectionTable: React.FC = () => {
                                 Award Total (Landed)
                             </td>
                             <td className="py-3 px-3 text-right font-mono text-foreground text-sm font-bold bg-primary/5">
-                                ₱{totalAwardedLanded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                ₱{totalAwardedLanded.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                             </td>
                             <td className="py-3 px-3 text-right font-mono text-xs">
                                 {totalAwardedLanded > 0 ? (
                                     <span className={targetVariance <= 0 ? "text-emerald-600 font-bold" : "text-rose-600 font-bold"}>
-                                        {targetVariance <= 0 ? "-" : "+"}₱{Math.abs(targetVariance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        {targetVariance <= 0 ? "-" : "+"}₱{Math.abs(targetVariance).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                     </span>
                                 ) : (
                                     "-"
@@ -236,14 +241,14 @@ export const ItemAwardSelectionTable: React.FC = () => {
                     <div className="border-l border-border pl-4">
                         <span className="text-muted-foreground block text-[10px] uppercase font-bold">Total Target Price</span>
                         <span className="font-mono font-medium text-foreground">
-                            ₱{totalTargetPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ₱{totalTargetPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                         </span>
                     </div>
                     {budget > 0 && (
                         <div className="border-l border-border pl-4">
                             <span className="text-muted-foreground block text-[10px] uppercase font-bold">Approved Budget</span>
                             <span className="font-mono font-medium text-foreground">
-                                ₱{budget.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                ₱{budget.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                             </span>
                         </div>
                     )}
@@ -262,8 +267,8 @@ export const ItemAwardSelectionTable: React.FC = () => {
                             )}
                         >
                             {budgetVariance <= 0
-                                ? `Under Budget by ₱${Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                : `Over Budget by ₱${Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                ? `Under Budget by ₱${Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
+                                : `Over Budget by ₱${Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`}
                         </Badge>
                     ) : (
                         <Badge variant="secondary" className="text-xs">No budget defined</Badge>

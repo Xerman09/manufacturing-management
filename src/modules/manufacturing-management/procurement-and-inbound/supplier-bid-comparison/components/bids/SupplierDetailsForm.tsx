@@ -5,7 +5,7 @@ import { Copy, Trash2, Building2, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+ 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ComboboxSelect, ComboboxOption } from "../shared/ComboboxSelect";
 import { NumericInputField } from "../shared/NumericInputField";
@@ -43,7 +43,15 @@ export const SupplierDetailsForm: React.FC<SupplierDetailsFormProps> = ({
 
     const handleSelectExistingSupplier = (selectedName: string, option?: ComboboxOption) => {
         if (option && option.extra) {
-            const s = option.extra;
+            const s = option.extra as {
+                id?: number;
+                country?: string;
+                isForeign?: boolean;
+                currency?: string;
+                contactPerson?: string;
+                emailAddress?: string;
+                phoneNumber?: string;
+            };
             handleUpdate({
                 supplierName: selectedName,
                 supplierId: s.id,

@@ -2,17 +2,52 @@ import { saveAs } from "file-saver";
 import { RfqProject } from "../types";
 import { evaluateAndCompareSuppliers } from "./scoring-engine";
 
+export interface DynamicExportOptions {
+    supplierIds?: string[];
+    itemIds?: string[];
+    includeCostWaterfall?: boolean;
+    includeCommercialTerms?: boolean;
+    includeQualityScores?: boolean;
+    includeAwards?: boolean;
+}
+
 /**
- * Generates and downloads the official two-sheet Excel workbook (.xlsx):
- * 1. "Comparison" sheet: item quotes, landed cost breakdown, quality scores, overall scores.
- * 2. "Award" sheet: awarded items, winning supplier, landed cost, budget & target variance, justification.
+ * Filter project items and bids based on export options
  */
-export async function exportRfqToExcel(project: RfqProject): Promise<void> {
+function getFilteredProject(project: RfqProject, options?: DynamicExportOptions): RfqProject {
+    if (!options) return project;
+
+    const targetBids = options.supplierIds && options.supplierIds.length > 0
+        ? project.bids.filter((b) => options.supplierIds!.includes(b.id))
+        : project.bids;
+
+    const targetItems = options.itemIds && options.itemIds.length > 0
+        ? project.items.filter((it) => options.itemIds!.includes(it.id))
+        : project.items;
+
+    return {
+        ...project,
+        bids: targetBids,
+        items: targetItems,
+    };
+}
+
+/**
+ * Generates and downloads the official multi-sheet Excel workbook (.xlsx):
+ * 1. "Bid Comparison" sheet: item quotes, landed cost breakdown, quality scores, overall scores.
+ * 2. "Award & Approval" sheet (optional): awarded items, winning supplier, landed cost, budget & target variance, justification.
+ * 3. "Bids & Quotations" sheet: canonical tabular import/export rows.
+ */
+export async function exportRfqToExcel(project: RfqProject, options?: DynamicExportOptions): Promise<void> {
+    const filteredProject = getFilteredProject(project, options);
     const ExcelJS = (await import("exceljs")).default;
-    const summary = evaluateAndCompareSuppliers(project);
+    const summary = evaluateAndCompareSuppliers(filteredProject);
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "VOS ERP - Supplier Bid Comparison";
     workbook.created = new Date();
+
+    const targetBids = filteredProject.bids;
+    const targetItems = filteredProject.items;
 
     // -------------------------------------------------------------------------
     // SHEET 1: Comparison
@@ -26,13 +61,13 @@ export async function exportRfqToExcel(project: RfqProject): Promise<void> {
         size: 14,
         bold: true,
     };
-    compSheet.addRow([`Project / RFQ: ${project.rfqTitle || "Untitled"}`]);
-    compSheet.addRow([`Reference No: ${project.rfqReference || "-"} | Currency: ${project.comparisonCurrency || "PHP"}`]);
-    compSheet.addRow([`Status: ${project.status} | Date: ${new Date().toLocaleDateString()}`]);
+    compSheet.addRow([`Project / RFQ: ${filteredProject.rfqTitle || "Untitled"}`]);
+    compSheet.addRow([`Reference No: ${filteredProject.rfqReference || "-"} | Currency: ${filteredProject.comparisonCurrency || "PHP"}`]);
+    compSheet.addRow([`Status: ${filteredProject.status} | Date: ${new Date().toLocaleDateString()}`]);
     compSheet.addRow([]);
 
     // Table Header
-    const supplierHeaders = project.bids.map((b) => `${b.supplierName} (${b.quoteCurrency})`);
+    const supplierHeaders = targetBids.map((b) => `${b.supplierName} (${b.quoteCurrency})`);
     const headerRow = compSheet.addRow([
         "#",
         "Item Name",
@@ -50,7 +85,7 @@ export async function exportRfqToExcel(project: RfqProject): Promise<void> {
     };
 
     // Item rows
-    project.items.forEach((item, idx) => {
+    targetItems.forEach((item, idx) => {
         const rowVals: (string | number)[] = [
             idx + 1,
             item.itemName,
@@ -60,7 +95,7 @@ export async function exportRfqToExcel(project: RfqProject): Promise<void> {
             item.targetUnitPrice,
         ];
 
-        for (const bid of project.bids) {
+        for (const bid of targetBids) {
             const res = summary.results[bid.id];
             const breakdown = res?.items[item.id];
             if (breakdown && breakdown.hasQuote) {
@@ -76,46 +111,54 @@ export async function exportRfqToExcel(project: RfqProject): Promise<void> {
         compSheet.addRow(rowVals);
     });
 
-    // Cost Breakdown Section
-    compSheet.addRow([]);
-    const breakdownTitle = compSheet.addRow(["TOTAL LANDED COST BREAKDOWN (" + (project.comparisonCurrency || "PHP") + ")"]);
-    breakdownTitle.font = { bold: true };
+    // Cost Breakdown Section (optional)
+    if (options?.includeCostWaterfall !== false) {
+        compSheet.addRow([]);
+        const breakdownTitle = compSheet.addRow(["TOTAL LANDED COST BREAKDOWN (" + (filteredProject.comparisonCurrency || "PHP") + ")"]);
+        breakdownTitle.font = { bold: true };
 
-    const costLines: { label: string; key: string }[] = [
-        { label: "Goods (after discount)", key: "goodsAfterDiscountCompCurr" },
-        { label: "Freight", key: "freightCompCurr" },
-        { label: "Insurance", key: "insuranceCompCurr" },
-        { label: "CIF Dutiable Value", key: "cifDutiableValueCompCurr" },
-        { label: "FX Risk Buffer", key: "fxBufferCompCurr" },
-        { label: "Import Duty", key: "dutyCompCurr" },
-        { label: "Customs, Port & Security Fees", key: "customsAndPortTotalCompCurr" },
-        { label: "Import / Local VAT", key: "vatCompCurr" },
-        { label: "Inland Trucking", key: "inlandTruckingCompCurr" },
-        { label: "Bank Fees", key: "bankFeesCompCurr" },
-        { label: "Payment Terms Net Cost", key: "paymentTermsCostCompCurr" },
-        { label: "TOTAL LANDED COST", key: "totalLandedCostCompCurr" },
-        { label: "Quality Score (0-100)", key: "qualityScore" },
-        { label: "Price Score (0-100)", key: "priceScore" },
-        { label: "Lead Time Score (0-100)", key: "leadTimeScore" },
-        { label: "OVERALL SCORE (0-100)", key: "overallScore" },
-        { label: "Rank", key: "ranking" },
-    ];
+        const allCostLines: { label: string; key: string; isQuality?: boolean }[] = [
+            { label: "Goods (after discount)", key: "goodsAfterDiscountCompCurr" },
+            { label: "Freight", key: "freightCompCurr" },
+            { label: "Insurance", key: "insuranceCompCurr" },
+            { label: "CIF Dutiable Value", key: "cifDutiableValueCompCurr" },
+            { label: "FX Risk Buffer", key: "fxBufferCompCurr" },
+            { label: "Import Duty", key: "dutyCompCurr" },
+            { label: "Customs, Port & Security Fees", key: "customsAndPortTotalCompCurr" },
+            { label: "Import / Local VAT", key: "vatCompCurr" },
+            { label: "Inland Trucking", key: "inlandTruckingCompCurr" },
+            { label: "Bank Fees", key: "bankFeesCompCurr" },
+            { label: "Payment Terms Net Cost", key: "paymentTermsCostCompCurr" },
+            { label: "TOTAL LANDED COST", key: "totalLandedCostCompCurr" },
+            { label: "Quality Score (0-100)", key: "qualityScore", isQuality: true },
+            { label: "Price Score (0-100)", key: "priceScore" },
+            { label: "Lead Time Score (0-100)", key: "leadTimeScore" },
+            { label: "OVERALL SCORE (0-100)", key: "overallScore" },
+            { label: "Rank", key: "ranking" },
+        ];
 
-    for (const cl of costLines) {
-        const lineVals: (string | number)[] = ["", cl.label, "", "", "", ""];
-        for (const bid of project.bids) {
-            const res = summary.results[bid.id];
-            const val = (res as any)?.[cl.key] ?? "-";
-            lineVals.push(val, "", "");
-        }
-        const row = compSheet.addRow(lineVals);
-        if (cl.label === "TOTAL LANDED COST" || cl.label === "OVERALL SCORE") {
-            row.font = { bold: true };
-            row.fill = {
-                type: "pattern",
-                pattern: "solid",
-                fgColor: { argb: "FFF1F5F9" },
-            };
+        const costLines = options?.includeQualityScores === false
+            ? allCostLines.filter((l) => !l.isQuality)
+            : allCostLines;
+
+        for (const cl of costLines) {
+            const lineVals: (string | number)[] = ["", cl.label, "", "", "", ""];
+            for (const bid of targetBids) {
+                const res = summary.results[bid.id];
+                const resRecord = res as unknown as Record<string, unknown> | undefined;
+                const rawVal = resRecord?.[cl.key];
+                const val = typeof rawVal === "number" || typeof rawVal === "string" ? rawVal : "-";
+                lineVals.push(val, "", "");
+            }
+            const row = compSheet.addRow(lineVals);
+            if (cl.label === "TOTAL LANDED COST" || cl.label === "OVERALL SCORE") {
+                row.font = { bold: true };
+                row.fill = {
+                    type: "pattern",
+                    pattern: "solid",
+                    fgColor: { argb: "FFF1F5F9" },
+                };
+            }
         }
     }
 
@@ -124,116 +167,260 @@ export async function exportRfqToExcel(project: RfqProject): Promise<void> {
     });
 
     // -------------------------------------------------------------------------
-    // SHEET 2: Award & Approval
+    // SHEET 2: Award & Approval (optional)
     // -------------------------------------------------------------------------
-    const awardSheet = workbook.addWorksheet("Award & Approval", {
-        views: [{ showGridLines: true }],
-    });
+    if (options?.includeAwards !== false) {
+        const awardSheet = workbook.addWorksheet("Award & Approval", {
+            views: [{ showGridLines: true }],
+        });
 
-    awardSheet.addRow(["AWARD ALLOCATION & EXECUTIVE APPROVAL"]).font = {
-        size: 14,
-        bold: true,
-    };
-    awardSheet.addRow([`Reference No: ${project.rfqReference || "-"} | Status: ${project.status}`]);
-    awardSheet.addRow([]);
+        awardSheet.addRow(["AWARD ALLOCATION & EXECUTIVE APPROVAL"]).font = {
+            size: 14,
+            bold: true,
+        };
+        awardSheet.addRow([`Reference No: ${filteredProject.rfqReference || "-"} | Status: ${filteredProject.status}`]);
+        awardSheet.addRow([]);
 
-    const awardHeader = awardSheet.addRow([
-        "#",
-        "Item Name",
-        "Quantity",
-        "UOM",
-        "Awarded Supplier",
-        "Landed Unit Cost (" + project.comparisonCurrency + ")",
-        "Landed Total (" + project.comparisonCurrency + ")",
-        "Target Unit Price",
-        "Target Total",
-        "Variance vs Target",
-    ]);
-    awardHeader.font = { bold: true };
-    awardHeader.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FFE2E8F0" },
-    };
-
-    let totalAwardLanded = 0;
-    let totalTarget = 0;
-
-    project.items.forEach((item, idx) => {
-        const award = project.awards?.find((a) => a.rfqItemId === item.id);
-        const awardedBid = award ? project.bids.find((b) => b.id === award.rfqBidId) : null;
-        const awardedSupplier = awardedBid?.supplierName || "Unawarded";
-
-        const landedUnit = award?.awardedLandedUnitCost || 0;
-        const landedTotal = award?.awardedLandedTotal || 0;
-        const targetTotal = item.quantity * item.targetUnitPrice;
-        const variance = landedTotal - targetTotal;
-
-        totalAwardLanded += landedTotal;
-        totalTarget += targetTotal;
-
-        awardSheet.addRow([
-            idx + 1,
-            item.itemName,
-            item.quantity,
-            item.uom,
-            awardedSupplier,
-            landedUnit > 0 ? landedUnit : "-",
-            landedTotal > 0 ? landedTotal : "-",
-            item.targetUnitPrice,
-            targetTotal,
-            variance !== 0 ? variance : "-",
+        const awardHeader = awardSheet.addRow([
+            "#",
+            "Item Name",
+            "Quantity",
+            "UOM",
+            "Awarded Supplier",
+            "Landed Unit Cost (" + filteredProject.comparisonCurrency + ")",
+            "Landed Total (" + filteredProject.comparisonCurrency + ")",
+            "Target Unit Price",
+            "Target Total",
+            "Variance vs Target",
         ]);
-    });
+        awardHeader.font = { bold: true };
+        awardHeader.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFE2E8F0" },
+        };
 
-    // Summary Totals
-    awardSheet.addRow([]);
-    const totalRow = awardSheet.addRow([
-        "",
-        "TOTAL AWARDED AMOUNT",
-        "",
-        "",
-        "",
-        "",
-        totalAwardLanded,
-        "",
-        totalTarget,
-        totalAwardLanded - totalTarget,
-    ]);
-    totalRow.font = { bold: true };
+        let totalAwardLanded = 0;
+        let totalTarget = 0;
 
-    if (project.budget) {
-        const budgetVariance = totalAwardLanded - project.budget;
+        targetItems.forEach((item, idx) => {
+            const award = filteredProject.awards?.find((a) => a.rfqItemId === item.id);
+            const awardedBid = award ? targetBids.find((b) => b.id === award.rfqBidId) : null;
+            const awardedSupplier = awardedBid?.supplierName || "Unawarded";
+
+            const landedUnit = award?.awardedLandedUnitCost || 0;
+            const landedTotal = award?.awardedLandedTotal || 0;
+            const targetTotal = item.quantity * item.targetUnitPrice;
+            const variance = landedTotal - targetTotal;
+
+            totalAwardLanded += landedTotal;
+            totalTarget += targetTotal;
+
+            awardSheet.addRow([
+                idx + 1,
+                item.itemName,
+                item.quantity,
+                item.uom,
+                awardedSupplier,
+                landedUnit > 0 ? landedUnit : "-",
+                landedTotal > 0 ? landedTotal : "-",
+                item.targetUnitPrice,
+                targetTotal,
+                variance !== 0 ? variance : "-",
+            ]);
+        });
+
+        // Summary Totals
+        awardSheet.addRow([]);
+        const totalRow = awardSheet.addRow([
+            "",
+            "TOTAL AWARDED AMOUNT",
+            "",
+            "",
+            "",
+            "",
+            totalAwardLanded,
+            "",
+            totalTarget,
+            totalAwardLanded - totalTarget,
+        ]);
+        totalRow.font = { bold: true };
+
+        if (filteredProject.budget) {
+            const budgetVariance = totalAwardLanded - filteredProject.budget;
+            awardSheet.addRow([
+                "",
+                "APPROVED BUDGET",
+                "",
+                "",
+                "",
+                "",
+                filteredProject.budget,
+                "",
+                budgetVariance > 0 ? `Over budget by ${budgetVariance}` : `Under budget by ${Math.abs(budgetVariance)}`,
+            ]).font = { bold: true };
+        }
+
+        awardSheet.addRow([]);
+        awardSheet.addRow(["JUSTIFICATION / REASON FOR AWARD:"]).font = { bold: true };
+        awardSheet.addRow([filteredProject.justification || "No justification recorded."]);
+
+        awardSheet.addRow([]);
+        awardSheet.addRow(["SIGNATORIES:"]).font = { bold: true };
         awardSheet.addRow([
-            "",
-            "APPROVED BUDGET",
-            "",
-            "",
-            "",
-            "",
-            project.budget,
-            "",
-            budgetVariance > 0 ? `Over budget by ${budgetVariance}` : `Under budget by ${Math.abs(budgetVariance)}`,
-        ]).font = { bold: true };
+            `Prepared by: ${filteredProject.preparedBy || "-"} (${filteredProject.preparedByTitle || "Procurement"})`,
+            `Reviewed by: ${filteredProject.reviewedBy || "-"} (${filteredProject.reviewedByTitle || "Reviewer"})`,
+            `Approved by: ${filteredProject.approvedBy || "-"} (${filteredProject.approvedByTitle || "Approver"})`,
+        ]);
+
+        awardSheet.columns.forEach((col) => {
+            col.width = 20;
+        });
     }
 
-    awardSheet.addRow([]);
-    awardSheet.addRow(["JUSTIFICATION / REASON FOR AWARD:"]).font = { bold: true };
-    awardSheet.addRow([project.justification || "No justification recorded."]);
-
-    awardSheet.addRow([]);
-    awardSheet.addRow(["SIGNATORIES:"]).font = { bold: true };
-    awardSheet.addRow([
-        `Prepared by: ${project.preparedBy || "-"} (${project.preparedByTitle || "Procurement"})`,
-        `Reviewed by: ${project.reviewedBy || "-"} (${project.reviewedByTitle || "Reviewer"})`,
-        `Approved by: ${project.approvedBy || "-"} (${project.approvedByTitle || "Approver"})`,
-    ]);
-
-    awardSheet.columns.forEach((col) => {
-        col.width = 20;
-    });
-
     // -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // SHEET: Technical Quality & Compliance Evaluation (optional)
+    // -------------------------------------------------------------------------
+    if (options?.includeQualityScores !== false) {
+        const qualitySheet = workbook.addWorksheet("Quality & Compliance", {
+            views: [{ showGridLines: true }],
+        });
+
+        qualitySheet.addRow(["TECHNICAL QUALITY & COMPLIANCE EVALUATION MATRIX"]).font = {
+            size: 14,
+            bold: true,
+        };
+        qualitySheet.addRow([`Project / RFQ: ${filteredProject.rfqTitle || "Untitled"}`]);
+        qualitySheet.addRow([`Reference No: ${filteredProject.rfqReference || "-"} | Status: ${filteredProject.status} | Date: ${new Date().toLocaleDateString()}`]);
+        qualitySheet.addRow([]);
+
+        const passFailCriteria = (filteredProject.qualityCriteria || []).filter((c) => c.criterionType === "PASS_FAIL");
+        const scoredCriteria = (filteredProject.qualityCriteria || []).filter((c) => c.criterionType === "SCORED");
+
+        // Section 1: Mandatory Compliance Requirements (Pass / Fail)
+        if (passFailCriteria.length > 0) {
+            const pfTitle = qualitySheet.addRow(["1. MANDATORY COMPLIANCE REQUIREMENTS (PASS / FAIL)"]);
+            pfTitle.font = { bold: true };
+
+            const pfHeader = qualitySheet.addRow([
+                "#",
+                "Compliance Criterion",
+                "Evaluation Type",
+                ...targetBids.flatMap((b) => [`${b.supplierName} Result`, `${b.supplierName} Audit Remarks`]),
+            ]);
+            pfHeader.font = { bold: true };
+            pfHeader.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FFE2E8F0" },
+            };
+
+            passFailCriteria.forEach((c, idx) => {
+                const rowVals: (string | number)[] = [idx + 1, c.criterionName, "Pass / Fail"];
+                for (const bid of targetBids) {
+                    const s = bid.scores?.[c.id];
+                    const result = s?.passFailResult || "NOT_CHECKED";
+                    const remarks = s?.evidenceRemarks || "-";
+                    rowVals.push(result, remarks);
+                }
+                const row = qualitySheet.addRow(rowVals);
+                targetBids.forEach((_, bIdx) => {
+                    const colIndex = 4 + bIdx * 2;
+                    const cell = row.getCell(colIndex);
+                    if (cell.value === "PASS") {
+                        cell.font = { bold: true, color: { argb: "FF166534" } };
+                    } else if (cell.value === "FAIL") {
+                        cell.font = { bold: true, color: { argb: "FF991B1B" } };
+                    }
+                });
+            });
+
+            qualitySheet.addRow([]);
+        }
+
+        // Section 2: Technical Scored Criteria (1-5 Scale)
+        if (scoredCriteria.length > 0) {
+            const scTitle = qualitySheet.addRow(["2. TECHNICAL SCORED CRITERIA (1-5 SCALE)"]);
+            scTitle.font = { bold: true };
+
+            const scHeader = qualitySheet.addRow([
+                "#",
+                "Evaluation Parameter",
+                "Weight (%)",
+                ...targetBids.flatMap((b) => [`${b.supplierName} Rating (1-5)`, `${b.supplierName} Weighted Score`, `${b.supplierName} Audit Remarks`]),
+            ]);
+            scHeader.font = { bold: true };
+            scHeader.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FFE2E8F0" },
+            };
+
+            scoredCriteria.forEach((c, idx) => {
+                const rowVals: (string | number)[] = [idx + 1, c.criterionName, `${c.weightPct}%`];
+                for (const bid of targetBids) {
+                    const s = bid.scores?.[c.id];
+                    const score = s?.score && s.score >= 1 ? s.score : "-";
+                    const weighted = typeof score === "number" ? Number(((score / 5) * c.weightPct).toFixed(2)) : "-";
+                    const remarks = s?.evidenceRemarks || "-";
+                    rowVals.push(score, weighted, remarks);
+                }
+                qualitySheet.addRow(rowVals);
+            });
+
+            qualitySheet.addRow([]);
+        }
+
+        // Section 3: Summary Scoring & Compliance Verdict
+        const verdictTitle = qualitySheet.addRow(["3. TECHNICAL EVALUATION SUMMARY & VERDICT"]);
+        verdictTitle.font = { bold: true };
+
+        const summaryHeader = qualitySheet.addRow([
+            "#",
+            "Supplier Name",
+            "Supplier Type",
+            "Country",
+            "Mandatory Compliance",
+            "Total Quality Score (0-100)",
+            "Quality Rank",
+        ]);
+        summaryHeader.font = { bold: true };
+        summaryHeader.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFE2E8F0" },
+        };
+
+        targetBids.forEach((bid, idx) => {
+            const res = summary.results[bid.id];
+            const isCompliant = res ? res.qualityPass : true;
+            const qScore = res ? res.qualityScore : 0;
+            const qRank = res ? res.ranking : "-";
+
+            const row = qualitySheet.addRow([
+                idx + 1,
+                bid.supplierName,
+                bid.supplierType,
+                bid.country || "-",
+                isCompliant ? "COMPLIANT" : "DISQUALIFIED (Failed mandatory)",
+                qScore,
+                qRank,
+            ]);
+
+            const statusCell = row.getCell(5);
+            if (isCompliant) {
+                statusCell.font = { bold: true, color: { argb: "FF166534" } };
+            } else {
+                statusCell.font = { bold: true, color: { argb: "FF991B1B" } };
+            }
+        });
+
+        qualitySheet.columns.forEach((col) => {
+            col.width = 22;
+        });
+    }
+
     // SHEET 3: Bids & Quotations (Canonical Import/Export Data)
     // -------------------------------------------------------------------------
     const bidsSheet = workbook.addWorksheet("Bids & Quotations", {
@@ -248,7 +435,7 @@ export async function exportRfqToExcel(project: RfqProject): Promise<void> {
         fgColor: { argb: "FF1E293B" }, // Slate-800
     };
 
-    const bidsRows = buildBidsDataRows(project);
+    const bidsRows = buildBidsDataRows(filteredProject, options);
     bidsRows.forEach((r) => {
         bidsSheet.addRow(r);
     });
@@ -263,7 +450,7 @@ export async function exportRfqToExcel(project: RfqProject): Promise<void> {
     const blob = new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
-    saveAs(blob, `${project.rfqReference || "RFQ"}-Supplier-Bid-Comparison.xlsx`);
+    saveAs(blob, `${filteredProject.rfqReference || "RFQ"}-Supplier-Bid-Comparison.xlsx`);
 }
 
 export const BIDS_CANONICAL_COLUMNS = [
@@ -312,19 +499,20 @@ export const BIDS_CANONICAL_COLUMNS = [
 
 /**
  * Builds the canonical 42-column tabular rows representation of bids and quotations.
- * Fully compatible with the import parser.
+ * Fully compatible with the import parser, with optional filtering.
  */
-export function buildBidsDataRows(project: RfqProject): (string | number)[][] {
+export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOptions): (string | number)[][] {
+    const filteredProject = getFilteredProject(project, options);
     const rows: (string | number)[][] = [];
 
     // If project has no bids yet, export requested items with empty supplier fields for vendor RFQ dispatch
-    if (!project.bids || project.bids.length === 0) {
-        (project.items || []).forEach((item) => {
+    if (!filteredProject.bids || filteredProject.bids.length === 0) {
+        (filteredProject.items || []).forEach((item) => {
             rows.push([
                 "", // Supplier
                 "Local", // Type
                 "PH", // Country
-                project.comparisonCurrency || "PHP", // Currency
+                filteredProject.comparisonCurrency || "PHP", // Currency
                 "DDP", // Incoterm
                 item.itemName,
                 item.quantity,
@@ -338,12 +526,12 @@ export function buildBidsDataRows(project: RfqProject): (string | number)[][] {
                 "LUMP_SUM", // Freight Basis
                 0, // Freight
                 0, // Freight Min
-                project.comparisonCurrency || "PHP",
+                filteredProject.comparisonCurrency || "PHP",
                 "PCT_GOODS_AND_FREIGHT",
                 0.3,
                 "", // FTA
                 0, // FTA Duty %
-                project.defaultVatPct ?? 12,
+                filteredProject.defaultVatPct ?? 12,
                 "No", // Prices incl VAT
                 0, // Brokerage
                 0, // Customs
@@ -367,7 +555,7 @@ export function buildBidsDataRows(project: RfqProject): (string | number)[][] {
         return rows;
     }
 
-    project.bids.forEach((bid) => {
+    filteredProject.bids.forEach((bid) => {
         // Compute average scored quality rating (1-5 scale)
         const scoredEntries = Object.values(bid.scores || {})
             .map((s) => s.score)
@@ -376,7 +564,7 @@ export function buildBidsDataRows(project: RfqProject): (string | number)[][] {
             ? Number((scoredEntries.reduce((a, b) => a + b, 0) / scoredEntries.length).toFixed(1))
             : 5;
 
-        (project.items || []).forEach((item) => {
+        (filteredProject.items || []).forEach((item) => {
             const quote = bid.quotations?.[item.id];
             const priceBreaks = quote?.priceBreaks && quote.priceBreaks.length > 0
                 ? quote.priceBreaks
@@ -434,10 +622,10 @@ export function buildBidsDataRows(project: RfqProject): (string | number)[][] {
 }
 
 /**
- * Generates and downloads a 100% import-compatible CSV of all project bids and quotations.
+ * Generates and downloads a 100% import-compatible CSV of project bids and quotations, with optional filtering.
  */
-export function exportRfqBidsToCsv(project: RfqProject): void {
-    const rows = buildBidsDataRows(project);
+export function exportRfqBidsToCsv(project: RfqProject, options?: DynamicExportOptions): void {
+    const rows = buildBidsDataRows(project, options);
     const headerLine = BIDS_CANONICAL_COLUMNS.join(",");
     const csvLines = [
         headerLine,
@@ -459,10 +647,14 @@ export function exportRfqBidsToCsv(project: RfqProject): void {
 }
 
 /**
- * Generates and downloads an executive comparison summary matrix CSV.
+ * Generates and downloads an executive comparison summary matrix CSV, with optional filtering.
  */
-export function exportRfqComparisonToCsv(project: RfqProject): void {
-    const summary = evaluateAndCompareSuppliers(project);
+export function exportRfqComparisonToCsv(project: RfqProject, options?: DynamicExportOptions): void {
+    const filteredProject = getFilteredProject(project, options);
+    const summary = evaluateAndCompareSuppliers(filteredProject);
+    const targetBids = filteredProject.bids;
+    const targetItems = filteredProject.items;
+
     const headers = [
         "Item Number",
         "Item Name",
@@ -470,13 +662,13 @@ export function exportRfqComparisonToCsv(project: RfqProject): void {
         "Quantity",
         "UOM",
         "Target Price",
-        ...project.bids.map((b) => `${b.supplierName} Landed Unit`),
-        ...project.bids.map((b) => `${b.supplierName} Total Landed`),
+        ...targetBids.map((b) => `${b.supplierName} Landed Unit`),
+        ...targetBids.map((b) => `${b.supplierName} Total Landed`),
     ];
 
     const rows: string[][] = [headers];
 
-    project.items.forEach((item, idx) => {
+    targetItems.forEach((item, idx) => {
         const row = [
             String(idx + 1),
             `"${item.itemName.replace(/"/g, '""')}"`,
@@ -486,13 +678,13 @@ export function exportRfqComparisonToCsv(project: RfqProject): void {
             String(item.targetUnitPrice),
         ];
 
-        for (const bid of project.bids) {
+        for (const bid of targetBids) {
             const res = summary.results[bid.id];
             const breakdown = res?.items[item.id];
             row.push(breakdown && breakdown.hasQuote ? String(breakdown.landedUnitCostCompCurr) : "-");
         }
 
-        for (const bid of project.bids) {
+        for (const bid of targetBids) {
             const res = summary.results[bid.id];
             const breakdown = res?.items[item.id];
             row.push(breakdown && breakdown.hasQuote ? String(breakdown.totalLandedCompCurr) : "-");
@@ -503,7 +695,142 @@ export function exportRfqComparisonToCsv(project: RfqProject): void {
 
     const csvContent = rows.map((r) => r.join(",")).join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    saveAs(blob, `${project.rfqReference || "RFQ"}-Supplier-Bid-Comparison.csv`);
+    saveAs(blob, `${filteredProject.rfqReference || "RFQ"}-Supplier-Bid-Comparison.csv`);
+}
+
+/**
+ * Generates and downloads a dedicated Technical Quality & Compliance Evaluation Matrix CSV.
+ */
+export function exportRfqQualityToCsv(project: RfqProject, options?: DynamicExportOptions): void {
+    const filteredProject = getFilteredProject(project, options);
+    const summary = evaluateAndCompareSuppliers(filteredProject);
+    const targetBids = filteredProject.bids;
+    const passFailCriteria = (filteredProject.qualityCriteria || []).filter((c) => c.criterionType === "PASS_FAIL");
+    const scoredCriteria = (filteredProject.qualityCriteria || []).filter((c) => c.criterionType === "SCORED");
+
+    const rows: string[][] = [];
+
+    rows.push([`"TECHNICAL QUALITY & COMPLIANCE EVALUATION MATRIX"`]);
+    rows.push([`"Project / RFQ"`, `"${filteredProject.rfqTitle || "Untitled"}"`]);
+    rows.push([`"Reference No"`, `"${filteredProject.rfqReference || "-"}"`, `"Status"`, `"${filteredProject.status}"`]);
+    rows.push([]);
+
+    // 1. Mandatory Compliance Section
+    if (passFailCriteria.length > 0) {
+        rows.push([`"1. MANDATORY COMPLIANCE REQUIREMENTS (PASS/FAIL)"`]);
+        const pfHeaders = [
+            `"#"`,
+            `"Criterion Name"`,
+            `"Type"`,
+            ...targetBids.flatMap((b) => [`"${b.supplierName} Result"`, `"${b.supplierName} Audit Remarks"`]),
+        ];
+        rows.push(pfHeaders);
+
+        passFailCriteria.forEach((c, idx) => {
+            const row = [
+                String(idx + 1),
+                `"${c.criterionName.replace(/"/g, '""')}"`,
+                `"Pass/Fail"`,
+            ];
+            for (const bid of targetBids) {
+                const s = bid.scores?.[c.id];
+                row.push(`"${s?.passFailResult || "NOT_CHECKED"}"`);
+                row.push(`"${(s?.evidenceRemarks || "").replace(/"/g, '""')}"`);
+            }
+            rows.push(row);
+        });
+        rows.push([]);
+    }
+
+    // 2. Scored Criteria Section
+    if (scoredCriteria.length > 0) {
+        rows.push([`"2. TECHNICAL SCORED CRITERIA (1-5 SCALE)"`]);
+        const scHeaders = [
+            `"#"`,
+            `"Evaluation Parameter"`,
+            `"Weight %"`,
+            ...targetBids.flatMap((b) => [
+                `"${b.supplierName} Score (1-5)"`,
+                `"${b.supplierName} Weighted Score"`,
+                `"${b.supplierName} Audit Remarks"`,
+            ]),
+        ];
+        rows.push(scHeaders);
+
+        scoredCriteria.forEach((c, idx) => {
+            const row = [
+                String(idx + 1),
+                `"${c.criterionName.replace(/"/g, '""')}"`,
+                `"${c.weightPct}%"`,
+            ];
+            for (const bid of targetBids) {
+                const s = bid.scores?.[c.id];
+                const score = s?.score && s.score >= 1 ? s.score : "-";
+                const weighted = typeof score === "number" ? ((score / 5) * c.weightPct).toFixed(2) : "-";
+                row.push(String(score));
+                row.push(String(weighted));
+                row.push(`"${(s?.evidenceRemarks || "").replace(/"/g, '""')}"`);
+            }
+            rows.push(row);
+        });
+        rows.push([]);
+    }
+
+    // 3. Evaluation Summary Verdict
+    rows.push([`"3. TECHNICAL EVALUATION SUMMARY & VERDICT"`]);
+    rows.push([
+        `"#"`,
+        `"Supplier Name"`,
+        `"Supplier Type"`,
+        `"Country"`,
+        `"Mandatory Compliance"`,
+        `"Total Quality Score (0-100)"`,
+        `"Quality Rank"`,
+    ]);
+
+    targetBids.forEach((bid, idx) => {
+        const res = summary.results[bid.id];
+        const isCompliant = res ? res.qualityPass : true;
+        const qScore = res ? res.qualityScore : 0;
+        const qRank = res ? res.ranking : "-";
+
+        rows.push([
+            String(idx + 1),
+            `"${bid.supplierName.replace(/"/g, '""')}"`,
+            bid.supplierType,
+            `"${bid.country || "-"}"`,
+            isCompliant ? `"COMPLIANT"` : `"DISQUALIFIED"`,
+            String(qScore),
+            String(qRank),
+        ]);
+    });
+
+    const csvContent = rows.map((r) => r.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    saveAs(blob, `${filteredProject.rfqReference || "RFQ"}-Quality-Evaluation.csv`);
+}
+
+/**
+ * Generates and downloads a structured JSON backup of the RFQ project, with optional filtering.
+ */
+export function exportRfqToJson(project: RfqProject, options?: DynamicExportOptions): void {
+    const filteredProject = getFilteredProject(project, options);
+    const targetAwards = options?.includeAwards === false
+        ? []
+        : (filteredProject.awards || []).filter((a) =>
+            filteredProject.items.some((it) => it.id === a.rfqItemId)
+        );
+
+    const exportPayload = {
+        ...filteredProject,
+        awards: targetAwards,
+        exportedAt: new Date().toISOString(),
+        exportedBy: "VOS Manufacturing Management",
+    };
+
+    const jsonString = JSON.stringify(exportPayload, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json;charset=utf-8;" });
+    saveAs(blob, `${project.rfqReference || "RFQ"}-Export.json`);
 }
 
 /**

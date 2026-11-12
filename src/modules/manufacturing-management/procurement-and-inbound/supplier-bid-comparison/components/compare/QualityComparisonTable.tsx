@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Check, X, ShieldAlert, Award } from "lucide-react";
+import { Check, X, Award } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
@@ -14,21 +14,32 @@ interface QualityComparisonTableProps {
 
 export const QualityComparisonTable: React.FC<QualityComparisonTableProps> = ({ supplierFilter }) => {
     const { currentProject } = useBidComparisonStore();
-    if (!currentProject) return null;
 
-    const criteria = currentProject.qualityCriteria || [];
-    const passFailCriteria = React.useMemo(() => criteria.filter((c) => c.criterionType === "PASS_FAIL"), [criteria]);
-    const scoredCriteria = React.useMemo(() => criteria.filter((c) => c.criterionType === "SCORED"), [criteria]);
+    const passFailCriteria = React.useMemo(() => {
+        if (!currentProject) return [];
+        return (currentProject.qualityCriteria || []).filter((c) => c.criterionType === "PASS_FAIL");
+    }, [currentProject]);
 
-    const summary = React.useMemo(() => evaluateAndCompareSuppliers(currentProject), [currentProject]);
+    const scoredCriteria = React.useMemo(() => {
+        if (!currentProject) return [];
+        return (currentProject.qualityCriteria || []).filter((c) => c.criterionType === "SCORED");
+    }, [currentProject]);
+
+    const summary = React.useMemo(
+        () => (currentProject ? evaluateAndCompareSuppliers(currentProject) : null),
+        [currentProject]
+    );
 
     const bids = React.useMemo(() => {
+        if (!currentProject) return [];
         return currentProject.bids.filter((b) => {
             if (supplierFilter === "LOCAL") return b.supplierType === "LOCAL";
             if (supplierFilter === "INTERNATIONAL") return b.supplierType === "INTERNATIONAL";
             return true;
         });
-    }, [currentProject.bids, supplierFilter]);
+    }, [currentProject, supplierFilter]);
+
+    if (!currentProject || !summary) return null;
 
     const getScoreBadgeColor = (score: number) => {
         if (score === 5) return "bg-emerald-500 text-white";

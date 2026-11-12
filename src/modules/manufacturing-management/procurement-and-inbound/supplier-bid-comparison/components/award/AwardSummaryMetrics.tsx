@@ -9,12 +9,17 @@ import { optimizeSplitAward } from "../../engine/split-award-optimizer";
 
 export const AwardSummaryMetrics: React.FC = () => {
     const { currentProject } = useBidComparisonStore();
-    if (!currentProject) return null;
+
+    const summary = React.useMemo(
+        () => (currentProject ? evaluateAndCompareSuppliers(currentProject) : null),
+        [currentProject]
+    );
+
+    if (!currentProject || !summary) return null;
 
     const items = currentProject.items || [];
     const awards = currentProject.awards || [];
     const compCurr = currentProject.comparisonCurrency || "PHP";
-    const summary = React.useMemo(() => evaluateAndCompareSuppliers(currentProject), [currentProject]);
 
     // Calculate total landed cost of current award
     const winningSupplierIds = new Set(awards.map((a) => a.rfqBidId));
@@ -26,7 +31,6 @@ export const AwardSummaryMetrics: React.FC = () => {
 
     // Compare with average market quotes for awarded items (matching prototype awardCalc)
     let avgSum = 0;
-    let maxSum = 0;
     let hasValidQuotes = false;
 
     for (const award of awards) {
@@ -42,14 +46,12 @@ export const AwardSummaryMetrics: React.FC = () => {
         if (itemLandedQuotes.length > 0) {
             hasValidQuotes = true;
             const avg = itemLandedQuotes.reduce((a, b) => a + b, 0) / itemLandedQuotes.length;
-            const max = Math.max(...itemLandedQuotes);
             avgSum += avg;
-            maxSum += max;
         }
     }
 
     const savingsVsAverage = hasValidQuotes ? avgSum - awardTotalLanded : null;
-    const savingsVsMax = hasValidQuotes ? maxSum - awardTotalLanded : null;
+
 
     // Budget variance
     const budgetVariance = currentProject.budget ? awardTotalLanded - currentProject.budget : null;
@@ -71,7 +73,7 @@ export const AwardSummaryMetrics: React.FC = () => {
                             AWARDED TOTAL (LANDED)
                         </span>
                         <div className="text-base font-bold font-mono text-foreground">
-                            {compCurr} {awardTotalLanded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {compCurr} {awardTotalLanded.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                         </div>
                         <span className="text-[10px] text-muted-foreground block truncate">
                             Allocated across {winningSupplierIds.size} supplier(s) · {awards.length}/{items.length} items
@@ -90,7 +92,7 @@ export const AwardSummaryMetrics: React.FC = () => {
                             {savingsVsAverage !== null ? (
                                 <span className={savingsVsAverage >= 0 ? "text-emerald-600" : "text-rose-600"}>
                                     {savingsVsAverage >= 0 ? "Saves " : "Over by "}
-                                    ₱{Math.abs(savingsVsAverage).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    ₱{Math.abs(savingsVsAverage).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                 </span>
                             ) : (
                                 "-"
@@ -112,14 +114,14 @@ export const AwardSummaryMetrics: React.FC = () => {
                         <div className="text-base font-bold font-mono">
                             {totalTarget > 0 ? (
                                 <span className={varianceVsTarget <= 0 ? "text-emerald-600" : "text-rose-600"}>
-                                    {varianceVsTarget <= 0 ? "-" : "+"}₱{Math.abs(varianceVsTarget).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    {varianceVsTarget <= 0 ? "-" : "+"}₱{Math.abs(varianceVsTarget).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                 </span>
                             ) : (
                                 "-"
                             )}
                         </div>
                         <span className="text-[10px] text-muted-foreground block truncate">
-                            Ceiling: ₱{totalTarget.toLocaleString()}
+                            Ceiling: ₱{totalTarget.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                         </span>
                     </CardContent>
                 </Card>
@@ -135,14 +137,14 @@ export const AwardSummaryMetrics: React.FC = () => {
                             {budgetVariance !== null ? (
                                 <span className={isOverBudget ? "text-rose-600 font-bold" : "text-emerald-600 font-bold"}>
                                     {isOverBudget ? "Over by " : "Under by "}
-                                    ₱{Math.abs(budgetVariance).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    ₱{Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                 </span>
                             ) : (
                                 <span className="text-muted-foreground text-xs">No budget set</span>
                             )}
                         </div>
                         <span className="text-[10px] text-muted-foreground block truncate">
-                            Budget: {currentProject.budget ? `₱${currentProject.budget.toLocaleString()}` : "-"}
+                            Budget: {currentProject.budget ? `₱${currentProject.budget.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "-"}
                         </span>
                     </CardContent>
                 </Card>
@@ -154,7 +156,7 @@ export const AwardSummaryMetrics: React.FC = () => {
                     <div className="flex items-center gap-2">
                         <Lightbulb className="h-4 w-4 text-blue-600 shrink-0" />
                         <span>
-                            <strong>Cheaper combination available:</strong> The optimized split award across {opt.participatingBidIds.length} suppliers achieves <strong>₱{opt.optimizedTotalCompCurr.toLocaleString()}</strong>, saving an additional <strong>₱{(awardTotalLanded - opt.optimizedTotalCompCurr).toLocaleString()}</strong>.
+                            <strong>Cheaper combination available:</strong> The optimized split award across {opt.participatingBidIds.length} suppliers achieves <strong>₱{opt.optimizedTotalCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</strong>, saving an additional <strong>₱{(awardTotalLanded - opt.optimizedTotalCompCurr).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</strong>.
                         </span>
                     </div>
                 </div>

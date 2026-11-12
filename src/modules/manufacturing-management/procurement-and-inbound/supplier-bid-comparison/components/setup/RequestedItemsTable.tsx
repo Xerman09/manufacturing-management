@@ -14,11 +14,6 @@ import { calculateCbm, convertToKg } from "../../constants/uom-conversions";
 
 export const RequestedItemsTable: React.FC = () => {
     const { currentProject, updateProject, lookups } = useBidComparisonStore();
-    if (!currentProject) return null;
-
-    const items = currentProject.items || [];
-    const compCurr = currentProject.comparisonCurrency || "PHP";
-    const budget = currentProject.budget || 0;
 
     const productOptions: ComboboxOption[] = React.useMemo(() => {
         return (lookups.products || []).map((p) => ({
@@ -48,6 +43,12 @@ export const RequestedItemsTable: React.FC = () => {
             subLabel: u.unitName && u.unitName !== u.unitShortcut ? u.unitName : undefined,
         }));
     }, [lookups.units]);
+
+    if (!currentProject) return null;
+
+    const items = currentProject.items || [];
+    const compCurr = currentProject.comparisonCurrency || "PHP";
+    const budget = currentProject.budget || 0;
 
     const handleAddItem = () => {
         const newItem: RequestedItem = {
@@ -94,9 +95,17 @@ export const RequestedItemsTable: React.FC = () => {
 
     const handleProductSelect = (itemId: string, selectedName: string, option?: ComboboxOption) => {
         if (option && option.extra) {
-            const p = option.extra;
-            const cbm = calculateCbm(p.cbmLength, p.cbmWidth, p.cbmHeight);
-            const kg = convertToKg(p.weightKg);
+            const p = option.extra as {
+                productId?: number;
+                cbmLength?: number;
+                cbmWidth?: number;
+                cbmHeight?: number;
+                weightKg?: number;
+                uom?: string;
+                targetUnitPrice?: number;
+            };
+            const cbm = calculateCbm(p.cbmLength || 0, p.cbmWidth || 0, p.cbmHeight || 0);
+            const kg = convertToKg(p.weightKg || 0);
 
             handleUpdateItem(itemId, {
                 itemName: selectedName,
@@ -218,8 +227,8 @@ export const RequestedItemsTable: React.FC = () => {
                                         </td>
                                         <td className="py-2 px-2.5 text-right font-mono font-semibold text-xs text-foreground whitespace-nowrap">
                                             {rowTotalTarget.toLocaleString(undefined, {
-                                                minimumFractionDigits: 2,
-                                                maximumFractionDigits: 2,
+                                                minimumFractionDigits: 3,
+                                                maximumFractionDigits: 3,
                                             })}
                                         </td>
                                         <td className="py-2 px-2.5">
@@ -286,14 +295,14 @@ export const RequestedItemsTable: React.FC = () => {
                     <div>
                         <span className="text-muted-foreground">Total Target Price: </span>
                         <span className="font-bold text-foreground font-mono">
-                            {compCurr} {totalTargetPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {compCurr} {totalTargetPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                         </span>
                     </div>
                     <div>
                         <span className="text-muted-foreground">Approved Budget: </span>
                         <span className="font-bold text-foreground font-mono">
                             {budget > 0
-                                ? `${compCurr} ${budget.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                ? `${compCurr} ${budget.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
                                 : "Not set"}
                         </span>
                     </div>
@@ -304,12 +313,12 @@ export const RequestedItemsTable: React.FC = () => {
                         isWithinBudget ? (
                             <Badge variant="outline" className="bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 gap-1.5 py-1 px-2.5 text-xs">
                                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>Under Budget by {compCurr} {budgetVariance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({variancePct.toFixed(1)}% buffer)</span>
+                                <span>Under Budget by {compCurr} {budgetVariance.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ({variancePct.toFixed(1)}% buffer)</span>
                             </Badge>
                         ) : (
                             <Badge variant="destructive" className="gap-1.5 py-1 px-2.5 text-xs">
                                 <AlertTriangle className="w-3.5 h-3.5" />
-                                <span>Over Budget by {compCurr} {Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(variancePct).toFixed(1)}% deficit)</span>
+                                <span>Over Budget by {compCurr} {Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ({Math.abs(variancePct).toFixed(1)}% deficit)</span>
                             </Badge>
                         )
                     ) : (

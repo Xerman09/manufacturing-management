@@ -1,6 +1,5 @@
 import {
-    CustomsChargesConfig,
-    Incoterm,
+ 
     IpcBracket,
     ItemLandedCostBreakdown,
     RequestedItem,
@@ -120,7 +119,6 @@ export function calculateSupplierLandedCost(
         : items;
 
     // 1. Quoted Goods Total
-    let goodsQuotedForeign = 0;
     let goodsAfterDiscountForeign = 0;
     let goodsQuotedCompCurr = 0;
     let goodsAfterDiscountCompCurr = 0;
@@ -206,7 +204,7 @@ export function calculateSupplierLandedCost(
             const nextCost = nextBreak.unitPrice * nextBreak.minQuantity * (1 - discountPct / 100);
             const savings = currentCost - nextCost;
             if (savings > 0) {
-                nextBreakSavingsCompCurr = Number((savings * supplierFxRate).toFixed(2));
+                nextBreakSavingsCompCurr = Number((savings * supplierFxRate).toFixed(3));
             }
         }
 
@@ -215,12 +213,11 @@ export function calculateSupplierLandedCost(
         const itemGoodsForeign = quotedUnitPrice * item.quantity;
         const itemGoodsAfterDiscountForeign = unitPriceDiscountedForeign * item.quantity;
 
-        const itemGoodsCompCurr = Number((itemGoodsForeign * supplierFxRate).toFixed(2));
-        const itemGoodsAfterDiscountCompCurr = Number((itemGoodsAfterDiscountForeign * supplierFxRate).toFixed(2));
-        const itemDiscountCompCurr = Number((itemGoodsCompCurr - itemGoodsAfterDiscountCompCurr).toFixed(2));
+        const itemGoodsCompCurr = Number((itemGoodsForeign * supplierFxRate).toFixed(3));
+        const itemGoodsAfterDiscountCompCurr = Number((itemGoodsAfterDiscountForeign * supplierFxRate).toFixed(3));
+        const itemDiscountCompCurr = Number((itemGoodsCompCurr - itemGoodsAfterDiscountCompCurr).toFixed(3));
 
         if (isAwarded) {
-            goodsQuotedForeign += itemGoodsForeign;
             goodsAfterDiscountForeign += itemGoodsAfterDiscountForeign;
             goodsQuotedCompCurr += itemGoodsCompCurr;
             goodsAfterDiscountCompCurr += itemGoodsAfterDiscountCompCurr;
@@ -292,18 +289,18 @@ export function calculateSupplierLandedCost(
 
     if (!isLocal && incoterm.buyerPaysFreight) {
         if (bid.freightBasis === "LUMP_SUM") {
-            freightCompCurr = Number((bid.freightRate * freightFxRate).toFixed(2));
+            freightCompCurr = Number((bid.freightRate * freightFxRate).toFixed(3));
         } else if (bid.freightBasis === "PER_CBM") {
             const calculated = bid.freightRate * totalVolumeM3;
             const applied = Math.max(calculated, bid.freightMinimum || 0);
-            freightCompCurr = Number((applied * freightFxRate).toFixed(2));
+            freightCompCurr = Number((applied * freightFxRate).toFixed(3));
         } else if (bid.freightBasis === "PER_KG") {
             const calculated = bid.freightRate * totalWeightKg;
             const applied = Math.max(calculated, bid.freightMinimum || 0);
-            freightCompCurr = Number((applied * freightFxRate).toFixed(2));
+            freightCompCurr = Number((applied * freightFxRate).toFixed(3));
         } else if (bid.freightBasis === "PCT_GOODS") {
             const applied = (bid.freightRate / 100) * goodsAfterDiscountForeign;
-            freightCompCurr = Number((applied * supplierFxRate).toFixed(2));
+            freightCompCurr = Number((applied * supplierFxRate).toFixed(3));
         }
 
         if (freightCompCurr === 0 && goodsAfterDiscountCompCurr > 0) {
@@ -314,15 +311,15 @@ export function calculateSupplierLandedCost(
     if (!isLocal && incoterm.buyerPaysInsurance) {
         if (bid.insuranceBasis === "PCT_GOODS_AND_FREIGHT") {
             const baseCompCurr = goodsAfterDiscountCompCurr + freightCompCurr;
-            insuranceCompCurr = Number(((bid.insuranceRateOrAmount / 100) * baseCompCurr).toFixed(2));
+            insuranceCompCurr = Number(((bid.insuranceRateOrAmount / 100) * baseCompCurr).toFixed(3));
         } else {
-            insuranceCompCurr = Number((bid.insuranceRateOrAmount * insuranceFxRate).toFixed(2));
+            insuranceCompCurr = Number((bid.insuranceRateOrAmount * insuranceFxRate).toFixed(3));
         }
     }
 
     const cifDutiableValueCompCurr = isLocal
         ? goodsAfterDiscountCompCurr
-        : Number((goodsAfterDiscountCompCurr + freightCompCurr + insuranceCompCurr).toFixed(2));
+        : Number((goodsAfterDiscountCompCurr + freightCompCurr + insuranceCompCurr).toFixed(3));
 
     // 4. FX Risk Buffer
     let fxBufferCompCurr = 0;
@@ -346,52 +343,57 @@ export function calculateSupplierLandedCost(
         ) {
             bufferBaseCompCurr += insuranceCompCurr;
         }
-        fxBufferCompCurr = Number(((fxRiskPct / 100) * bufferBaseCompCurr).toFixed(2));
+        fxBufferCompCurr = Number(((fxRiskPct / 100) * bufferBaseCompCurr).toFixed(3));
     }
 
-    // 5. Import Duty
+    // 5. Allocate Freight, Insurance, and CIF per item + Compute Import Duty
     let dutyCompCurr = 0;
-    if (!isLocal && incoterm.buyerPaysDutyAndVat) {
-        for (const item of evaluatedItems) {
-            const breakdown = itemBreakdowns[item.id];
-            if (!breakdown || !breakdown.hasQuote) continue;
+    const buyerPaysDuty = !isLocal && incoterm.buyerPaysDutyAndVat;
 
-            // Allocate share of freight and insurance to item
-            let freightShare = 0;
-            if (freightCompCurr > 0) {
-                if (bid.freightBasis === "PER_CBM" && totalVolumeM3 > 0) {
-                    freightShare = (item.quantity * item.cbmPerUnit / totalVolumeM3) * freightCompCurr;
-                } else if (bid.freightBasis === "PER_KG" && totalWeightKg > 0) {
-                    freightShare = (item.quantity * item.weightPerUnitKg / totalWeightKg) * freightCompCurr;
-                } else if (goodsAfterDiscountCompCurr > 0) {
-                    freightShare = (breakdown.goodsCompCurr / goodsAfterDiscountCompCurr) * freightCompCurr;
-                }
+    for (const item of evaluatedItems) {
+        const breakdown = itemBreakdowns[item.id];
+        if (!breakdown || !breakdown.hasQuote) continue;
+
+        // Allocate share of freight and insurance to item
+        let freightShare = 0;
+        if (freightCompCurr > 0) {
+            if (bid.freightBasis === "PER_CBM" && totalVolumeM3 > 0) {
+                freightShare = (item.quantity * item.cbmPerUnit / totalVolumeM3) * freightCompCurr;
+            } else if (bid.freightBasis === "PER_KG" && totalWeightKg > 0) {
+                freightShare = (item.quantity * item.weightPerUnitKg / totalWeightKg) * freightCompCurr;
+            } else if (goodsAfterDiscountCompCurr > 0) {
+                freightShare = (breakdown.goodsCompCurr / goodsAfterDiscountCompCurr) * freightCompCurr;
             }
+        }
 
-            let insuranceShare = 0;
-            if (insuranceCompCurr > 0 && goodsAfterDiscountCompCurr > 0) {
-                insuranceShare = (breakdown.goodsCompCurr / goodsAfterDiscountCompCurr) * insuranceCompCurr;
-            }
+        let insuranceShare = 0;
+        if (insuranceCompCurr > 0 && goodsAfterDiscountCompCurr > 0) {
+            insuranceShare = (breakdown.goodsCompCurr / goodsAfterDiscountCompCurr) * insuranceCompCurr;
+        }
 
-            const itemCif = breakdown.goodsCompCurr + freightShare + insuranceShare;
-            breakdown.freightCompCurr = Number(freightShare.toFixed(2));
-            breakdown.insuranceCompCurr = Number(insuranceShare.toFixed(2));
-            breakdown.cifCompCurr = Number(itemCif.toFixed(2));
+        const itemCif = breakdown.goodsCompCurr + freightShare + insuranceShare;
+        breakdown.freightCompCurr = Number(freightShare.toFixed(3));
+        breakdown.insuranceCompCurr = Number(insuranceShare.toFixed(3));
+        breakdown.cifCompCurr = Number(itemCif.toFixed(3));
 
-            let dutyRate = item.dutyPct || 0;
+        let dutyRate = 0;
+        let itemDuty = 0;
+
+        if (buyerPaysDuty) {
+            dutyRate = item.dutyPct || 0;
             if (bid.dutyMode === "FTA") {
                 dutyRate = bid.ftaDutyPct || 0;
             } else if (bid.dutyMode === "ONE_RATE") {
                 dutyRate = bid.singleDutyPct || 0;
             }
-
-            breakdown.dutyRatePct = dutyRate;
-            const itemDuty = Number(((dutyRate / 100) * itemCif).toFixed(2));
-            breakdown.dutyCompCurr = itemDuty;
+            itemDuty = Number(((dutyRate / 100) * itemCif).toFixed(3));
             dutyCompCurr += itemDuty;
         }
-        dutyCompCurr = Number(dutyCompCurr.toFixed(2));
+
+        breakdown.dutyRatePct = dutyRate;
+        breakdown.dutyCompCurr = itemDuty;
     }
+    dutyCompCurr = Number(dutyCompCurr.toFixed(3));
 
     // 6. Customs & Port Charges (Philippine BOC)
     const declarationsCount = Math.max(bid.declarationsCount || 1, 1);
@@ -404,7 +406,7 @@ export function calculateSupplierLandedCost(
     let wharfageCompCurr = 0;
     let containerSecurityCompCurr = 0;
     let lcBankChargeCompCurr = 0;
-    let otherPortChargesCompCurr = bid.otherPortChargesCompCurr || 0;
+    const otherPortChargesCompCurr = bid.otherPortChargesCompCurr || 0;
     let brokerageCompCurr = 0;
 
     if (!isLocal && incoterm.buyerPaysBrokerageAndCustoms) {
@@ -427,27 +429,27 @@ export function calculateSupplierLandedCost(
                         (
                             estimatedContainers20ft * customsRates.arrastre20ftCompCurr +
                             estimatedContainers40ft * customsRates.arrastre40ftCompCurr
-                        ).toFixed(2)
+                        ).toFixed(3)
                     );
                     wharfageCompCurr = Number(
                         (
                             estimatedContainers20ft * customsRates.wharfage20ftCompCurr +
                             estimatedContainers40ft * customsRates.wharfage40ftCompCurr
-                        ).toFixed(2)
+                        ).toFixed(3)
                     );
                     containerSecurityCompCurr = Number(
-                        (teuCount * customsRates.containerSecurityUsd * usdFxRate).toFixed(2)
+                        (teuCount * customsRates.containerSecurityUsd * usdFxRate).toFixed(3)
                     );
                 } else if (shipmentType === "LCL") {
-                    arrastreCompCurr = Number((revenueTons * customsRates.lclArrastrePerRtCompCurr).toFixed(2));
-                    wharfageCompCurr = Number((revenueTons * customsRates.lclWharfagePerRtCompCurr).toFixed(2));
+                    arrastreCompCurr = Number((revenueTons * customsRates.lclArrastrePerRtCompCurr).toFixed(3));
+                    wharfageCompCurr = Number((revenueTons * customsRates.lclWharfagePerRtCompCurr).toFixed(3));
                 }
             }
 
             // LC bank charge
             if (bid.paidByLc) {
                 const lcRate = (customsRates.lcBankChargePct || 0.125) / 100;
-                lcBankChargeCompCurr = Number((cifDutiableValueCompCurr * lcRate).toFixed(2));
+                lcBankChargeCompCurr = Number((cifDutiableValueCompCurr * lcRate).toFixed(3));
             }
         }
     }
@@ -463,7 +465,7 @@ export function calculateSupplierLandedCost(
             containerSecurityCompCurr +
             lcBankChargeCompCurr +
             otherPortChargesCompCurr
-        ).toFixed(2)
+        ).toFixed(3)
     );
 
     // 7. Value Added Tax (VAT)
@@ -475,9 +477,9 @@ export function calculateSupplierLandedCost(
         if (bid.pricesIncludeVat) {
             // Price already includes VAT - no additional VAT is added to landed cost
             vatCompCurr = 0;
-            vatBaseCompCurr = Number((goodsAfterDiscountCompCurr / (1 + vatPct / 100)).toFixed(2));
+            vatBaseCompCurr = Number((goodsAfterDiscountCompCurr / (1 + vatPct / 100)).toFixed(3));
         } else {
-            vatCompCurr = Number(((vatPct / 100) * goodsAfterDiscountCompCurr).toFixed(2));
+            vatCompCurr = Number(((vatPct / 100) * goodsAfterDiscountCompCurr).toFixed(3));
             vatBaseCompCurr = goodsAfterDiscountCompCurr;
         }
     } else if (incoterm.buyerPaysDutyAndVat) {
@@ -493,9 +495,9 @@ export function calculateSupplierLandedCost(
                 arrastreCompCurr +
                 wharfageCompCurr +
                 lcBankChargeCompCurr
-            ).toFixed(2)
+            ).toFixed(3)
         );
-        vatCompCurr = Number(((vatPct / 100) * vatBaseCompCurr).toFixed(2));
+        vatCompCurr = Number(((vatPct / 100) * vatBaseCompCurr).toFixed(3));
     }
 
     // 8. Inland Trucking
@@ -511,11 +513,11 @@ export function calculateSupplierLandedCost(
         paymentCount = (downPaymentPct > 0 && downPaymentPct < 100) ? 2 : 1;
     }
     const bankFeeRate = bid.bankFeePerPaymentCompCurr || 0;
-    const bankFeesCompCurr = Number((bankFeeRate * paymentCount).toFixed(2));
+    const bankFeesCompCurr = Number((bankFeeRate * paymentCount).toFixed(3));
 
     // 10. Payment Terms Financing Cost
     // Down payment is strictly defined as % * Goods after discount
-    const downPaymentCompCurr = Number(((downPaymentPct / 100) * goodsAfterDiscountCompCurr).toFixed(2));
+    const downPaymentCompCurr = Number(((downPaymentPct / 100) * goodsAfterDiscountCompCurr).toFixed(3));
     const balanceBeforeDiscount = goodsAfterDiscountCompCurr - downPaymentCompCurr;
 
     let earlyPayDiscountAmountCompCurr = 0;
@@ -523,7 +525,7 @@ export function calculateSupplierLandedCost(
 
     if (bid.takeEarlyPayDiscount && (bid.earlyPayDiscountPct || 0) > 0) {
         earlyPayDiscountAmountCompCurr = Number(
-            (((bid.earlyPayDiscountPct || 0) / 100) * balanceBeforeDiscount).toFixed(2)
+            (((bid.earlyPayDiscountPct || 0) / 100) * balanceBeforeDiscount).toFixed(3)
         );
         balanceDaysAfterDelivery = bid.earlyPayDiscountDays || 0;
     }
@@ -536,13 +538,13 @@ export function calculateSupplierLandedCost(
     const workingCapitalBenefitBalance = (costOfMoney * netBalanceDueCompCurr * balanceDaysAfterDelivery) / 365;
 
     const paymentTermsCostCompCurr = Number(
-        (carryingCostDownPayment - workingCapitalBenefitBalance).toFixed(2)
+        (carryingCostDownPayment - workingCapitalBenefitBalance).toFixed(3)
     );
 
     // 11. Total Landed Cost
     const vatCostToAdd = project.countVatAsCost ? vatCompCurr : 0;
 
-    let totalLandedCostCompCurr = Number(
+    const totalLandedCostCompCurr = Number(
         (
             goodsAfterDiscountCompCurr +
             freightCompCurr +
@@ -555,7 +557,7 @@ export function calculateSupplierLandedCost(
             bankFeesCompCurr +
             paymentTermsCostCompCurr -
             earlyPayDiscountAmountCompCurr
-        ).toFixed(2)
+        ).toFixed(3)
     );
 
     // 12. Allocate Landed Cost to Individual Items (§8.3)
@@ -580,7 +582,7 @@ export function calculateSupplierLandedCost(
             (fG ? breakdown.goodsCompCurr : 0) +
             (fF && bid.freightBasis !== "PCT_GOODS" ? breakdown.freightCompCurr : 0) +
             (fF && bid.insuranceBasis !== "PCT_GOODS_AND_FREIGHT" ? breakdown.insuranceCompCurr : 0);
-        breakdown.fxBufferCompCurr = Number(((fxRiskPct / 100) * itemFxBase).toFixed(2));
+        breakdown.fxBufferCompCurr = Number(((fxRiskPct / 100) * itemFxBase).toFixed(3));
 
         // VAT allocated in proportion to (CIF + Duty) for import, or valueShare for local
         if (project.countVatAsCost && vatCompCurr > 0) {
@@ -590,36 +592,34 @@ export function calculateSupplierLandedCost(
                 const totalCifAndDuty = cifDutiableValueCompCurr + dutyCompCurr;
                 vatShare = totalCifAndDuty > 0 ? itemCifAndDuty / totalCifAndDuty : valueShare;
             }
-            breakdown.vatCompCurr = Number((vatShare * vatCompCurr).toFixed(2));
+            breakdown.vatCompCurr = Number((vatShare * vatCompCurr).toFixed(3));
         } else {
             breakdown.vatCompCurr = 0;
         }
 
         // Fixed charges allocated by value
-        breakdown.fixedChargesCompCurr = Number((valueShare * fixedChargesTotal).toFixed(2));
+        breakdown.fixedChargesCompCurr = Number((valueShare * fixedChargesTotal).toFixed(3));
 
-        // Total item landed cost
-        const itemLandedTotal = Number(
-            (
-                breakdown.goodsCompCurr +
-                breakdown.freightCompCurr +
-                breakdown.insuranceCompCurr +
-                breakdown.fxBufferCompCurr +
-                breakdown.dutyCompCurr +
-                breakdown.vatCompCurr +
-                breakdown.fixedChargesCompCurr
-            ).toFixed(2)
-        );
+        // Total item landed cost using unrounded canonical formula (§8.3 / prototype.html)
+        // L.landed = L.cif + L.duty + L.fx + L.vat + rest * gs
+        const unroundedLanded =
+            breakdown.cifCompCurr +
+            breakdown.dutyCompCurr +
+            breakdown.fxBufferCompCurr +
+            breakdown.vatCompCurr +
+            (valueShare * fixedChargesTotal);
+
+        const itemLandedTotal = Number(unroundedLanded.toFixed(3));
 
         breakdown.totalLandedCompCurr = itemLandedTotal;
         breakdown.landedUnitCostCompCurr =
-            item.quantity > 0 ? Number((itemLandedTotal / item.quantity).toFixed(2)) : 0;
+            item.quantity > 0 ? Number((unroundedLanded / item.quantity).toFixed(3)) : 0;
 
         const variance = breakdown.landedUnitCostCompCurr - item.targetUnitPrice;
-        breakdown.varianceVsTargetCompCurr = Number(variance.toFixed(2));
+        breakdown.varianceVsTargetCompCurr = Number(variance.toFixed(3));
         breakdown.varianceVsTargetPct =
             item.targetUnitPrice > 0
-                ? Number(((variance / item.targetUnitPrice) * 100).toFixed(2))
+                ? Number(((variance / item.targetUnitPrice) * 100).toFixed(3))
                 : 0;
     }
 
@@ -664,7 +664,7 @@ export function calculateSupplierLandedCost(
     let totalScoreWeight = 0;
     let weightedScoreSum = 0;
 
-    for (const crit of (project as any).qualityCriteria || []) {
+    for (const crit of project.qualityCriteria || []) {
         if (crit.criterionType === "SCORED") {
             const scoreObj = bid.scores?.[crit.id];
             if (scoreObj && typeof scoreObj.score === "number" && scoreObj.score >= 1) {
@@ -675,7 +675,7 @@ export function calculateSupplierLandedCost(
     }
 
     if (totalScoreWeight > 0) {
-        qualityScore = Number(((weightedScoreSum / totalScoreWeight) * 100).toFixed(2));
+        qualityScore = Number(((weightedScoreSum / totalScoreWeight) * 100).toFixed(3));
     }
 
     return {
@@ -691,7 +691,7 @@ export function calculateSupplierLandedCost(
         goodsQuotedCompCurr,
         discountTotalCompCurr,
         goodsAfterDiscountCompCurr,
-        totalWeightKg: Number(totalWeightKg.toFixed(2)),
+        totalWeightKg: Number(totalWeightKg.toFixed(3)),
         totalVolumeM3: Number(totalVolumeM3.toFixed(4)),
         revenueTons: Number(revenueTons.toFixed(4)),
         estimatedContainers20ft,
@@ -717,7 +717,7 @@ export function calculateSupplierLandedCost(
         inlandTruckingCompCurr,
         bankFeesCompCurr,
         downPaymentCompCurr,
-        balanceDueCompCurr: Number(netBalanceDueCompCurr.toFixed(2)),
+        balanceDueCompCurr: Number(netBalanceDueCompCurr.toFixed(3)),
         earlyPayDiscountAmountCompCurr,
         paymentTermsCostCompCurr,
         totalLandedCostCompCurr,

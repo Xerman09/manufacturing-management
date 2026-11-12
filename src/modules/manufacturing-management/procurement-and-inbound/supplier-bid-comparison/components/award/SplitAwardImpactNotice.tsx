@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { AlertCircle, Info, Split } from "lucide-react";
+import {   Info, Split } from "lucide-react";
 import { motion } from "framer-motion";
 
 interface SplitAwardImpactNoticeProps {
@@ -13,7 +13,7 @@ interface SplitAwardImpactNoticeProps {
 export const SplitAwardImpactNotice: React.FC<SplitAwardImpactNoticeProps> = ({
   supplierCount,
   totalItems,
-  currency,
+ 
 }) => {
   if (supplierCount <= 1) {
     return (
@@ -45,7 +45,7 @@ export const SplitAwardImpactNotice: React.FC<SplitAwardImpactNoticeProps> = ({
           </span>
         </div>
         <p className="text-amber-800/90 leading-relaxed">
-          Splitting items lowers item-level purchase costs, but <strong>fixed overheads</strong> (lump-sum freight minimums, Philippine customs documentary stamps, arrastre/wharfage handling, inland delivery trucking, and bank LC fees) are billed per shipment and supplier. The total landed cost shown includes each winning supplier's standalone fixed overhead.
+          Splitting items lowers item-level purchase costs, but <strong>fixed overheads</strong> (lump-sum freight minimums, Philippine customs documentary stamps, arrastre/wharfage handling, inland delivery trucking, and bank LC fees) are billed per shipment and supplier. The total landed cost shown includes each winning supplier&apos;s standalone fixed overhead.
         </p>
       </div>
     </motion.div>

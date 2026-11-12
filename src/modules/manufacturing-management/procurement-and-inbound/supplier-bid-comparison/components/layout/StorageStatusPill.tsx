@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Loader2, Check, Cloud, AlertCircle } from "lucide-react";
+import { Loader2, Check, AlertCircle } from "lucide-react";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { cn } from "@/lib/utils";
 

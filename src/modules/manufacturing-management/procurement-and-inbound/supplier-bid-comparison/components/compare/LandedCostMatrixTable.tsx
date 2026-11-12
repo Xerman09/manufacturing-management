@@ -1,12 +1,12 @@
 "use client";
 
 import React from "react";
-import { Check, XCircle, AlertTriangle } from "lucide-react";
+import { Check  } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
-import { SupplierBid } from "../../types";
+ 
 import { cn } from "@/lib/utils";
 
 interface LandedCostMatrixTableProps {
@@ -15,25 +15,28 @@ interface LandedCostMatrixTableProps {
 
 export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ supplierFilter }) => {
     const { currentProject } = useBidComparisonStore();
-    if (!currentProject) return null;
 
-    const items = currentProject.items || [];
-    const compCurr = currentProject.comparisonCurrency || "PHP";
-    const summary = React.useMemo(() => evaluateAndCompareSuppliers(currentProject), [currentProject]);
+    const summary = React.useMemo(
+        () => (currentProject ? evaluateAndCompareSuppliers(currentProject) : null),
+        [currentProject]
+    );
 
     // Apply supplier filter
     const bids = React.useMemo(() => {
+        if (!currentProject) return [];
         return currentProject.bids.filter((b) => {
             if (supplierFilter === "LOCAL") return b.supplierType === "LOCAL";
             if (supplierFilter === "INTERNATIONAL") return b.supplierType === "INTERNATIONAL";
             return true;
         });
-    }, [currentProject.bids, supplierFilter]);
+    }, [currentProject, supplierFilter]);
 
     // Find cheapest valid landed unit cost for each item
     const cheapestValidUnitCost = React.useMemo(() => {
+        if (!currentProject || !summary) return {};
+        const itemsList = currentProject.items || [];
         const costMap: Record<string, number> = {};
-        for (const item of items) {
+        for (const item of itemsList) {
             let minCost: number | null = null;
             for (const bid of currentProject.bids) {
                 const res = summary.results[bid.id];
@@ -50,7 +53,12 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
             }
         }
         return costMap;
-    }, [items, currentProject.bids, summary]);
+    }, [currentProject, summary]);
+
+    if (!currentProject || !summary) return null;
+
+    const items = currentProject.items || [];
+    const compCurr = currentProject.comparisonCurrency || "PHP";
 
     return (
         <Card className="shadow-xs border-border/80">
@@ -123,7 +131,7 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                         {item.quantity.toLocaleString()} {item.uom}
                                     </td>
                                     <td className="py-2.5 px-3 font-mono text-right font-medium text-foreground">
-                                        ₱{item.targetUnitPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        ₱{item.targetUnitPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                     </td>
 
                                     {bids.map((bid) => {
@@ -154,11 +162,11 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                                         <div className="flex items-center justify-end gap-1">
                                                             {isCheapest && <Check className="h-3.5 w-3.5 text-emerald-600 inline" />}
                                                             <span className={cn("text-xs font-semibold", isOverTarget ? "text-rose-600" : "text-foreground")}>
-                                                                ₱{breakdown.landedUnitCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                ₱{breakdown.landedUnitCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                                             </span>
                                                         </div>
                                                         <span className="text-[10px] text-muted-foreground block">
-                                                            {bid.quoteCurrency} {breakdown.appliedUnitPriceForeign.toLocaleString()}{" "}
+                                                            {bid.quoteCurrency} {breakdown.appliedUnitPriceForeign.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}{" "}
                                                             {breakdown.discountPct > 0 ? `(-${breakdown.discountPct}%)` : ""}
                                                         </span>
                                                         {isOverTarget && (
@@ -183,7 +191,7 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                 Total Landed Cost
                             </td>
                             <td className="py-3 px-3 text-right font-mono text-muted-foreground">
-                                ₱{items.reduce((s, it) => s + (it.quantity * it.targetUnitPrice), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                ₱{items.reduce((s, it) => s + (it.quantity * it.targetUnitPrice), 0).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                             </td>
                             {bids.map((bid) => {
                                 const res = summary.results[bid.id];
@@ -192,7 +200,7 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                         {res && res.totalLandedCostCompCurr > 0 ? (
                                             <div>
                                                 <span className="text-xs font-bold block text-foreground">
-                                                    ₱{res.totalLandedCostCompCurr.toLocaleString()}
+                                                    ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                                 </span>
                                                 {!res.isFullBid && (
                                                     <span className="text-[10px] text-amber-600 block font-normal">

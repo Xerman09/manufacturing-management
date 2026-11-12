@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
-import { SupplierBid } from "../../types";
+ 
 import { cn } from "@/lib/utils";
 
 interface SupplierSidebarProps {
@@ -96,7 +96,7 @@ export const SupplierSidebar: React.FC<SupplierSidebarProps> = ({ onAddSupplier 
                                     </span>
                                     {res && res.totalLandedCostCompCurr > 0 && (
                                         <span className="font-mono font-bold text-foreground">
-                                            ₱{res.totalLandedCostCompCurr.toLocaleString()}
+                                            ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                         </span>
                                     )}
                                 </div>

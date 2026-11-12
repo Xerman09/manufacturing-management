@@ -114,9 +114,9 @@ export const PaymentTermsCard: React.FC<PaymentTermsCardProps> = ({ bid }) => {
                 {/* Net Impact Statement Footnote */}
                 <p className="text-[11px] text-muted-foreground pt-1">
                     {financingCost > 0 ? (
-                        <>At {costOfMoney}%/yr cost of money, these terms cost you <strong>PHP {financingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> vs paying on delivery.</>
+                        <>At {costOfMoney}%/yr cost of money, these terms cost you <strong>PHP {financingCost.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</strong> vs paying on delivery.</>
                     ) : financingCost < 0 ? (
-                        <>At {costOfMoney}%/yr cost of money, these terms save you <strong>PHP {Math.abs(financingCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> compared to paying on delivery.</>
+                        <>At {costOfMoney}%/yr cost of money, these terms save you <strong>PHP {Math.abs(financingCost).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</strong> compared to paying on delivery.</>
                     ) : (
                         `At ${costOfMoney}%/yr cost of money, payment on delivery incurs no net financing cost.`
                     )}

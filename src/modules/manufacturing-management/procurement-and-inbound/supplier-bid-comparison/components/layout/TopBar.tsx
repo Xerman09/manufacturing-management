@@ -39,14 +39,16 @@ import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { exportRfqToExcel, exportRfqBidsToCsv, exportRfqComparisonToCsv } from "../../engine/excel-export";
 import { StorageStatusPill } from "./StorageStatusPill";
 import { toast } from "sonner";
-import { getPhilippineTimestamp } from "../../utils/timestamp";
+ 
 interface TopBarProps {
     onOpenImportModal: () => void;
+    onOpenExportModal?: () => void;
     onTriggerPrint: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
     onOpenImportModal,
+    onOpenExportModal,
     onTriggerPrint,
 }) => {
     const {
@@ -56,7 +58,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         createNewProject,
         duplicateProject,
         deleteProject,
-        storageStatus,
+ 
         lastSavedTimestamp,
         isDirty,
         isSaving,
@@ -239,27 +241,42 @@ export const TopBar: React.FC<TopBarProps> = ({
                                     <ChevronDown className="h-3 w-3 opacity-50" />
                                 </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-56">
+                            <DropdownMenuContent align="end" className="w-64">
+                                {onOpenExportModal && (
+                                    <>
+                                        <DropdownMenuItem
+                                            onClick={onOpenExportModal}
+                                            className="cursor-pointer text-xs gap-2 font-semibold text-primary focus:text-primary py-2"
+                                        >
+                                            <Download className="h-4 w-4 text-primary" />
+                                            <div className="flex flex-col">
+                                                <span>Dynamic Export Modal...</span>
+                                                <span className="text-[10px] text-muted-foreground font-normal">Choose format, suppliers, items &amp; sections</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                    </>
+                                )}
                                 <DropdownMenuItem
                                     onClick={() => exportRfqToExcel(currentProject)}
                                     className="cursor-pointer text-xs gap-2"
                                 >
                                     <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                                    Excel Workbook (.xlsx)
+                                    Quick Excel (.xlsx)
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                     onClick={() => exportRfqBidsToCsv(currentProject)}
                                     className="cursor-pointer text-xs gap-2"
                                 >
                                     <FileText className="h-4 w-4 text-blue-600" />
-                                    Bids &amp; Quotations (.csv)
+                                    Quick Bids Dataset (.csv)
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                     onClick={() => exportRfqComparisonToCsv(currentProject)}
                                     className="cursor-pointer text-xs gap-2"
                                 >
                                     <FileText className="h-4 w-4 text-slate-500" />
-                                    Comparison Summary (.csv)
+                                    Quick Comparison Matrix (.csv)
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem

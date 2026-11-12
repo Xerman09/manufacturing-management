@@ -6,6 +6,7 @@ import { useBidComparisonStore } from "./hooks/useBidComparisonState";
 import { TopBar } from "./components/layout/TopBar";
 import { StepNavigation } from "./components/layout/StepNavigation";
 import { ImportExportModal } from "./components/shared/ImportExportModal";
+import { ExportModal } from "./components/shared/ExportModal";
 
 // Step 1: Setup Components
 import { ProjectDetailsCard } from "./components/setup/ProjectDetailsCard";
@@ -44,7 +45,6 @@ import { ApprovalWorkflowCard } from "./components/award/ApprovalWorkflowCard";
 import { ApprovalHistoryAudit } from "./components/award/ApprovalHistoryAudit";
 
 // Step 5: Abstract of Bids Components
-import { PrintAndExportBar } from "./components/abstract/PrintAndExportBar";
 import { AbstractOfBidsDocument } from "./components/abstract/AbstractOfBidsDocument";
 
 import { SupplierBid, ItemQuotation, PassFailResult, Incoterm } from "./types";
@@ -65,16 +65,17 @@ export const SupplierBidComparisonModule: React.FC = () => {
   } = useBidComparisonStore();
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState<"ALL" | "LOCAL" | "INTERNATIONAL">("ALL");
 
   // Initial load
   useEffect(() => {
     fetchLookups();
-    fetchProjects().then(() => {
+    fetchProjects().then(async () => {
       const store = useBidComparisonStore.getState();
       if (!store.currentProject) {
         if (store.projectsList && store.projectsList.length > 0) {
-          store.selectProject(store.projectsList[0].id);
+          await store.selectProject(store.projectsList[0].id);
         } else {
           store.createNewProject();
         }
@@ -117,13 +118,16 @@ export const SupplierBidComparisonModule: React.FC = () => {
 
   const handlePrint = () => {
     setCurrentStep(5);
+    if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     window.scrollTo(0, 0);
     document.querySelectorAll("main").forEach((el) => {
       el.scrollTop = 0;
     });
     setTimeout(() => {
       window.print();
-    }, 200);
+    }, 350);
   };
 
   const handleAddSupplier = (type: "LOCAL" | "INTERNATIONAL") => {
@@ -170,17 +174,17 @@ export const SupplierBidComparisonModule: React.FC = () => {
       validUntil: "",
       leadTimeDays: type === "LOCAL" ? 14 : 35,
       notes: "",
-      incoterm: (type === "LOCAL" ? "DDP" : "FOB") as Incoterm,
+      incoterm: (type === "LOCAL" ? "DELIVERED" : "FOB") as Incoterm,
       vatPct: currentProject.defaultVatPct ?? 12,
       pricesIncludeVat: false,
       inlandTruckingCompCurr: 0,
-      freightBasis: "LUMP_SUM",
+      freightBasis: "PER_CBM",
       freightRate: 0,
       freightMinimum: 0,
-      freightCurrency: type === "LOCAL" ? compCurr : "USD",
+      freightCurrency: type === "LOCAL" ? compCurr : "",
       insuranceBasis: "PCT_GOODS_AND_FREIGHT",
       insuranceRateOrAmount: 0.3,
-      insuranceCurrency: type === "LOCAL" ? compCurr : "USD",
+      insuranceCurrency: type === "LOCAL" ? compCurr : "",
       dutyMode: "PER_ITEM",
       brokerageCompCurr: 0,
       otherPortChargesCompCurr: 0,
@@ -194,7 +198,7 @@ export const SupplierBidComparisonModule: React.FC = () => {
       earlyPayDiscountPct: 0,
       earlyPayDiscountDays: 0,
       takeEarlyPayDiscount: false,
-      bankFeePerPaymentCompCurr: 0,
+      bankFeePerPaymentCompCurr: type === "LOCAL" ? 0 : 1500,
       quotations: initialQuotes,
       scores: initialScores,
       attachments: [],
@@ -261,6 +265,7 @@ export const SupplierBidComparisonModule: React.FC = () => {
       {/* Top action bar: Project switcher, status, actions */}
       <TopBar
         onOpenImportModal={() => setIsImportModalOpen(true)}
+        onOpenExportModal={() => setIsExportModalOpen(true)}
         onTriggerPrint={handlePrint}
       />
 
@@ -410,7 +415,7 @@ export const SupplierBidComparisonModule: React.FC = () => {
                 onFilterChange={setSupplierFilter}
               />
               <SupplierSummaryTable supplierFilter={supplierFilter} />
-              <LandedCostStackedChart />
+              <LandedCostStackedChart supplierFilter={supplierFilter} />
               <LandedCostMatrixTable supplierFilter={supplierFilter} />
               <QualityComparisonTable supplierFilter={supplierFilter} />
             </motion.div>
@@ -451,18 +456,10 @@ export const SupplierBidComparisonModule: React.FC = () => {
               transition={{ duration: 0.18 }}
               className="space-y-6 w-full"
             >
-              <PrintAndExportBar onPrint={handlePrint} />
-              <AbstractOfBidsDocument />
+              <AbstractOfBidsDocument onPrint={handlePrint} />
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Print Fallback: In case the browser triggers print from outside Step 5, guarantee AbstractOfBidsDocument prints */}
-        {currentStep !== 5 && (
-          <div className="hidden print:block w-full">
-            <AbstractOfBidsDocument />
-          </div>
-        )}
       </main>
 
       {/* CSV / Excel Import Modal - Conditionally mounted to eliminate Radix dialog backdrop latency */}
@@ -470,6 +467,16 @@ export const SupplierBidComparisonModule: React.FC = () => {
         <ImportExportModal
           isOpen={isImportModalOpen}
           onClose={() => setIsImportModalOpen(false)}
+        />
+      )}
+
+      {/* Dynamic Export Modal */}
+      {isExportModalOpen && (
+        <ExportModal
+          isOpen={isExportModalOpen}
+          onClose={() => setIsExportModalOpen(false)}
+          project={currentProject}
+          onTriggerPrint={handlePrint}
         />
       )}
     </div>

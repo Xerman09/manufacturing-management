@@ -1,13 +1,19 @@
 "use client";
 
 import React from "react";
-import { Check } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Printer } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
 import { cn } from "@/lib/utils";
 
-export const AbstractOfBidsDocument: React.FC = () => {
+interface AbstractOfBidsDocumentProps {
+    onPrint?: () => void;
+}
+
+export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ onPrint }) => {
     const { currentProject } = useBidComparisonStore();
     if (!currentProject) return null;
 
@@ -21,12 +27,12 @@ export const AbstractOfBidsDocument: React.FC = () => {
     const budgetVariance = currentProject.budget ? awardTotalLanded - currentProject.budget : null;
 
     return (
-        <div className="abstract-paper-sheet mx-auto max-w-[1120px] bg-white text-slate-900 p-6 sm:p-10 rounded-sm border border-slate-300 shadow-md print:max-w-none print:w-full print:p-0 print:border-none print:shadow-none print:rounded-none font-sans text-xs space-y-6">
+        <Card className="w-full shadow-xs border-border/80 bg-card print:border-none print:shadow-none print:bg-white print:p-0">
             <style>{`
                 @media print {
                     @page {
-                        size: auto; /* Lets the user switch between Portrait and Landscape in the browser print dialog */
-                        margin: 8mm 10mm 10mm 10mm;
+                        size: landscape;
+                        margin: 8mm 8mm 8mm 8mm;
                     }
 
                     html,
@@ -34,6 +40,8 @@ export const AbstractOfBidsDocument: React.FC = () => {
                         width: 100% !important;
                         height: auto !important;
                         min-height: 100% !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
                         overflow: visible !important;
                         background: #ffffff !important;
                         color: #000000 !important;
@@ -44,9 +52,7 @@ export const AbstractOfBidsDocument: React.FC = () => {
                     #__next,
                     [data-slot="sidebar-wrapper"],
                     [data-slot="sidebar-inset"],
-                    main,
-                    section,
-                    div {
+                    main {
                         height: auto !important;
                         min-height: 0 !important;
                         max-height: none !important;
@@ -54,26 +60,28 @@ export const AbstractOfBidsDocument: React.FC = () => {
                         position: static !important;
                         transform: none !important;
                         box-shadow: none !important;
+                        padding: 0 !important;
+                        margin: 0 !important;
+                        border: none !important;
                     }
 
                     header,
                     nav,
                     aside,
                     [data-slot="sidebar"],
-                    .print\\:hidden {
+                    .print\\:hidden,
+                    [data-radix-portal],
+                    [data-radix-popper-content-wrapper],
+                    [role="menu"],
+                    [data-slot="dropdown-menu-content"],
+                    .toaster,
+                    [data-sonner-toaster] {
                         display: none !important;
-                    }
-
-                    .abstract-paper-sheet {
-                        display: block !important;
-                        width: 100% !important;
-                        max-width: 100% !important;
-                        margin: 0 !important;
-                        padding: 0 !important;
-                        background: #ffffff !important;
-                        border: none !important;
-                        box-shadow: none !important;
-                        overflow: visible !important;
+                        visibility: hidden !important;
+                        opacity: 0 !important;
+                        height: 0 !important;
+                        width: 0 !important;
+                        pointer-events: none !important;
                     }
 
                     .abstract-section {
@@ -88,15 +96,20 @@ export const AbstractOfBidsDocument: React.FC = () => {
 
                     .abstract-table-wrapper {
                         overflow: visible !important;
-                        border: 1px solid #94a3b8 !important;
+                        border: 1.5px solid #334155 !important;
                         width: 100% !important;
+                        max-width: 100% !important;
                         display: block !important;
+                        margin: 0 !important;
+                        box-sizing: border-box !important;
                     }
 
                     table {
                         width: 100% !important;
+                        max-width: 100% !important;
                         border-collapse: collapse !important;
-                        font-size: 8pt !important;
+                        border: 1.5px solid #334155 !important;
+                        font-size: 7.5pt !important;
                         page-break-inside: auto !important;
                         break-inside: auto !important;
                     }
@@ -116,70 +129,101 @@ export const AbstractOfBidsDocument: React.FC = () => {
 
                     td,
                     th {
-                        padding: 2.5px 4px !important;
-                        border-color: #cbd5e1 !important;
+                        padding: 2.5px 3.5px !important;
+                        border: 1px solid #475569 !important;
+                        color: #0f172a !important;
+                        box-sizing: border-box !important;
+                    }
+
+                    th {
+                        font-weight: 700 !important;
+                        border-bottom: 2px solid #1e293b !important;
                     }
 
                     .award-summary-box {
                         page-break-inside: avoid !important;
                         break-inside: avoid !important;
-                        margin-top: 12px !important;
-                        padding: 10px !important;
+                        margin-top: 14px !important;
+                        padding: 12px !important;
                         background: #f8fafc !important;
-                        border: 1px solid #94a3b8 !important;
+                        border: 1.5px solid #334155 !important;
                     }
 
                     .signatories-box {
                         page-break-inside: avoid !important;
                         break-inside: avoid !important;
-                        margin-top: 16px !important;
-                        padding-top: 12px !important;
-                        border-top: 1px solid #64748b !important;
+                        margin-top: 28px !important;
+                        padding-top: 20px !important;
+                        border-top: 2px solid #334155 !important;
+                    }
+
+                    .signature-clearance {
+                        height: 72px !important;
+                        min-height: 72px !important;
+                        width: 100% !important;
+                        display: flex !important;
+                        align-items: flex-end !important;
+                        justify-content: center !important;
+                    }
+
+                    .signature-line {
+                        border-bottom: 1.5px solid #0f172a !important;
+                        width: 190px !important;
+                        margin-bottom: 6px !important;
                     }
                 }
             `}</style>
 
-            {/* Web Instruction Helper (Hidden in Print) */}
-            <div className="flex flex-wrap items-center justify-between text-xs text-slate-500 border-b pb-2 print:hidden">
-                <span>
-                    Official Abstract of Bids / Canvass · Standard A4 Paper format.
-                </span>
-                <span className="italic">
-                    Tip: In your browser print dialog, choose <strong>Landscape</strong> (recommended for 3+ suppliers) or <strong>Portrait</strong>.
-                </span>
-            </div>
-
-            {/* 1. Official Document Header */}
-            <div className="text-center space-y-1 pb-3 border-b-2 border-slate-800">
-                <div className="text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                    Republic of the Philippines · Manufacturing &amp; Procurement Management
+            <CardHeader className="py-4 px-5 border-b bg-muted/20 print:hidden flex flex-row items-center justify-between">
+                <div>
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                        <span className="text-base">🖨️</span> Abstract of bids
+                    </CardTitle>
+                    <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                        Print or Save as PDF in A4 Landscape. Edit signatories in Setup.
+                    </CardDescription>
                 </div>
-                <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-900">
-                    ABSTRACT OF BIDS / CANVASS
-                </h1>
-                <h2 className="text-sm font-semibold text-slate-700">
-                    {currentProject.rfqTitle || "Procurement Canvass Project"}
-                </h2>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-700 font-mono pt-2 border-t border-slate-300 mt-2 text-left">
-                    <div>
-                        <strong>Reference:</strong> {currentProject.rfqReference || "—"}
-                    </div>
-                    <div>
-                        <strong>Date:</strong> {new Date().toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" })}
-                    </div>
-                    <div>
-                        <strong>Currency:</strong> {compCurr} (landed base)
-                    </div>
-                    <div className="text-right">
-                        <strong>Status:</strong>{" "}
-                        <span className="uppercase font-bold text-slate-900 border border-slate-400 px-1.5 py-0.5 rounded-xs">
-                            {currentProject.status || "DRAFT"}
-                        </span>
+                {onPrint && (
+                    <Button
+                        size="sm"
+                        onClick={onPrint}
+                        className="gap-1.5 text-xs h-8 bg-primary text-primary-foreground font-semibold shadow-xs"
+                    >
+                        <Printer className="w-3.5 h-3.5" />
+                        Print Document
+                    </Button>
+                )}
+            </CardHeader>
+
+            <CardContent className="p-4 sm:p-6 space-y-6 print:p-0">
+                {/* Document Header */}
+                <div className="text-center space-y-1 pb-3 border-b">
+                    <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-foreground">
+                        ABSTRACT OF BIDS
+                    </h1>
+                    <h2 className="text-sm font-semibold text-muted-foreground">
+                        {currentProject.rfqTitle || "Procurement Canvass Project"}
+                    </h2>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-muted-foreground font-mono pt-2 border-t mt-2 text-left">
+                        <div>
+                            <strong className="text-foreground">Reference:</strong> {currentProject.rfqReference || "—"}
+                        </div>
+                        <div>
+                            <strong className="text-foreground">Date:</strong> {new Date().toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" })}
+                        </div>
+                        <div>
+                            <strong className="text-foreground">Currency:</strong> {compCurr} (landed, incl. VAT, duty, freight, fees)
+                        </div>
+                        <div className="text-right">
+                            <strong className="text-foreground">Status:</strong>{" "}
+                            <span className="uppercase font-bold text-foreground border border-border px-1.5 py-0.5 rounded-xs">
+                                {currentProject.status || "DRAFT"}
+                            </span>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            {/* 2. Section 1: Item Quotations & Landed Cost Waterfall Matrix */}
+                {/* 2. Section 1: Item Quotations & Landed Cost Waterfall Matrix */}
             <div className="abstract-section space-y-2">
                 <div className="flex items-center justify-between border-b border-slate-300 pb-1">
                     <span className="font-bold text-xs uppercase tracking-wider text-slate-900">
@@ -190,7 +234,7 @@ export const AbstractOfBidsDocument: React.FC = () => {
                     </span>
                 </div>
 
-                <div className="abstract-table-wrapper border border-slate-300 rounded-sm overflow-x-auto print:overflow-visible print:border-none print:w-full print:block">
+                <div className="abstract-table-wrapper border border-slate-300 rounded-sm overflow-x-auto print:overflow-visible print:w-full print:block">
                     <table className="w-full text-[11px] text-left border-collapse">
                         <thead className="bg-slate-100 border-b border-slate-300 text-slate-800 font-bold">
                             {/* Header Row 1: Supplier Identity */}
@@ -284,8 +328,8 @@ export const AbstractOfBidsDocument: React.FC = () => {
                                                     <div>
                                                         {bid.quoteCurrency}{" "}
                                                         {breakdown.appliedUnitPriceForeign.toLocaleString(undefined, {
-                                                            minimumFractionDigits: 2,
-                                                            maximumFractionDigits: 2,
+                                                            minimumFractionDigits: 3,
+                                                            maximumFractionDigits: 3,
                                                         })}
                                                     </div>
                                                     {breakdown.discountPct > 0 && (
@@ -303,8 +347,8 @@ export const AbstractOfBidsDocument: React.FC = () => {
                                                     )}
                                                 >
                                                     {breakdown.totalLandedCompCurr.toLocaleString(undefined, {
-                                                        minimumFractionDigits: 2,
-                                                        maximumFractionDigits: 2,
+                                                        minimumFractionDigits: 3,
+                                                        maximumFractionDigits: 3,
                                                     })}
                                                     {isAwarded && " ✓"}
                                                 </td>
@@ -328,10 +372,10 @@ export const AbstractOfBidsDocument: React.FC = () => {
                                     >
                                         {summary.results[bid.id]?.goodsAfterDiscountCompCurr
                                             ? summary.results[bid.id].goodsAfterDiscountCompCurr.toLocaleString(undefined, {
-                                                  minimumFractionDigits: 2,
-                                                  maximumFractionDigits: 2,
+                                                  minimumFractionDigits: 3,
+                                                  maximumFractionDigits: 3,
                                               })
-                                            : "0.00"}
+                                            : "0.000"}
                                     </td>
                                 ))}
                             </tr>
@@ -351,8 +395,8 @@ export const AbstractOfBidsDocument: React.FC = () => {
                                             className="py-1 px-3 text-right font-mono text-slate-600 border-r border-slate-300 last:border-r-0"
                                         >
                                             {sum.toLocaleString(undefined, {
-                                                minimumFractionDigits: 2,
-                                                maximumFractionDigits: 2,
+                                                minimumFractionDigits: 3,
+                                                maximumFractionDigits: 3,
                                             })}
                                         </td>
                                     );
@@ -371,8 +415,8 @@ export const AbstractOfBidsDocument: React.FC = () => {
                                         className="py-1 px-3 text-right font-mono text-slate-600 border-r border-slate-300 last:border-r-0"
                                     >
                                         {(summary.results[bid.id]?.dutyCompCurr || 0).toLocaleString(undefined, {
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2,
+                                            minimumFractionDigits: 3,
+                                            maximumFractionDigits: 3,
                                         })}
                                     </td>
                                 ))}
@@ -390,8 +434,8 @@ export const AbstractOfBidsDocument: React.FC = () => {
                                         className="py-1 px-3 text-right font-mono text-slate-600 border-r border-slate-300 last:border-r-0"
                                     >
                                         {(summary.results[bid.id]?.vatCompCurr || 0).toLocaleString(undefined, {
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2,
+                                            minimumFractionDigits: 3,
+                                            maximumFractionDigits: 3,
                                         })}
                                     </td>
                                 ))}
@@ -414,8 +458,8 @@ export const AbstractOfBidsDocument: React.FC = () => {
                                             className="py-1 px-3 text-right font-mono text-slate-600 border-r border-slate-300 last:border-r-0"
                                         >
                                             {sum.toLocaleString(undefined, {
-                                                minimumFractionDigits: 2,
-                                                maximumFractionDigits: 2,
+                                                minimumFractionDigits: 3,
+                                                maximumFractionDigits: 3,
                                             })}
                                         </td>
                                     );
@@ -439,8 +483,8 @@ export const AbstractOfBidsDocument: React.FC = () => {
                                             className="py-1 px-3 text-right font-mono text-slate-600 border-r border-slate-300 last:border-r-0"
                                         >
                                             {net.toLocaleString(undefined, {
-                                                minimumFractionDigits: 2,
-                                                maximumFractionDigits: 2,
+                                                minimumFractionDigits: 3,
+                                                maximumFractionDigits: 3,
                                             })}
                                         </td>
                                     );
@@ -462,10 +506,10 @@ export const AbstractOfBidsDocument: React.FC = () => {
                                         >
                                             {r
                                                 ? r.totalLandedCostCompCurr.toLocaleString(undefined, {
-                                                      minimumFractionDigits: 2,
-                                                      maximumFractionDigits: 2,
+                                                      minimumFractionDigits: 3,
+                                                      maximumFractionDigits: 3,
                                                   })
-                                                : "0.00"}
+                                                : "0.000"}
                                         </td>
                                     );
                                 })}
@@ -535,7 +579,7 @@ export const AbstractOfBidsDocument: React.FC = () => {
                     </span>
                 </div>
 
-                <div className="abstract-table-wrapper border border-slate-300 rounded-sm overflow-x-auto print:overflow-visible print:border-none print:w-full print:block">
+                <div className="abstract-table-wrapper border border-slate-300 rounded-sm overflow-x-auto print:overflow-visible print:w-full print:block">
                     <table className="w-full text-[11px] text-left border-collapse">
                         <thead className="bg-slate-100 border-b border-slate-300 text-slate-800 font-bold">
                             <tr>
@@ -710,8 +754,8 @@ export const AbstractOfBidsDocument: React.FC = () => {
                                         <span>
                                             {supplier.supplierName} · {compCurr}{" "}
                                             {award?.awardedLandedTotal.toLocaleString(undefined, {
-                                                minimumFractionDigits: 2,
-                                                maximumFractionDigits: 2,
+                                                minimumFractionDigits: 3,
+                                                maximumFractionDigits: 3,
                                             })}
                                         </span>
                                     ) : (
@@ -727,15 +771,15 @@ export const AbstractOfBidsDocument: React.FC = () => {
                     <div>
                         <strong>Total award amount:</strong> {compCurr}{" "}
                         {awardTotalLanded.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
+                            minimumFractionDigits: 3,
+                            maximumFractionDigits: 3,
                         })}
                         <span className="ml-4 text-slate-600">
                             <strong>Budget:</strong>{" "}
                             {currentProject.budget
                                 ? `${compCurr} ${currentProject.budget.toLocaleString(undefined, {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
+                                      minimumFractionDigits: 3,
+                                      maximumFractionDigits: 3,
                                   })}`
                                 : "—"}
                         </span>
@@ -748,8 +792,8 @@ export const AbstractOfBidsDocument: React.FC = () => {
                             >
                                 ({budgetVariance <= 0 ? "Under budget by " : "Over budget by "}
                                 {compCurr} {Math.abs(budgetVariance).toLocaleString(undefined, {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
+                                    minimumFractionDigits: 3,
+                                    maximumFractionDigits: 3,
                                 })})
                             </span>
                         )}
@@ -771,52 +815,59 @@ export const AbstractOfBidsDocument: React.FC = () => {
             </div>
 
             {/* 5. Section 4: Three Signatures Block */}
-            <div className="signatories-box grid grid-cols-3 gap-6 pt-6 border-t-2 border-slate-800 text-center">
-                <div className="space-y-6">
-                    <div className="border-b border-slate-400 mx-auto w-44" />
-                    <div>
-                        <span className="text-xs font-bold block text-slate-900 uppercase tracking-wide">
-                            Prepared by
-                        </span>
-                        <span className="text-xs block text-slate-700 font-medium">
-                            {currentProject.preparedBy || "—"}
-                        </span>
-                        <span className="text-[10px] text-slate-500 block">
-                            {currentProject.preparedByTitle || "Procurement Officer"}
-                        </span>
+                <div className="signatories-box grid grid-cols-3 gap-6 pt-8 mt-6 border-t-2 border-slate-700 dark:border-slate-300 text-center">
+                    <div className="flex flex-col items-center">
+                        <div className="signature-clearance h-20 w-full flex items-end justify-center">
+                            <div className="signature-line border-b-2 border-slate-900 dark:border-slate-100 w-48 mb-2" />
+                        </div>
+                        <div>
+                            <span className="text-xs font-bold block text-foreground uppercase tracking-wide">
+                                PREPARED BY
+                            </span>
+                            <span className="text-xs block text-foreground font-semibold mt-0.5">
+                                {currentProject.preparedBy || "—"}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground block">
+                                {currentProject.preparedByTitle || "Procurement Officer"}
+                            </span>
+                        </div>
                     </div>
-                </div>
 
-                <div className="space-y-6">
-                    <div className="border-b border-slate-400 mx-auto w-44" />
-                    <div>
-                        <span className="text-xs font-bold block text-slate-900 uppercase tracking-wide">
-                            Reviewed by
-                        </span>
-                        <span className="text-xs block text-slate-700 font-medium">
-                            {currentProject.reviewedBy || "—"}
-                        </span>
-                        <span className="text-[10px] text-slate-500 block">
-                            {currentProject.reviewedByTitle || "BAC Reviewer"}
-                        </span>
+                    <div className="flex flex-col items-center">
+                        <div className="signature-clearance h-20 w-full flex items-end justify-center">
+                            <div className="signature-line border-b-2 border-slate-900 dark:border-slate-100 w-48 mb-2" />
+                        </div>
+                        <div>
+                            <span className="text-xs font-bold block text-foreground uppercase tracking-wide">
+                                REVIEWED BY
+                            </span>
+                            <span className="text-xs block text-foreground font-semibold mt-0.5">
+                                {currentProject.reviewedBy || "—"}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground block">
+                                {currentProject.reviewedByTitle || "BAC Reviewer"}
+                            </span>
+                        </div>
                     </div>
-                </div>
 
-                <div className="space-y-6">
-                    <div className="border-b border-slate-400 mx-auto w-44" />
-                    <div>
-                        <span className="text-xs font-bold block text-slate-900 uppercase tracking-wide">
-                            Approved by
-                        </span>
-                        <span className="text-xs block text-slate-700 font-medium">
-                            {currentProject.approvedBy || "—"}
-                        </span>
-                        <span className="text-[10px] text-slate-500 block">
-                            {currentProject.approvedByTitle || "Approving Authority"}
-                        </span>
+                    <div className="flex flex-col items-center">
+                        <div className="signature-clearance h-20 w-full flex items-end justify-center">
+                            <div className="signature-line border-b-2 border-slate-900 dark:border-slate-100 w-48 mb-2" />
+                        </div>
+                        <div>
+                            <span className="text-xs font-bold block text-foreground uppercase tracking-wide">
+                                APPROVED BY
+                            </span>
+                            <span className="text-xs block text-foreground font-semibold mt-0.5">
+                                {currentProject.approvedBy || "—"}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground block">
+                                {currentProject.approvedByTitle || "Approving Authority"}
+                            </span>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </div>
+            </CardContent>
+        </Card>
     );
 };

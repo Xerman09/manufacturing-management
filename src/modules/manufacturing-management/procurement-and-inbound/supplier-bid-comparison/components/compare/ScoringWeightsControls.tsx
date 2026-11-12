@@ -19,11 +19,10 @@ export const ScoringWeightsControls: React.FC<ScoringWeightsControlsProps> = ({
     onFilterChange,
 }) => {
     const { currentProject, updateProject } = useBidComparisonStore();
-    if (!currentProject) return null;
 
-    const wP = currentProject.scoringWeightPricePct ?? 50;
-    const wQ = currentProject.scoringWeightQualityPct ?? 35;
-    const wL = currentProject.scoringWeightLeadTimePct ?? 15;
+    const wP = currentProject?.scoringWeightPricePct ?? 50;
+    const wQ = currentProject?.scoringWeightQualityPct ?? 35;
+    const wL = currentProject?.scoringWeightLeadTimePct ?? 15;
 
     // Local transient states for instantaneous 60fps/120fps slider movement
     const [localWP, setLocalWP] = React.useState(wP);
@@ -43,6 +42,8 @@ export const ScoringWeightsControls: React.FC<ScoringWeightsControlsProps> = ({
     }, [wL]);
 
     const rafRef = React.useRef<number | null>(null);
+
+    if (!currentProject) return null;
 
     const scheduleUpdate = (field: "scoringWeightPricePct" | "scoringWeightQualityPct" | "scoringWeightLeadTimePct", val: number) => {
         if (rafRef.current) cancelAnimationFrame(rafRef.current);

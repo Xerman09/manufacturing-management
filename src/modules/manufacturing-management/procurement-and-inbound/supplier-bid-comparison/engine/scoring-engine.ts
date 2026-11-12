@@ -1,8 +1,8 @@
 import {
     ComparisonSummary,
-    RequestedItem,
+ 
     RfqProject,
-    SupplierBid,
+ 
     SupplierLandedCostResult,
 } from "../types";
 import { calculateSupplierLandedCost } from "./landed-cost-calculator";
@@ -78,12 +78,12 @@ export function evaluateAndCompareSuppliers(
                     priceScoreSum += 0;
                 }
             }
-            res.priceScore = Number(((priceScoreSum / items.length) * 100).toFixed(2));
+            res.priceScore = Number(((priceScoreSum / items.length) * 100).toFixed(3));
         }
 
         // Lead Time Score (L)
         if (shortestValidLeadTime !== null && bid.leadTimeDays > 0) {
-            res.leadTimeScore = Number(((shortestValidLeadTime / bid.leadTimeDays) * 100).toFixed(2));
+            res.leadTimeScore = Number(((shortestValidLeadTime / bid.leadTimeDays) * 100).toFixed(3));
         } else {
             res.leadTimeScore = 0;
         }
@@ -91,7 +91,7 @@ export function evaluateAndCompareSuppliers(
         // Overall Score (calculated transparently; unquoted suppliers score 0)
         if (totalWeights > 0 && res.quotedItemCount > 0) {
             const overall = (wP * res.priceScore + wQ * res.qualityScore + wL * res.leadTimeScore) / totalWeights;
-            res.overallScore = Number(overall.toFixed(2));
+            res.overallScore = Number(overall.toFixed(3));
         } else {
             res.overallScore = 0;
         }
@@ -188,7 +188,7 @@ export function evaluateAndCompareSuppliers(
     let bestLocalVsIntPct: number | null = null;
     if (bestLocalTotalCompCurr !== null && bestInternationalTotalCompCurr !== null) {
         bestLocalVsIntDifferenceCompCurr = Number(
-            Math.abs(bestLocalTotalCompCurr - bestInternationalTotalCompCurr).toFixed(2)
+            Math.abs(bestLocalTotalCompCurr - bestInternationalTotalCompCurr).toFixed(3)
         );
         const baseline = Math.min(bestLocalTotalCompCurr, bestInternationalTotalCompCurr);
         if (baseline > 0) {
@@ -203,7 +203,7 @@ export function evaluateAndCompareSuppliers(
     let isBudgetOver = false;
     if (project.budget && recommendedBidId) {
         const recTotal = results[recommendedBidId].totalLandedCostCompCurr;
-        budgetVarianceCompCurr = Number((recTotal - project.budget).toFixed(2));
+        budgetVarianceCompCurr = Number((recTotal - project.budget).toFixed(3));
         isBudgetOver = budgetVarianceCompCurr > 0;
     }
 

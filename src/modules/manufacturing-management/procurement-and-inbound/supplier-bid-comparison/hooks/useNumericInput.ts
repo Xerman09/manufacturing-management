@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 
 interface UseNumericInputOptions {
     value: number | null | undefined;
@@ -22,16 +22,16 @@ export function useNumericInput({
     precision = 4,
 }: UseNumericInputOptions) {
     const [isFocused, setIsFocused] = useState(false);
+    const [prevValue, setPrevValue] = useState(value);
     const [textValue, setTextValue] = useState<string>(
         value !== null && value !== undefined ? String(value) : ""
     );
 
     // Only sync from external prop when the user is NOT actively typing inside this input
-    useEffect(() => {
-        if (!isFocused) {
-            setTextValue(value !== null && value !== undefined ? String(value) : "");
-        }
-    }, [value, isFocused]);
+    if (!isFocused && value !== prevValue) {
+        setPrevValue(value);
+        setTextValue(value !== null && value !== undefined ? String(value) : "");
+    }
 
     const handleFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
         setIsFocused(true);

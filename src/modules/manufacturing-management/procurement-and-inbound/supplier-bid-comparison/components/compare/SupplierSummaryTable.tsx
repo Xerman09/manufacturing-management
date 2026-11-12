@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
-import { cn } from "@/lib/utils";
 
 interface SupplierSummaryTableProps {
     supplierFilter: "ALL" | "LOCAL" | "INTERNATIONAL";
@@ -14,13 +13,15 @@ interface SupplierSummaryTableProps {
 
 export const SupplierSummaryTable: React.FC<SupplierSummaryTableProps> = ({ supplierFilter }) => {
     const { currentProject } = useBidComparisonStore();
-    if (!currentProject) return null;
 
-    const compCurr = currentProject.comparisonCurrency || "PHP";
-    const summary = React.useMemo(() => evaluateAndCompareSuppliers(currentProject), [currentProject]);
+    const summary = React.useMemo(
+        () => (currentProject ? evaluateAndCompareSuppliers(currentProject) : null),
+        [currentProject]
+    );
 
     // Filter and sort by overall score descending
     const filteredBids = React.useMemo(() => {
+        if (!currentProject || !summary) return [];
         return currentProject.bids
             .filter((b) => {
                 if (supplierFilter === "LOCAL") return b.supplierType === "LOCAL";
@@ -32,7 +33,11 @@ export const SupplierSummaryTable: React.FC<SupplierSummaryTableProps> = ({ supp
                 const scoreB = summary.results[b.id]?.overallScore || 0;
                 return scoreB - scoreA;
             });
-    }, [currentProject.bids, supplierFilter, summary]);
+    }, [currentProject, supplierFilter, summary]);
+
+    if (!currentProject || !summary) return null;
+
+    const compCurr = currentProject.comparisonCurrency || "PHP";
 
     const lowestFullBidTotal = summary.lowestSingleTotalCompCurr || 0;
 
@@ -157,35 +162,35 @@ export const SupplierSummaryTable: React.FC<SupplierSummaryTableProps> = ({ supp
                                             </span>
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{res.goodsAfterDiscountCompCurr.toLocaleString()}
+                                            ₱{res.goodsAfterDiscountCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
                                             {res.discountTotalCompCurr > 0 ? (
                                                 <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                                                    -₱{res.discountTotalCompCurr.toLocaleString()}
+                                                    -₱{res.discountTotalCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                                 </span>
                                             ) : (
                                                 <span className="text-muted-foreground">-</span>
                                             )}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{(res.freightCompCurr + res.insuranceCompCurr).toLocaleString()}
+                                            ₱{(res.freightCompCurr + res.insuranceCompCurr).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{res.dutyCompCurr.toLocaleString()}
+                                            ₱{res.dutyCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{res.vatCompCurr.toLocaleString()}
+                                            ₱{res.vatCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{feesAndInland.toLocaleString()}
+                                            ₱{feesAndInland.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{fxAndTerms.toLocaleString()}
+                                            ₱{fxAndTerms.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono bg-primary/5">
                                             <span className="font-bold text-xs block text-foreground">
-                                                ₱{res.totalLandedCostCompCurr.toLocaleString()}
+                                                ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                             </span>
                                             {pctAboveLowest && (
                                                 <span className="text-[9px] text-muted-foreground block">

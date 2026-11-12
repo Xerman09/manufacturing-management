@@ -10,11 +10,21 @@ import { optimizeSplitAward } from "../../engine/split-award-optimizer";
 
 export const ComparisonKpiCards: React.FC = () => {
     const { currentProject } = useBidComparisonStore();
-    if (!currentProject) return null;
 
-    const summary = React.useMemo(() => evaluateAndCompareSuppliers(currentProject), [currentProject]);
-    const validBids = React.useMemo(() => currentProject.bids.filter((b) => summary.results[b.id]?.isValid), [currentProject.bids, summary]);
-    const optimized = React.useMemo(() => optimizeSplitAward(currentProject, validBids), [currentProject, validBids]);
+    const summary = React.useMemo(
+        () => (currentProject ? evaluateAndCompareSuppliers(currentProject) : null),
+        [currentProject]
+    );
+    const validBids = React.useMemo(() => {
+        if (!currentProject || !summary) return [];
+        return currentProject.bids.filter((b) => summary.results[b.id]?.isValid);
+    }, [currentProject, summary]);
+    const optimized = React.useMemo(() => {
+        if (!currentProject) return null;
+        return optimizeSplitAward(currentProject, validBids);
+    }, [currentProject, validBids]);
+
+    if (!currentProject || !summary) return null;
 
     const recBid = summary.recommendedBidId
         ? currentProject.bids.find((b) => b.id === summary.recommendedBidId)
@@ -53,7 +63,7 @@ export const ComparisonKpiCards: React.FC = () => {
                         {recBid ? recBid.supplierName : "No valid full bid"}
                     </span>
                     <div className="text-xs font-mono font-semibold text-foreground pt-0.5">
-                        {recResult ? `₱${recResult.totalLandedCostCompCurr.toLocaleString()}` : "-"}
+                        {recResult ? `₱${recResult.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "-"}
                     </div>
                     <span className="text-[10px] text-muted-foreground block truncate">
                         Highest overall price/quality score
@@ -79,7 +89,7 @@ export const ComparisonKpiCards: React.FC = () => {
                         {lowestBid ? lowestBid.supplierName : "None"}
                     </span>
                     <div className="text-xs font-mono font-semibold text-foreground pt-0.5">
-                        {lowestResult ? `₱${lowestResult.totalLandedCostCompCurr.toLocaleString()}` : "-"}
+                        {lowestResult ? `₱${lowestResult.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "-"}
                     </div>
                     <span className="text-[10px] text-muted-foreground block truncate">
                         Cheapest single valid full quote
@@ -102,12 +112,12 @@ export const ComparisonKpiCards: React.FC = () => {
                         )}
                     </div>
                     <span className="text-sm font-bold text-foreground truncate block font-mono">
-                        {optimized ? `₱${optimized.optimizedTotalCompCurr.toLocaleString()}` : "-"}
+                        {optimized ? `₱${optimized.optimizedTotalCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "-"}
                     </span>
                     <div className="text-[10px] text-muted-foreground pt-0.5 truncate">
                         {optimized && lowestResult && lowestResult.totalLandedCostCompCurr > optimized.optimizedTotalCompCurr ? (
                             <span className="text-emerald-600 font-bold">
-                                Saves ₱{(lowestResult.totalLandedCostCompCurr - optimized.optimizedTotalCompCurr).toLocaleString()} vs single
+                                Saves ₱{(lowestResult.totalLandedCostCompCurr - optimized.optimizedTotalCompCurr).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} vs single
                             </span>
                         ) : (
                             "Best multi-supplier combination"
@@ -139,7 +149,7 @@ export const ComparisonKpiCards: React.FC = () => {
                     </div>
                     <div className="text-[11px] font-mono text-muted-foreground truncate">
                         {summary.bestLocalVsIntDifferenceCompCurr !== null
-                            ? `Diff: ₱${summary.bestLocalVsIntDifferenceCompCurr.toLocaleString()}`
+                            ? `Diff: ₱${summary.bestLocalVsIntDifferenceCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
                             : "-"}
                     </div>
                     <span className="text-[10px] text-muted-foreground block truncate">
@@ -169,12 +179,12 @@ export const ComparisonKpiCards: React.FC = () => {
                         )}
                     </div>
                     <span className="text-sm font-bold text-foreground truncate block font-mono">
-                        {currentProject.budget ? `₱${currentProject.budget.toLocaleString()}` : "No budget set"}
+                        {currentProject.budget ? `₱${currentProject.budget.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "No budget set"}
                     </span>
                     <div className="text-xs font-mono pt-0.5">
                         {summary.budgetVarianceCompCurr !== null ? (
                             <span className={summary.isBudgetOver ? "text-rose-600 font-bold" : "text-emerald-600 font-bold"}>
-                                {summary.isBudgetOver ? "+" : "-"}₱{Math.abs(summary.budgetVarianceCompCurr).toLocaleString()}
+                                {summary.isBudgetOver ? "+" : "-"}₱{Math.abs(summary.budgetVarianceCompCurr).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                             </span>
                         ) : (
                             <span className="text-muted-foreground text-[10px]">Set in Step 1</span>

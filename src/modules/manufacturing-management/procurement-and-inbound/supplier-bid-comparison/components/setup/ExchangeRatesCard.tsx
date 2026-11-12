@@ -11,13 +11,13 @@ import { ExchangeRateEntry } from "../../types";
 
 export const ExchangeRatesCard: React.FC = () => {
     const { currentProject, updateProject } = useBidComparisonStore();
+    const [newCurrency, setNewCurrency] = useState("");
+    const [newRate, setNewRate] = useState<number>(1.0);
+
     if (!currentProject) return null;
 
     const rates = currentProject.exchangeRates || [];
     const compCurr = currentProject.comparisonCurrency || "PHP";
-
-    const [newCurrency, setNewCurrency] = useState("");
-    const [newRate, setNewRate] = useState<number>(1.0);
 
     const handleAddCurrency = (e: React.FormEvent) => {
         e.preventDefault();

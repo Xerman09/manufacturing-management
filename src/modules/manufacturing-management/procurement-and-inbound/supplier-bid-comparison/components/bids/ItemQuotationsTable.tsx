@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
-import { Plus, Trash2, Tag, Layers, AlertCircle, Calculator, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, Tag, AlertCircle, Calculator, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+
 import { NumericInputField } from "../shared/NumericInputField";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { SupplierBid, ItemQuotation, PriceBreak } from "../../types";
@@ -16,15 +16,18 @@ interface ItemQuotationsTableProps {
 
 export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid }) => {
     const { currentProject, updateProject } = useBidComparisonStore();
-    if (!currentProject) return null;
+    const [showFormula, setShowFormula] = useState(true);
+
+    const landedResult = React.useMemo(() => {
+        if (!currentProject) return null;
+        const itemsList = currentProject.items || [];
+        return calculateSupplierLandedCost(currentProject, itemsList, bid);
+    }, [currentProject, bid]);
+
+    if (!currentProject || !landedResult) return null;
 
     const items = currentProject.items || [];
     const compCurr = currentProject.comparisonCurrency || "PHP";
-    const [showFormula, setShowFormula] = useState(true);
-    const landedResult = React.useMemo(
-        () => calculateSupplierLandedCost(currentProject, items, bid),
-        [currentProject, items, bid]
-    );
 
     const handleAddPrice = (itemId: string) => {
         const item = items.find((i) => i.id === itemId);
@@ -240,11 +243,8 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                             <th className="py-2 px-3 w-28">Order Qty</th>
                             <th className="py-2 px-3 min-w-[300px]">Price Breaks ({bid.quoteCurrency})</th>
                             <th className="py-2 px-3 w-20">Disc %</th>
-                            <th className="py-2 px-3 min-w-[140px] text-right bg-primary/5">
-                                Landed Unit ({compCurr})
-                            </th>
-                            <th className="py-2 px-3 min-w-[140px] text-right bg-primary/5">
-                                Landed Total ({compCurr})
+                            <th className="py-2 px-3 min-w-[160px] text-right bg-primary/5">
+                                Landed ({compCurr})
                             </th>
                             <th className="py-2 px-2 w-8"></th>
                         </tr>
@@ -252,7 +252,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                     <tbody className="divide-y divide-border/60">
                         {items.length === 0 ? (
                             <tr>
-                                <td colSpan={8} className="py-6 text-center text-muted-foreground">
+                                <td colSpan={7} className="py-6 text-center text-muted-foreground">
                                     No items requested in Setup. Go to Step 1 to add items.
                                 </td>
                             </tr>
@@ -270,7 +270,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                             <span className="font-semibold block">{item.itemName}</span>
                                             <span className="text-[10px] text-muted-foreground block truncate max-w-xs">
                                                 {item.specifications || "No specs"} · Target: {compCurr}{" "}
-                                                {item.targetUnitPrice.toLocaleString()}
+                                                {item.targetUnitPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                             </span>
                                         </td>
                                         <td className="py-2.5 px-3 font-mono font-medium">
@@ -291,7 +291,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                                 </Button>
                                             ) : (
                                                 <div className="space-y-1.5 py-1">
-                                                    {quote.priceBreaks.map((br, bIdx) => (
+                                                    {quote.priceBreaks.map((br) => (
                                                         <div key={br.id} className="flex items-center gap-1.5">
                                                             <span className="text-[10px] text-muted-foreground w-14 shrink-0">
                                                                 &ge; {br.minQuantity} {item.uom}:
@@ -379,37 +379,19 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                             )}
                                         </td>
 
-                                        {/* Landed Unit Cost */}
+                                        {/* Landed Cost (Matches prototype regLine layout) */}
                                         <td className="py-2.5 px-3 text-right bg-primary/5 font-mono">
                                             {breakdown && breakdown.hasQuote ? (
                                                 <div>
                                                     <span className="font-bold text-xs block text-foreground">
-                                                        ₱{breakdown.landedUnitCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        ₱{breakdown.totalLandedCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                                                     </span>
-                                                    <span
-                                                        className="text-[10px] text-muted-foreground block truncate"
-                                                        title={`Formula: ₱${breakdown.totalLandedCompCurr.toLocaleString()} ÷ ${item.quantity.toLocaleString()} ${item.uom}`}
-                                                    >
-                                                        = ₱{breakdown.totalLandedCompCurr.toLocaleString()} ÷ {item.quantity.toLocaleString()}
-                                                    </span>
-                                                </div>
-                                            ) : (
-                                                <span className="text-muted-foreground">-</span>
-                                            )}
-                                        </td>
-
-                                        {/* Landed Total */}
-                                        <td className="py-2.5 px-3 text-right bg-primary/5 font-mono">
-                                            {breakdown && breakdown.hasQuote ? (
-                                                <div>
-                                                    <span className="font-bold text-xs block text-foreground">
-                                                        ₱{breakdown.totalLandedCompCurr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                    </span>
-                                                    <span
-                                                        className="text-[10px] text-muted-foreground block truncate"
-                                                        title={`Formula: Goods (₱${breakdown.goodsCompCurr.toLocaleString()}) + Landed fees (₱${Math.round(breakdown.totalLandedCompCurr - breakdown.goodsCompCurr).toLocaleString()})`}
-                                                    >
-                                                        Goods ₱{breakdown.goodsCompCurr.toLocaleString()} + Fees ₱{Math.round(breakdown.totalLandedCompCurr - breakdown.goodsCompCurr).toLocaleString()}
+                                                    <span className="text-[10.5px] text-muted-foreground block truncate">
+                                                        ₱{breakdown.landedUnitCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}/unit
+                                                        {bid.supplierType === "INTERNATIONAL" && ` · duty ${breakdown.dutyRatePct}%`}
+                                                        {breakdown.isBelowMoq && (
+                                                            <span className="text-destructive font-medium ml-1">· below MOQ</span>
+                                                        )}
                                                     </span>
                                                 </div>
                                             ) : (

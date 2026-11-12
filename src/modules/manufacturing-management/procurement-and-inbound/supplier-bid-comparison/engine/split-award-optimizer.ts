@@ -1,4 +1,4 @@
-import { RequestedItem, RfqProject, SupplierBid } from "../types";
+import {   RfqProject, SupplierBid } from "../types";
 import { calculateSupplierLandedCost } from "./landed-cost-calculator";
 
 export interface OptimizationResult {
@@ -181,7 +181,7 @@ export function optimizeSplitAward(
     }
 
     return {
-        optimizedTotalCompCurr: Number(bestTotalCost.toFixed(2)),
+        optimizedTotalCompCurr: Number(bestTotalCost.toFixed(3)),
         supplierAwardMap,
         participatingBidIds: Array.from(participatingBidIds),
         costPerSupplier,

@@ -151,7 +151,7 @@ export const BidValidationChecks: React.FC<BidValidationChecksProps> = ({ bid })
             checks.push({
                 type: "info",
                 icon: "💡",
-                message: `${item.itemName}: ordering ${nextBreakQty} (+${itemBreakdown.nextBreakUnitsNeeded}) drops the unit price to ${bid.quoteCurrency} ${nextUnitPrice.toFixed(2)}.`,
+                message: `${item.itemName}: ordering ${nextBreakQty} (+${itemBreakdown.nextBreakUnitsNeeded}) drops the unit price to ${bid.quoteCurrency} ${nextUnitPrice.toFixed(3)}.`,
             });
         }
     });
@@ -266,8 +266,8 @@ export const BidValidationChecks: React.FC<BidValidationChecksProps> = ({ bid })
                             check.type === "bad"
                                 ? "bg-rose-50/80 dark:bg-rose-950/30 border-rose-200/80 dark:border-rose-900/50 text-rose-900 dark:text-rose-200"
                                 : check.type === "warn"
-                                ? "bg-amber-50/80 dark:bg-amber-950/30 border-amber-200/80 dark:border-amber-900/50 text-amber-900 dark:text-amber-200"
-                                : "bg-blue-50/80 dark:bg-blue-950/30 border-blue-200/80 dark:border-blue-900/50 text-blue-900 dark:text-blue-200";
+                                    ? "bg-amber-50/80 dark:bg-amber-950/30 border-amber-200/80 dark:border-amber-900/50 text-amber-900 dark:text-amber-200"
+                                    : "bg-blue-50/80 dark:bg-blue-950/30 border-blue-200/80 dark:border-blue-900/50 text-blue-900 dark:text-blue-200";
 
                         return (
                             <div

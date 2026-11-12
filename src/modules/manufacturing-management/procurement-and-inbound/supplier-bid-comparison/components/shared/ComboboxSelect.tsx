@@ -22,7 +22,7 @@ export interface ComboboxOption {
     value: string;
     label: string;
     subLabel?: string;
-    extra?: Record<string, any>;
+    extra?: Record<string, unknown>;
 }
 
 interface ComboboxSelectProps {

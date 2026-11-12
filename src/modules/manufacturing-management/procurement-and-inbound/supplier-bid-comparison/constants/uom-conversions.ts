@@ -47,7 +47,7 @@ export function convertToKg(weight: number, unitCodeOrName?: string | null): num
         return Number((weight * 0.02834952).toFixed(4));
     }
     if (unit === "ton" || unit === "tons" || unit === "mt") {
-        return Number((weight * 1000).toFixed(2));
+        return Number((weight * 1000).toFixed(3));
     }
     return Number(weight.toFixed(4)); // default already kg
 }
