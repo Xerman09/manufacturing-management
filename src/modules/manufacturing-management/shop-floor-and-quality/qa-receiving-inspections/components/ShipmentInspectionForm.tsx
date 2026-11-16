@@ -549,9 +549,100 @@ export default function ShipmentInspectionForm({
                 </div>
             </div>
 
+            {/* Section 1 — PO Receiving Progress Cards (Parent PO Overview) */}
+            {!isReplacement && (
+                <div data-testid="qa-receiving-progress" className="mx-4 mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3.5 space-y-3">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-2">
+                            <p className="text-xs font-bold uppercase tracking-wider text-primary">PO Receiving Progress</p>
+                            <span className="text-[11px] font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                                {receiptProgress.progressPercent}% Processed
+                            </span>
+                        </div>
+                        <span className="text-xs font-semibold text-muted-foreground">
+                            {receiptOptions.length} receipt{receiptOptions.length === 1 ? "" : "s"} on this PO
+                        </span>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="w-full bg-muted/60 h-2 rounded-full overflow-hidden">
+                        <div
+                            className="bg-primary h-full transition-all duration-300 rounded-full"
+                            style={{ width: `${receiptProgress.progressPercent}%` }}
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                        {receiptProgressMetrics.map(metric => (
+                            <div key={metric.label} className="rounded-lg border border-border/70 bg-background/90 px-3 py-2">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{metric.label}</p>
+                                <p className={`mt-0.5 text-sm font-bold ${metric.className}`}>{metric.value}</p>
+                                <p className="text-[11px] text-muted-foreground/80 truncate mt-0.5">{metric.subtext}</p>
+                            </div>
+                        ))}
+                    </div>
+
+                    {selectedReceipt && receiptProgress.selectedRejected !== null && receiptProgress.selectedRejected > 0 && (
+                        <p className="text-xs font-semibold text-amber-700 bg-amber-500/10 rounded-md px-2.5 py-1">
+                            Selected receipt rejected: {formatQuantity(receiptProgress.selectedRejected)} units
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {/* Section 2 — Receipt History (Read-Only Reference Table) */}
+            {!isReplacement && receiptOptions.length > 0 && (
+                <div data-testid="qa-receipt-history" className="mx-4 mt-3 overflow-hidden rounded-xl border bg-background">
+                    <div className="flex flex-col gap-1 border-b bg-muted/20 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <p className="text-xs font-bold uppercase tracking-wider text-foreground">Receipt history</p>
+                            <p className="text-xs text-muted-foreground">Static audit ledger of all recorded receipts for this purchase order. Use the Receipt Number selector below to change the active inspection.</p>
+                        </div>
+                    </div>
+                    <div className="grid w-full grid-cols-[minmax(0,1.5fr)_80px_repeat(3,minmax(72px,0.5fr))] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <span>Receipt / Date</span>
+                        <span>Status</span>
+                        <span className="text-right">Received</span>
+                        <span className="text-right text-emerald-700">Accepted</span>
+                        <span className="text-right text-amber-700">Rejected</span>
+                    </div>
+                    <div className="divide-y">
+                        {receiptOptions.map(option => {
+                            const isSelected = selectedReceipt?.key === option.key;
+                            return (
+                                <div
+                                    key={option.key}
+                                    aria-current={isSelected ? "true" : undefined}
+                                    className={`grid w-full grid-cols-[minmax(0,1.5fr)_80px_repeat(3,minmax(72px,0.5fr))] items-center gap-2 px-3 py-2 text-left ${isSelected ? "bg-primary/5 ring-1 ring-inset ring-primary/30" : ""}`}
+                                >
+                                    <span className="min-w-0">
+                                        <span className="block truncate text-xs font-bold text-foreground">{option.receiptNumber}</span>
+                                        <span className="block truncate text-[11px] text-muted-foreground">
+                                            {option.receiptDate || "No date"} · {option.receiptType || "Receipt"}
+                                        </span>
+                                    </span>
+                                    <span className="min-w-0">
+                                        <span className={`inline-block rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase ${option.isCurrent
+                                            ? "bg-primary/10 text-primary"
+                                            : "bg-emerald-500/10 text-emerald-700"
+                                            }`}>
+                                            {option.isCurrent ? "Awaiting QA" : option.postingStatus || "Posted"}
+                                        </span>
+                                    </span>
+                                    <span className="text-right text-xs font-semibold text-foreground">{formatQuantity(option.receivedQuantity)}</span>
+                                    <span className="text-right text-xs font-semibold text-emerald-700">{formatQuantity(option.acceptedQuantity)}</span>
+                                    <span className="text-right text-xs font-semibold text-amber-700">{formatQuantity(option.rejectedQuantity)}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {/* Section 3 — Receipt Details & Filtering Bar */}
             <div
                 data-testid="receiving-metadata-grid"
-                className="grid grid-cols-1 gap-3 border-b bg-background p-4 sm:grid-cols-2 2xl:grid-cols-4"
+                className="grid grid-cols-1 gap-3 border-b bg-background p-4 mt-3 sm:grid-cols-2 2xl:grid-cols-4"
             >
                 <div className="min-w-0 space-y-1">
                     <label htmlFor="receiving-receipt-number" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
@@ -668,96 +759,6 @@ export default function ShipmentInspectionForm({
                     {!issueFor(undefined, "supplierDocumentTypeId") && !supplierDocumentTypeError && <p className="text-xs text-muted-foreground">Document type encoded during Warehouse Receiving.</p>}
                 </div>
             </div>
-
-            {!isReplacement && (
-                <div data-testid="qa-receiving-progress" className="mx-4 mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3.5 space-y-3">
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex items-center gap-2">
-                            <p className="text-xs font-bold uppercase tracking-wider text-primary">PO Receiving Progress</p>
-                            <span className="text-[11px] font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-                                {receiptProgress.progressPercent}% Processed
-                            </span>
-                        </div>
-                        <span className="text-xs font-semibold text-muted-foreground">
-                            {receiptOptions.length} receipt{receiptOptions.length === 1 ? "" : "s"} on this PO
-                        </span>
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div className="w-full bg-muted/60 h-2 rounded-full overflow-hidden">
-                        <div
-                            className="bg-primary h-full transition-all duration-300 rounded-full"
-                            style={{ width: `${receiptProgress.progressPercent}%` }}
-                        />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                        {receiptProgressMetrics.map(metric => (
-                            <div key={metric.label} className="rounded-lg border border-border/70 bg-background/90 px-3 py-2">
-                                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{metric.label}</p>
-                                <p className={`mt-0.5 text-sm font-bold ${metric.className}`}>{metric.value}</p>
-                                <p className="text-[11px] text-muted-foreground/80 truncate mt-0.5">{metric.subtext}</p>
-                            </div>
-                        ))}
-                    </div>
-
-                    {selectedReceipt && receiptProgress.selectedRejected !== null && receiptProgress.selectedRejected > 0 && (
-                        <p className="text-xs font-semibold text-amber-700 bg-amber-500/10 rounded-md px-2.5 py-1">
-                            Selected receipt rejected: {formatQuantity(receiptProgress.selectedRejected)} units
-                        </p>
-                    )}
-                </div>
-            )}
-
-            {!isReplacement && receiptOptions.length > 0 && (
-                <div data-testid="qa-receipt-history" className="mx-4 mt-3 overflow-hidden rounded-xl border bg-background">
-                    <div className="flex flex-col gap-1 border-b bg-muted/20 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <p className="text-xs font-bold uppercase tracking-wider text-foreground">Receipt history</p>
-                            <p className="text-xs text-muted-foreground">Select a row to inspect its quantities. Posted receipts are view-only.</p>
-                        </div>
-                    </div>
-                    <div className="grid w-full grid-cols-[minmax(0,1.5fr)_80px_repeat(3,minmax(72px,0.5fr))] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        <span>Receipt / Date</span>
-                        <span>Status</span>
-                        <span className="text-right">Received</span>
-                        <span className="text-right text-emerald-700">Accepted</span>
-                        <span className="text-right text-amber-700">Rejected</span>
-                    </div>
-                    <div className="divide-y">
-                        {receiptOptions.map(option => {
-                            const isSelected = selectedReceipt?.key === option.key;
-                            return (
-                                <button
-                                    key={option.key}
-                                    type="button"
-                                    onClick={() => onReceiptSelection(option.key)}
-                                    aria-current={isSelected ? "true" : undefined}
-                                    className={`grid w-full grid-cols-[minmax(0,1.5fr)_80px_repeat(3,minmax(72px,0.5fr))] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/40 ${isSelected ? "bg-primary/5 ring-1 ring-inset ring-primary/30" : ""}`}
-                                >
-                                    <span className="min-w-0">
-                                        <span className="block truncate text-xs font-bold text-foreground">{option.receiptNumber}</span>
-                                        <span className="block truncate text-[11px] text-muted-foreground">
-                                            {option.receiptDate || "No date"} · {option.receiptType || "Receipt"}
-                                        </span>
-                                    </span>
-                                    <span className="min-w-0">
-                                        <span className={`inline-block rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase ${option.isCurrent
-                                            ? "bg-primary/10 text-primary"
-                                            : "bg-emerald-500/10 text-emerald-700"
-                                            }`}>
-                                            {option.isCurrent ? "Awaiting QA" : option.postingStatus || "Posted"}
-                                        </span>
-                                    </span>
-                                    <span className="text-right text-xs font-semibold text-foreground">{formatQuantity(option.receivedQuantity)}</span>
-                                    <span className="text-right text-xs font-semibold text-emerald-700">{formatQuantity(option.acceptedQuantity)}</span>
-                                    <span className="text-right text-xs font-semibold text-amber-700">{formatQuantity(option.rejectedQuantity)}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
 
             {/* Receipt & Delivery File Attachments */}
             <QaReceivingAttachments

@@ -299,6 +299,7 @@ export default function QAReceivingModule({
                     onCommit={handleCommitReceiving}
                     committedResult={committedResult}
                     onFinish={finishCommittedInspection}
+                    receivingHeaderId={selectedReceipt?.receivingHeaderId || null}
                 />
             </div>
         );
