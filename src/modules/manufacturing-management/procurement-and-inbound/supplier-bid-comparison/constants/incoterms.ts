@@ -1,0 +1,148 @@
+import { Incoterm } from "../types";
+
+export interface IncotermObligation {
+    incoterm: Incoterm;
+    label: string;
+    isInternational: boolean;
+    buyerPaysFreight: boolean;
+    buyerPaysInsurance: boolean;
+    buyerPaysDutyAndVat: boolean;
+    buyerPaysBrokerageAndCustoms: boolean;
+    buyerPaysArrastreAndWharfage: boolean;
+    buyerPaysInlandTrucking: boolean;
+}
+
+export const INCOTERMS_CONFIG: Record<Incoterm, IncotermObligation> = {
+    DELIVERED: {
+        incoterm: "DELIVERED",
+        label: "Delivered (Local)",
+        isInternational: false,
+        buyerPaysFreight: false,
+        buyerPaysInsurance: false,
+        buyerPaysDutyAndVat: false,
+        buyerPaysBrokerageAndCustoms: false,
+        buyerPaysArrastreAndWharfage: false,
+        buyerPaysInlandTrucking: false,
+    },
+    PICK_UP: {
+        incoterm: "PICK_UP",
+        label: "Pick-up (Local)",
+        isInternational: false,
+        buyerPaysFreight: false,
+        buyerPaysInsurance: false,
+        buyerPaysDutyAndVat: false,
+        buyerPaysBrokerageAndCustoms: false,
+        buyerPaysArrastreAndWharfage: false,
+        buyerPaysInlandTrucking: true,
+    },
+    EXW: {
+        incoterm: "EXW",
+        label: "EXW (Ex Works)",
+        isInternational: true,
+        buyerPaysFreight: true,
+        buyerPaysInsurance: true,
+        buyerPaysDutyAndVat: true,
+        buyerPaysBrokerageAndCustoms: true,
+        buyerPaysArrastreAndWharfage: true,
+        buyerPaysInlandTrucking: true,
+    },
+    FCA: {
+        incoterm: "FCA",
+        label: "FCA (Free Carrier)",
+        isInternational: true,
+        buyerPaysFreight: true,
+        buyerPaysInsurance: true,
+        buyerPaysDutyAndVat: true,
+        buyerPaysBrokerageAndCustoms: true,
+        buyerPaysArrastreAndWharfage: true,
+        buyerPaysInlandTrucking: true,
+    },
+    FOB: {
+        incoterm: "FOB",
+        label: "FOB (Free on Board)",
+        isInternational: true,
+        buyerPaysFreight: true,
+        buyerPaysInsurance: true,
+        buyerPaysDutyAndVat: true,
+        buyerPaysBrokerageAndCustoms: true,
+        buyerPaysArrastreAndWharfage: true,
+        buyerPaysInlandTrucking: true,
+    },
+    CFR: {
+        incoterm: "CFR",
+        label: "CFR (Cost & Freight)",
+        isInternational: true,
+        buyerPaysFreight: false,
+        buyerPaysInsurance: true,
+        buyerPaysDutyAndVat: true,
+        buyerPaysBrokerageAndCustoms: true,
+        buyerPaysArrastreAndWharfage: true,
+        buyerPaysInlandTrucking: true,
+    },
+    CPT: {
+        incoterm: "CPT",
+        label: "CPT (Carriage Paid To)",
+        isInternational: true,
+        buyerPaysFreight: false,
+        buyerPaysInsurance: true,
+        buyerPaysDutyAndVat: true,
+        buyerPaysBrokerageAndCustoms: true,
+        buyerPaysArrastreAndWharfage: true,
+        buyerPaysInlandTrucking: true,
+    },
+    CIF: {
+        incoterm: "CIF",
+        label: "CIF (Cost, Insurance & Freight)",
+        isInternational: true,
+        buyerPaysFreight: false,
+        buyerPaysInsurance: false,
+        buyerPaysDutyAndVat: true,
+        buyerPaysBrokerageAndCustoms: true,
+        buyerPaysArrastreAndWharfage: true,
+        buyerPaysInlandTrucking: true,
+    },
+    CIP: {
+        incoterm: "CIP",
+        label: "CIP (Carriage and Insurance Paid to)",
+        isInternational: true,
+        buyerPaysFreight: false,
+        buyerPaysInsurance: false,
+        buyerPaysDutyAndVat: true,
+        buyerPaysBrokerageAndCustoms: true,
+        buyerPaysArrastreAndWharfage: true,
+        buyerPaysInlandTrucking: true,
+    },
+    DAP: {
+        incoterm: "DAP",
+        label: "DAP (Delivered at Place)",
+        isInternational: true,
+        buyerPaysFreight: false,
+        buyerPaysInsurance: false,
+        buyerPaysDutyAndVat: true,
+        buyerPaysBrokerageAndCustoms: true,
+        buyerPaysArrastreAndWharfage: false,
+        buyerPaysInlandTrucking: false,
+    },
+    DPU: {
+        incoterm: "DPU",
+        label: "DPU (Delivered at Place Unloaded)",
+        isInternational: true,
+        buyerPaysFreight: false,
+        buyerPaysInsurance: false,
+        buyerPaysDutyAndVat: true,
+        buyerPaysBrokerageAndCustoms: true,
+        buyerPaysArrastreAndWharfage: false,
+        buyerPaysInlandTrucking: false,
+    },
+    DDP: {
+        incoterm: "DDP",
+        label: "DDP (Delivered Duty Paid)",
+        isInternational: true,
+        buyerPaysFreight: false,
+        buyerPaysInsurance: false,
+        buyerPaysDutyAndVat: false,
+        buyerPaysBrokerageAndCustoms: false,
+        buyerPaysArrastreAndWharfage: false,
+        buyerPaysInlandTrucking: false,
+    },
+};

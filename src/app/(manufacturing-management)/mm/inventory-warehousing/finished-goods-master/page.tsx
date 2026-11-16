@@ -13,7 +13,11 @@ import { cookies } from "next/headers";
 
 // ✅ Wire the finished goods module
 import FinishedGoodsModule from "@/modules/manufacturing-management/inventory-warehousing/finished-goods-master/FinishedGoodsModule";
+export const metadata = {
+    title: "Finished Goods Master",
+    description: "Finished Goods Master",
 
+}
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
