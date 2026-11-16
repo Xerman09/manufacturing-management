@@ -24,7 +24,7 @@ import {
     deleteQaReceivingAttachment
 } from "../services/qa-api";
 import { formatPhtTimestamp } from "@/modules/manufacturing-management/shared/pht-date";
-import { getProductionCameraErrorMessage, shouldUseNativeCameraCapture } from "@/modules/manufacturing-management/production-workflow/utils/production-camera";
+import { getProductionCameraErrorMessage } from "@/modules/manufacturing-management/production-workflow/utils/production-camera";
 
 interface QaReceivingAttachmentsProps {
     purchaseOrderId: number;
