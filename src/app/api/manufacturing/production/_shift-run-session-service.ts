@@ -729,7 +729,7 @@ function reservationSnapshot(row: any) {
     const actual = Math.max(0, finiteNumber(row.actual_used_quantity));
     const returned = Math.max(0, finiteNumber(row.returned_quantity));
     const availableBasis = issued > EPSILON ? issued : staged;
-    const remaining = Math.max(0, availableBasis - actual - returned);
+    const remaining = roundedQuantity(Math.max(0, availableBasis - actual - returned));
     return { issued, actual, returned, remaining };
 }
 
@@ -878,6 +878,21 @@ async function applyReservationUpdate(plan: MaterialPlan, consumptionRow: any) {
         );
     }
 
+    const saved = await directusRequest<any>(
+        `${DIRECTUS_URL}/items/manufacturing_job_order_materials_reservations/${encodeURIComponent(String(reservationId))}?fields=actual_used_quantity,remaining_wip_quantity`,
+        `Verify persisted WIP consumption ${reservationId}`
+    );
+    if (roundedQuantity(finiteNumber(saved.actual_used_quantity)) !== roundedQuantity(plan.reservationActualAfter)
+        || roundedQuantity(finiteNumber(saved.remaining_wip_quantity)) !== roundedQuantity(plan.remainingWipAfter)) {
+        throw new ProductionSessionError(409, "MATERIAL_PERSISTENCE_PRECISION_MISMATCH", `Reservation ${reservationId} did not retain the recorded material precision. Reconcile the saved shift before retrying.`, {
+            reservationId,
+            expectedActualAfter: plan.reservationActualAfter,
+            expectedRemainingAfter: plan.remainingWipAfter,
+            liveActual: saved.actual_used_quantity,
+            liveRemaining: saved.remaining_wip_quantity
+        });
+    }
+
     const consumptionId = numberId(consumptionRow.consumage_id ?? consumptionRow.id);
     if (!consumptionId) throw new DirectusSessionPersistenceError("Consumption row returned no identifier.");
     await directusRequest(
@@ -925,6 +940,21 @@ async function applyMaterialAggregate(plan: MaterialPlan, consumptionRow: any) {
                 })
             }
         );
+    }
+
+    const saved = await directusRequest<any>(
+        `${DIRECTUS_URL}/items/manufacturing_job_order_materials/${encodeURIComponent(String(materialId))}?fields=actual_consumed_quantity,reserved_quantity`,
+        `Verify persisted JO material ${materialId}`
+    );
+    if (roundedQuantity(finiteNumber(saved.actual_consumed_quantity)) !== roundedQuantity(plan.materialActualAfter)
+        || roundedQuantity(finiteNumber(saved.reserved_quantity)) !== roundedQuantity(plan.materialReservedAfter)) {
+        throw new ProductionSessionError(409, "MATERIAL_PERSISTENCE_PRECISION_MISMATCH", `JO material ${materialId} did not retain the recorded material precision. Reconcile the saved shift before retrying.`, {
+            joMaterialId: materialId,
+            expectedActualAfter: plan.materialActualAfter,
+            expectedReservedAfter: plan.materialReservedAfter,
+            liveActual: saved.actual_consumed_quantity,
+            liveReserved: saved.reserved_quantity
+        });
     }
 
     const consumptionId = numberId(consumptionRow.consumage_id ?? consumptionRow.id);
@@ -985,6 +1015,13 @@ async function ensureConsumptionAndGenealogy(
             }
         );
         existingConsumptionRows.push(consumptionRow);
+        const savedConsumption = await directusRequest<any>(
+            `${DIRECTUS_URL}/items/manufacturing_job_order_yield_ledger_bom_consumage/${encodeURIComponent(String(numberId(consumptionRow.consumage_id ?? consumptionRow.id)))}?fields=quantity_consumed`,
+            `Verify persisted material consumption for reservation ${plan.line.reservationId}`
+        );
+        if (roundedQuantity(finiteNumber(savedConsumption.quantity_consumed)) !== plan.line.actualQty) {
+            throw new ProductionSessionError(409, "MATERIAL_PERSISTENCE_PRECISION_MISMATCH", "Saved material consumption did not retain six-decimal precision. Reconcile the saved shift before retrying.", { joMaterialId: plan.line.joMaterialId, reservationId: plan.line.reservationId });
+        }
     }
 
     await applyReservationUpdate(plan, consumptionRow);
@@ -1024,6 +1061,13 @@ async function ensureConsumptionAndGenealogy(
             }
         );
         existingGenealogyRows.push(genealogy);
+        const savedGenealogy = await directusRequest<any>(
+            `${DIRECTUS_URL}/items/jo_material_genealogy/${encodeURIComponent(String(numberId(genealogy.genealogy_id ?? genealogy.id)))}?fields=consumed_quantity`,
+            `Verify persisted material genealogy for reservation ${plan.line.reservationId}`
+        );
+        if (roundedQuantity(finiteNumber(savedGenealogy.consumed_quantity)) !== plan.line.actualQty) {
+            throw new ProductionSessionError(409, "MATERIAL_PERSISTENCE_PRECISION_MISMATCH", "Saved material genealogy did not retain six-decimal precision. Reconcile the saved shift before retrying.", { joMaterialId: plan.line.joMaterialId, reservationId: plan.line.reservationId });
+        }
     }
 }
 
@@ -1631,7 +1675,7 @@ export async function recordShiftRunSession(request: Request): Promise<NextRespo
         await directusRequest(
             `${DIRECTUS_URL}/items/manufacturing_job_order_yield_ledger/${encodeURIComponent(String(ledgerId))}`,
             `Commit production session ${ledgerId}`,
-            { method: "PATCH", body: JSON.stringify({ commit_status: "COMMITTED", job_order_updated: true, qa_status: "Pending" }) }
+            { method: "PATCH", body: JSON.stringify({ commit_status: "COMMITTED", job_order_updated: true, qa_status: "Pending", recovery_error: null }) }
         );
 
         const finalChildren = await loadSessionChildren(ledgerId, input.joId);
@@ -1676,7 +1720,7 @@ export async function recordShiftRunSession(request: Request): Promise<NextRespo
         }
     } catch (error) {
         if (sessionLedgerId > 0 && error instanceof ProductionSessionError
-            && ["MATERIAL_AGGREGATE_CHANGED", "MATERIAL_RESERVATION_CHANGED"].includes(error.code)) {
+            && ["MATERIAL_AGGREGATE_CHANGED", "MATERIAL_RESERVATION_CHANGED", "MATERIAL_PERSISTENCE_PRECISION_MISMATCH"].includes(error.code)) {
             try {
                 await directusRequest(
                     `${DIRECTUS_URL}/items/manufacturing_job_order_yield_ledger/${encodeURIComponent(String(sessionLedgerId))}`,

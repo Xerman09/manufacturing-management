@@ -19,6 +19,7 @@ interface MovementPayloadModalProps {
     onCommit: () => void;
     committedResult: ReceivingCommitResult | null;
     onFinish: () => void;
+    receivingHeaderId?: number | null;
 }
 
 interface RouteRow {
@@ -38,7 +39,8 @@ export default function MovementPayloadModal({
     posting,
     onCommit,
     committedResult,
-    onFinish
+    onFinish,
+    receivingHeaderId
 }: MovementPayloadModalProps) {
     const [verified, setVerified] = React.useState(false);
     const [printLoading, setPrintLoading] = React.useState<"qa" | "storage" | null>(null);
@@ -54,9 +56,14 @@ export default function MovementPayloadModal({
         if (!committedResult) return;
         try {
             setPrintLoading(key);
+            const resolvedHeaderId = receivingHeaderId
+                || (committedResult.receivingRecords.length > 0
+                    ? ((committedResult.receivingRecords[0] as unknown as { receivingHeaderId?: number | null }).receivingHeaderId || null)
+                    : null);
             await downloadPurchaseOrderPrintable({
                 purchaseOrderId: committedResult.shipmentId,
-                documentType
+                documentType,
+                receivingHeaderId: resolvedHeaderId
             });
             toast.success(`${key === "qa" ? "QA goods receipt" : "Storage-lot allocation"} printable downloaded.`);
         } catch (error) {

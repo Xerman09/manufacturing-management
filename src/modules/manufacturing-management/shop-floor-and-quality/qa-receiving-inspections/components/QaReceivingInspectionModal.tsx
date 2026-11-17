@@ -240,6 +240,7 @@ export default function QaReceivingInspectionModal({
                         onCommit={handleCommitReceiving}
                         committedResult={committedResult}
                         onFinish={finishCommittedInspection}
+                        receivingHeaderId={selectedReceipt?.receivingHeaderId || null}
                     />
                 </div>
             </div>
