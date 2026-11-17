@@ -6,7 +6,6 @@ import {
     Plus,
     Trash2,
     Eye,
-    Download,
     FileText,
     Image as ImageIcon,
     File,
