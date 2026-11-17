@@ -241,21 +241,10 @@ export async function GET(request: Request) {
                     return NextResponse.json({ success: true, data: json.data || [] });
                 }
             } catch (err) {
-                console.warn("Directus fetch for qa_rejection_reasons failed, using fallback list:", err);
+                console.warn("Directus fetch for qa_rejection_reasons failed:", err);
             }
 
-            // Fallback standard rejection reasons
-            const fallbackReasons = [
-                { id: 1, reason_id: 1, code: "DEF-DIM", reason_name: "Dimensional Variance / Out of Tolerance", category: "Dimensional", is_active: true },
-                { id: 2, reason_id: 2, code: "DEF-SURF", reason_name: "Surface Flaw / Scratch / Dent", category: "Cosmetic", is_active: true },
-                { id: 3, reason_id: 3, code: "DEF-CONT", reason_name: "Foreign Material Contamination", category: "Quality", is_active: true },
-                { id: 4, reason_id: 4, code: "DEF-SEAL", reason_name: "Improper Sealing / Packaging Defect", category: "Packaging", is_active: true },
-                { id: 5, reason_id: 5, code: "DEF-CHEM", reason_name: "Chemical / Viscosity Specification Failure", category: "Chemical", is_active: true },
-                { id: 6, reason_id: 6, code: "DEF-MACH", reason_name: "Machine Jam / Processing Scrap", category: "Process", is_active: true },
-                { id: 7, reason_id: 7, code: "DEF-SETUP", reason_name: "Line Setup / Calibration Waste", category: "Setup", is_active: true },
-                { id: 8, reason_id: 8, code: "DEF-EXP", reason_name: "Material Expired in Staging", category: "Material", is_active: true }
-            ];
-            return NextResponse.json({ success: true, data: fallbackReasons });
+            return NextResponse.json({ success: false, error: "Unable to load rejection reasons. Please retry.", code: "REJECTION_REASON_LOOKUP_UNAVAILABLE" }, { status: 503 });
         }
 
         // 2. Fetch yield ledger logs

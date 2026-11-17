@@ -30,6 +30,7 @@ import {
     fetchRejectionReasons,
     RecoverableShiftRunSession,
     resumeShiftRunLogSession,
+    cancelSavedShift,
     ShiftRunLogPayload,
     ShiftRunLogRequestError,
     fetchJobOrderStatusHistory,
@@ -42,7 +43,7 @@ import { toast } from "sonner";
 import { calculatePipelinedLineDurationHours } from "../../planning-engineering/utils/production-timing";
 import { exceedsAvailableStock, formatProductionQuantity, resolveJobOrderTargetQuantity, roundToInputStep } from "../utils/production-quantity";
 import {
-    calculateWipTopUpShortfall,
+    materialConsumptionShortfalls,
     calculateMaterialConsumptionDefaults,
     distributeConsumptionAcrossReservations,
     materialConsumptionReservationKey,
@@ -114,6 +115,19 @@ export function JobOrderShiftLogModal({
     const [rejectedQty, setRejectedQty] = useState("0");
     const [rejectionReasons, setRejectionReasons] = useState<RejectionReason[]>([]);
     const [selectedReasonId, setSelectedReasonId] = useState<string>("");
+    const [reasonsLoading, setReasonsLoading] = useState(false);
+    const [reasonsError, setReasonsError] = useState<string | null>(null);
+    const [reasonServerError, setReasonServerError] = useState<string | null>(null);
+    const reasonRequired = Number(rejectedQty) > 0;
+    const reasonValid = rejectionReasons.some(reason => String(reason.id ?? reason.reason_id) === selectedReasonId);
+    const reasonError = reasonRequired ? reasonServerError || (!reasonValid ? "Select a rejection reason when rejected units are greater than zero." : null) : null;
+    const loadRejectionReasons = useCallback(async () => {
+        setReasonsLoading(true); setReasonsError(null); setReasonServerError(null);
+        try { setRejectionReasons(await fetchRejectionReasons()); }
+        catch { setRejectionReasons([]); setReasonsError("Unable to load rejection reasons. Please retry."); }
+        finally { setReasonsLoading(false); }
+    }, []);
+
     const [rejectionRemarks, setRejectionRemarks] = useState("");
     const [remarks, setRemarks] = useState("");
     const [varianceReason, setVarianceReason] = useState("");
@@ -143,7 +157,6 @@ export function JobOrderShiftLogModal({
     const allocatedWipByReservationRef = useRef<Map<string, number>>(new Map());
     const topUpReservationKeysByRootRef = useRef<Map<string, Set<string>>>(new Map());
     const preserveTopUpDraftOnCloseRef = useRef(false);
-    const autoResumeAttemptedRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
         shiftMaterialsRef.current = shiftMaterials;
@@ -319,7 +332,6 @@ export function JobOrderShiftLogModal({
     useEffect(() => {
         if (!open) {
             initializedFormJobOrderKeyRef.current = null;
-            autoResumeAttemptedRef.current.clear();
             return;
         }
 
@@ -356,9 +368,7 @@ export function JobOrderShiftLogModal({
         }
 
         // Fetch rejection reasons
-        fetchRejectionReasons()
-            .then((reasons) => setRejectionReasons(reasons))
-            .catch((err) => console.error("Error loading rejection reasons:", err));
+        void loadRejectionReasons();
 
         let cancelled = false;
         const newSessionKey = () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -376,28 +386,7 @@ export function JobOrderShiftLogModal({
                 }
 
                 setRecoveryStatus("pending");
-                if (sessions.length !== 1 || !sessions[0].canResume) return;
 
-                const session = sessions[0];
-                const attemptKey = `${jobOrderId}:${session.sessionKey}`;
-                if (autoResumeAttemptedRef.current.has(attemptKey)) return;
-                autoResumeAttemptedRef.current.add(attemptKey);
-                setRecoveryStatus("resuming");
-                setRecoveryError(null);
-                try {
-                    await resumeShiftRunLogSession(jobOrderId, session.sessionKey);
-                    if (cancelled) return;
-                    toast.success(`Recovered and recorded the pending shift for ${session.shiftName}.`);
-                    onOpenChange(false);
-                    onSuccess?.();
-                } catch (error) {
-                    if (cancelled) return;
-                    setRecoveryError(error instanceof Error ? error.message : "The pending shift could not be resumed.");
-                    setRecoveryStatus("pending");
-                    fetchRecoverableShiftRunSessions(jobOrderId)
-                        .then((latest) => { if (!cancelled) setRecoverableSessions(latest); })
-                        .catch(() => undefined);
-                }
             })
             .catch((error) => {
                 if (cancelled) return;
@@ -492,6 +481,11 @@ export function JobOrderShiftLogModal({
 
         if (evidenceImages.length === 0 || evidenceImageError) {
             toast.error("At least one valid Inspector / Shift evidence image or video is required.");
+            return false;
+        }
+
+        if (reasonRequired && (reasonError || reasonsLoading || reasonsError)) {
+            toast.error(reasonError || "Wait for valid rejection reasons to load.");
             return false;
         }
 
@@ -694,6 +688,10 @@ export function JobOrderShiftLogModal({
                 }
             }
         } catch (err: any) {
+            if (err instanceof ShiftRunLogRequestError && (err.code || "").startsWith("REJECTION_REASON_")) {
+                setReasonServerError(err.message);
+                setIsConfirmationOpen(false);
+            }
             if (err instanceof ShiftRunLogRequestError
                 && ["MATERIAL_AGGREGATE_CHANGED", "MATERIAL_RESERVATION_CHANGED"].includes(err.code || "")) {
                 setIsConfirmationOpen(false);
@@ -1108,7 +1106,7 @@ export function JobOrderShiftLogModal({
             uomId: material.uom_id ?? null,
             remainingWip: available,
             theoretical,
-            shortfall: calculateWipTopUpShortfall(requested, available),
+            shortfall: materialConsumptionShortfalls(requested, theoretical, available).topUpShortfall,
             requestedQuantity: requested,
             reservationKey,
             candidateLots: material.candidate_lots || [],
@@ -1124,9 +1122,6 @@ export function JobOrderShiftLogModal({
 
     const hasInsufficiency = shiftMaterials.some((material) =>
         exceedsAvailableStock(requestedConsumption(material), currentWipForRequest(material))
-    );
-    const hasTheoreticalShortage = shiftMaterials.some((material) =>
-        exceedsAvailableStock(materialTheoretical(material), material.available_stock)
     );
     const hasIncompleteMaterialLine = shiftMaterials.some((m) =>
         !m.reservation_id
@@ -1187,9 +1182,10 @@ export function JobOrderShiftLogModal({
             variance: values.actual - values.theoretical
         }))
         .filter((group) => Math.abs(group.variance) > Math.max(0.000001, Math.abs(group.theoretical) * varianceTolerancePct / 100));
-    const hasVarianceException = !hasTheoreticalShortage && varianceExceptions.length > 0;
+    const hasVarianceException = varianceExceptions.length > 0;
     const missingVarianceApproval = hasVarianceException && (!varianceReason.trim() || !approveVariance);
-    const isSubmitDisabled = submittingShiftLog
+    const isSubmitDisabled = (reasonRequired && (Boolean(reasonError) || reasonsLoading || Boolean(reasonsError)))
+        || submittingShiftLog
         || loadingShiftMaterials
         || Boolean(materialsLoadError)
         || hasInvalidMaterialConsumptionDraft
@@ -1402,16 +1398,26 @@ export function JobOrderShiftLogModal({
                                                 <select
                                                     id="rejectionReason"
                                                     value={selectedReasonId}
-                                                    onChange={(e) => setSelectedReasonId(e.target.value)}
+                                                    onChange={(e) => { setSelectedReasonId(e.target.value); setReasonServerError(null); }}
+                                                    required={reasonRequired}
+                                                    disabled={reasonsLoading}
+                                                    aria-invalid={Boolean(reasonError)}
+                                                    aria-describedby={reasonError ? "rejection-reason-error" : undefined}
                                                     className="w-full h-8.5 rounded-lg border border-border bg-background text-foreground px-2 text-xs font-medium"
                                                 >
-                                                    <option value="">-- No Defect / Standard Run --</option>
+                                                    <option value="">{reasonRequired ? "Select rejection reason" : "-- No Defect / Standard Run --"}</option>
                                                     {rejectionReasons.map((r) => (
                                                         <option key={r.id || r.reason_id} value={r.id || r.reason_id}>
                                                             {r.code} - {r.reason_name}
                                                         </option>
                                                      ))}
                                                  </select>
+                                                {reasonError && <p id="rejection-reason-error" role="alert" className="text-xs text-red-600">{reasonError}</p>}
+                                                {reasonsLoading && <p role="status" className="text-xs">Loading rejection reasons...</p>}
+                                                {reasonsError && <p role="alert" className="text-xs text-red-600">{reasonsError}</p>}
+                                                {!reasonsLoading && !reasonsError && rejectionReasons.length === 0 && <p className="text-xs">No active rejection reasons are available.</p>}
+                                                {(reasonsError || !reasonsLoading && rejectionReasons.length === 0) && <Button type="button" size="sm" variant="outline" onClick={() => void loadRejectionReasons()}>Retry rejection reasons</Button>}
+
                                              </div>
                                              <div className="space-y-1 sm:col-span-2">
                                                  <Label htmlFor="productionRemarks" className="text-muted-foreground text-[10px]">Session Remarks</Label>
@@ -1549,7 +1555,7 @@ export function JobOrderShiftLogModal({
                                                  const availableForRequest = currentWipForRequest(m);
                                                  const isInsufficient = exceedsAvailableStock(actual, availableForRequest);
                                                 const availableStock = roundToInputStep(m.available_stock);
-                                                const shortfall = calculateWipTopUpShortfall(actual, availableForRequest);
+                                                const { actualShortfall, theoreticalShortfall, topUpShortfall: shortfall } = materialConsumptionShortfalls(actual, theoretical, availableForRequest);
                                                 const allocated = allocatedWipByReservationRef.current.get(reservationKey) ?? availableStock;
                                                 const confirmedAdditional = Math.max(0, availableStock - allocated);
                                                 const previewAdditional = Math.max(0, Number(topUpPreviews[reservationKey] || 0));
@@ -1561,7 +1567,7 @@ export function JobOrderShiftLogModal({
                                                     : isExceeded 
                                                     ? "bg-amber-500" 
                                                     : "bg-emerald-500";
-                                                const needsTopUp = isInsufficient;
+                                                const needsTopUp = exceedsAvailableStock(shortfall, 0);
 
                                                 return (
                                                      <div key={m.reservation_id || `${m.jo_material_id}-${index}`} className="p-3.5 bg-background rounded-xl border border-border/80 hover:border-primary/20 hover:shadow-sm transition-all duration-200 space-y-3">
@@ -1700,7 +1706,8 @@ export function JobOrderShiftLogModal({
                                                             {needsTopUp && (
                                                                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
                                                                     <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
-                                                                        {`Short by ${shortfall.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${m.unit_shortcut} against entered actual consumption.`}
+                                                                        {actualShortfall > 0.000001 && <span className="block">{`Entered actual usage exceeds confirmed WIP by ${formatExactMaterialQuantity(actualShortfall)} ${m.unit_shortcut}. Add materials before saving.`}</span>}
+                                                                        {theoreticalShortfall > 0.000001 && <span className="block">{`Theoretical demand exceeds confirmed WIP by ${formatExactMaterialQuantity(theoreticalShortfall)} ${m.unit_shortcut}.`}</span>}
                                                                     </span>
                                                                     <Button
                                                                         type="button"
@@ -1794,7 +1801,7 @@ export function JobOrderShiftLogModal({
                                             {recoveryStatus === "checking" ? "Checking for a saved shift…"
                                                 : recoveryStatus === "resuming" ? "Resuming the saved shift…"
                                                     : recoveryStatus === "error" ? "Unable to check for saved shifts"
-                                                        : "A shift is waiting to be recovered"}
+                                                        : recoveryError ? "Saved shift could not be recovered" : "A shift is waiting to be recovered"}
                                         </h3>
                                         <p className="text-sm text-muted-foreground">
                                             {recoveryStatus === "checking" || recoveryStatus === "resuming"
@@ -1815,6 +1822,8 @@ export function JobOrderShiftLogModal({
                                                                 <p className="mt-1 text-xs text-muted-foreground">
                                                                     {session.productionDate || "Date unavailable"} · Good {formatProductionQuantity(session.goodQuantity)} pcs · Rejected {formatProductionQuantity(session.rejectedQuantity)} pcs
                                                                 </p>
+                                                                {session.recoveryState && <p className="mt-2 text-xs font-semibold">{({READY:"Ready to resume",TEMPORARY_FAILURE:"Temporary failure - retry available",PRECISION_REPAIR_REQUIRED:"Precision repair required",BALANCE_CONFLICT:"Balance conflict - supervisor reconciliation required"})[session.recoveryState]}</p>}
+                                                                {!session.canResume && <p className="mt-2 text-xs">Ask an administrator to inspect this session using the production recovery maintenance command. Do not enter the same output again.</p>}
                                                                 {session.recoveryError?.message && (
                                                                     <p className="mt-2 text-xs text-amber-900 dark:text-amber-200">{session.recoveryError.message}</p>
                                                                 )}
@@ -1824,6 +1833,13 @@ export function JobOrderShiftLogModal({
                                                                     </p>
                                                                 )}
                                                             </div>
+                                                            {session.canDiscard && <Button type="button" variant="destructive" disabled={recoveryStatus === "resuming"} onClick={async () => {
+                                                                const reason = window.prompt("Reason for discarding this untouched saved shift:");
+                                                                if (!reason?.trim() || !window.confirm("Discard only if no production effects exist? The server will recheck. Saved evidence will be retained.")) return;
+                                                                setRecoveryStatus("resuming");
+                                                                try { await cancelSavedShift(session.jobOrderId,session.sessionKey,reason); onSuccess?.(); await handleRetryRecoveryCheck(); }
+                                                                catch(error) { setRecoveryError(error instanceof Error ? error.message : "Cancellation could not be confirmed."); setRecoveryStatus("pending"); }
+                                                            }}>Discard saved shift</Button>}
                                                             {session.canResume ? (
                                                                 <Button
                                                                     type="button"
