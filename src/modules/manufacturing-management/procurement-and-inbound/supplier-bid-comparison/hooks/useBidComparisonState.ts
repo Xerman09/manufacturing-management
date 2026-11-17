@@ -713,7 +713,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                     const oldId = liveProject.id;
 
                     // Stamp resolved database IDs for child entities to prevent duplicate rows on next save
-                    let updatedProject = {
+                    const updatedProject = {
                         ...liveProject,
                         id: serverId,
                         dbId: serverDbId || liveProject.dbId,
