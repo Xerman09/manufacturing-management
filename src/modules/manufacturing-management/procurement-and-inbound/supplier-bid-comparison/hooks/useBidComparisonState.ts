@@ -679,10 +679,24 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                 if (res.ok) {
                     const data = await res.json();
                     if (data.backendUnavailable || !data.success) {
+                        const errMsg = data.error || (data.partialFailure ? `Partial failure in ${data.partialFailure.section}: ${data.partialFailure.error}` : "Backend storage currently unavailable");
+                        toast.error(errMsg);
                         set({
                             isSaving: false,
-                            saveError: data.error || "Backend storage currently unavailable",
+                            saveError: errMsg,
                             storageStatus: "SAVED_LOCAL",
+                            isDirty: true,
+                        });
+                        return;
+                    }
+
+                    if (data.partialFailure) {
+                        toast.error(`Save partially failed in "${data.partialFailure.section}": ${data.partialFailure.error}. Will retry.`);
+                        set({
+                            isSaving: false,
+                            saveError: `Partial failure in ${data.partialFailure.section}`,
+                            storageStatus: "SAVED_LOCAL",
+                            isDirty: true,
                         });
                         return;
                     }
@@ -694,33 +708,60 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                         return;
                     }
 
-                    if (data.project) {
-                        const serverId = String(data.project.id);
-                        const serverDbId = data.project.dbId || (typeof data.project.id === "number" ? data.project.id : undefined);
-                        const oldId = liveProject.id;
+                    const serverId = data.project ? String(data.project.id) : liveProject.id;
+                    const serverDbId = data.project?.dbId || (typeof data.project?.id === "number" ? data.project.id : undefined);
+                    const oldId = liveProject.id;
 
-                        if (serverId !== oldId || (serverDbId && liveProject.dbId !== serverDbId)) {
-                            // Update IDs on the live project without overwriting user's active fields
-                            const updatedProject = {
-                                ...liveProject,
-                                id: serverId,
-                                dbId: serverDbId || liveProject.dbId,
-                            };
+                    // Stamp resolved database IDs for child entities to prevent duplicate rows on next save
+                    let updatedProject = {
+                        ...liveProject,
+                        id: serverId,
+                        dbId: serverDbId || liveProject.dbId,
+                    };
 
-                            if (typeof window !== "undefined") {
-                                try {
-                                    localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + oldId);
-                                    localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + serverId, JSON.stringify(updatedProject));
-                                    const updatedList = get().projectsList.map((p) =>
-                                        p.id === oldId ? { ...p, id: serverId } : p
-                                    );
-                                    localStorage.setItem(LOCAL_STORAGE_INDEX_KEY, JSON.stringify(updatedList));
-                                    set({ currentProject: updatedProject, projectsList: updatedList });
-                                } catch {
-                                    // LocalStorage quota error handled safely
-                                }
-                            }
+                    if (data.resolvedIds) {
+                        const { items: itemMap, criteria: critMap, bids: bidMap } = data.resolvedIds as {
+                            items?: Record<string, number>;
+                            criteria?: Record<string, number>;
+                            bids?: Record<string, number>;
+                        };
+
+                        if (itemMap && updatedProject.items) {
+                            updatedProject.items = updatedProject.items.map((it) =>
+                                itemMap[it.id] ? { ...it, dbId: itemMap[it.id] } : it
+                            );
                         }
+                        if (critMap && updatedProject.qualityCriteria) {
+                            updatedProject.qualityCriteria = updatedProject.qualityCriteria.map((qc) =>
+                                critMap[qc.id] ? { ...qc, dbId: critMap[qc.id] } : qc
+                            );
+                        }
+                        if (bidMap && updatedProject.bids) {
+                            updatedProject.bids = updatedProject.bids.map((b) =>
+                                bidMap[b.id] ? { ...b, dbId: bidMap[b.id] } : b
+                            );
+                        }
+                    }
+
+                    if (typeof window !== "undefined") {
+                        try {
+                            if (serverId !== oldId) {
+                                localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + oldId);
+                            }
+                            localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + serverId, JSON.stringify(updatedProject));
+                            const updatedList = get().projectsList.map((p) =>
+                                p.id === oldId
+                                    ? { ...p, id: serverId, rfqTitle: updatedProject.rfqTitle, rfqReference: updatedProject.rfqReference, status: updatedProject.status, updatedAt: updatedProject.updatedAt }
+                                    : p
+                            );
+                            localStorage.setItem(LOCAL_STORAGE_INDEX_KEY, JSON.stringify(updatedList));
+                            set({ currentProject: updatedProject, projectsList: updatedList });
+                        } catch {
+                            // LocalStorage quota error handled safely
+                            set({ currentProject: updatedProject });
+                        }
+                    } else {
+                        set({ currentProject: updatedProject });
                     }
 
                     // Update fingerprint cache on successful backend persist

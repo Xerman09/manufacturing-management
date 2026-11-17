@@ -488,9 +488,14 @@ export async function POST(request: NextRequest) {
 
         // Synchronize child entities for newly created project
         const fullProject: RfqProject = { ...body, id: String(newRfqId), dbId: newRfqId };
-        await syncChildEntities(newRfqId, fullProject, userId);
+        const syncResult = await syncChildEntities(newRfqId, fullProject, userId);
 
-        return NextResponse.json({ success: true, project: fullProject }, { status: 201 });
+        return NextResponse.json({
+            success: !syncResult.partialFailure,
+            project: fullProject,
+            resolvedIds: syncResult.resolvedIds,
+            partialFailure: syncResult.partialFailure || null,
+        }, { status: 201 });
     } catch (error) {
         return NextResponse.json(
             { success: false, error: (error as Error).message || "Failed to create project", backendUnavailable: true },
@@ -695,7 +700,7 @@ export async function PUT(request: NextRequest) {
         }
 
         // 4. Diff-Upsert Child Entities
-        await syncChildEntities(rfqDbId, project, userId);
+        const syncResult = await syncChildEntities(rfqDbId, project, userId);
 
         const updatedProject: RfqProject = {
             ...project,
@@ -703,7 +708,12 @@ export async function PUT(request: NextRequest) {
             dbId: rfqDbId,
         };
 
-        return NextResponse.json({ success: true, project: updatedProject });
+        return NextResponse.json({
+            success: !syncResult.partialFailure,
+            project: updatedProject,
+            resolvedIds: syncResult.resolvedIds,
+            partialFailure: syncResult.partialFailure || null,
+        });
     } catch (error) {
         return NextResponse.json(
             {
@@ -716,10 +726,19 @@ export async function PUT(request: NextRequest) {
     }
 }
 
+interface SyncResult {
+    resolvedIds: {
+        items: Record<string, number>;
+        criteria: Record<string, number>;
+        bids: Record<string, number>;
+    };
+    partialFailure?: { section: string; error: string };
+}
+
 /**
  * Child Entity Relational Diff-Upsert Orchestrator
  */
-async function syncChildEntities(rfqId: number, project: RfqProject, userId: number | null) {
+async function syncChildEntities(rfqId: number, project: RfqProject, userId: number | null): Promise<SyncResult> {
     const nowIso = new Date().toISOString();
 
     // Map client IDs to DB IDs
@@ -731,6 +750,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
     // -------------------------------------------------------------
     // A. Sync mm_rfq_items
     // -------------------------------------------------------------
+    try {
     if (project.items && Array.isArray(project.items)) {
         const existingItems = await fetchCollection<Record<string, unknown>>(
             "mm_rfq_items",
@@ -779,10 +799,17 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
             }
         }
     }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "items", error: (err as Error).message },
+        };
+    }
 
     // -------------------------------------------------------------
     // B. Sync mm_rfq_quality_criteria
     // -------------------------------------------------------------
+    try {
     if (project.qualityCriteria && Array.isArray(project.qualityCriteria)) {
         const existingCriteria = await fetchCollection<Record<string, unknown>>(
             "mm_rfq_quality_criteria",
@@ -821,10 +848,17 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
             }
         }
     }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "quality criteria", error: (err as Error).message },
+        };
+    }
 
     // -------------------------------------------------------------
     // C. Sync mm_rfq_exchange_rates
     // -------------------------------------------------------------
+    try {
     if (project.exchangeRates && Array.isArray(project.exchangeRates)) {
         // Query ALL rows for this RFQ (including soft-deleted) to avoid MySQL uq_rfq_currency duplicates
         const existingRates = await fetchCollection<Record<string, unknown>>(
@@ -866,453 +900,495 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
             }
         }
     }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "exchange rates", error: (err as Error).message },
+        };
+    }
 
     // -------------------------------------------------------------
     // D. Sync mm_rfq_customs_rates
     // -------------------------------------------------------------
-    if (project.customsRates) {
-        const cr = project.customsRates;
-        const existingCustoms = await fetchCollection<Record<string, unknown>>(
-            "mm_rfq_customs_rates",
-            `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true&limit=1`
-        );
+    try {
+        if (project.customsRates) {
+            const cr = project.customsRates;
+            const existingCustoms = await fetchCollection<Record<string, unknown>>(
+                "mm_rfq_customs_rates",
+                `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true&limit=1`
+            );
 
-        const customsPayload = {
-            rfq_id: rfqId,
-            cds_comp_curr: cr.cdsCompCurr ?? 100,
-            bir_dst_comp_curr: cr.birDstCompCurr ?? 30,
-            container_security_usd: cr.containerSecurityUsd ?? 5,
-            arrastre_20ft_comp_curr: cr.arrastre20ftCompCurr ?? 4738,
-            arrastre_40ft_comp_curr: cr.arrastre40ftCompCurr ?? 10869,
-            wharfage_20ft_comp_curr: cr.wharfage20ftCompCurr ?? 519.35,
-            wharfage_40ft_comp_curr: cr.wharfage40ftCompCurr ?? 779.05,
-            lcl_arrastre_per_rt_comp_curr: cr.lclArrastrePerRtCompCurr ?? 149,
-            lcl_wharfage_per_rt_comp_curr: cr.lclWharfagePerRtCompCurr ?? 30.55,
-            lc_bank_charge_pct: cr.lcBankChargePct ?? 0.1250,
-        };
+            const customsPayload = {
+                rfq_id: rfqId,
+                cds_comp_curr: cr.cdsCompCurr ?? 100,
+                bir_dst_comp_curr: cr.birDstCompCurr ?? 30,
+                container_security_usd: cr.containerSecurityUsd ?? 5,
+                arrastre_20ft_comp_curr: cr.arrastre20ftCompCurr ?? 4738,
+                arrastre_40ft_comp_curr: cr.arrastre40ftCompCurr ?? 10869,
+                wharfage_20ft_comp_curr: cr.wharfage20ftCompCurr ?? 519.35,
+                wharfage_40ft_comp_curr: cr.wharfage40ftCompCurr ?? 779.05,
+                lcl_arrastre_per_rt_comp_curr: cr.lclArrastrePerRtCompCurr ?? 149,
+                lcl_wharfage_per_rt_comp_curr: cr.lclWharfagePerRtCompCurr ?? 30.55,
+                lc_bank_charge_pct: cr.lcBankChargePct ?? 0.1250,
+            };
 
-        if (existingCustoms.length > 0) {
-            await patchItem("mm_rfq_customs_rates", Number(existingCustoms[0].id), customsPayload);
-        } else {
-            await postItem("mm_rfq_customs_rates", customsPayload);
+            if (existingCustoms.length > 0) {
+                await patchItem("mm_rfq_customs_rates", Number(existingCustoms[0].id), customsPayload);
+            } else {
+                await postItem("mm_rfq_customs_rates", customsPayload);
+            }
         }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "customs rates", error: (err as Error).message },
+        };
     }
 
     // -------------------------------------------------------------
     // E. Sync mm_rfq_ipc_brackets
     // -------------------------------------------------------------
-    if (project.ipcBrackets && Array.isArray(project.ipcBrackets)) {
-        const existingIpc = await fetchCollection<Record<string, unknown>>(
-            "mm_rfq_ipc_brackets",
-            `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true`
-        );
-        const ipcOrderMap = new Map<number, number>();
-        existingIpc.forEach((b) => ipcOrderMap.set(Number(b.bracket_order), Number(b.id)));
+    try {
+        if (project.ipcBrackets && Array.isArray(project.ipcBrackets)) {
+            const existingIpc = await fetchCollection<Record<string, unknown>>(
+                "mm_rfq_ipc_brackets",
+                `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true`
+            );
+            const ipcOrderMap = new Map<number, number>();
+            existingIpc.forEach((b) => ipcOrderMap.set(Number(b.bracket_order), Number(b.id)));
 
-        const activeOrders = new Set<number>();
+            const activeOrders = new Set<number>();
 
-        for (const b of project.ipcBrackets) {
-            activeOrders.add(b.bracketOrder);
-            const payload = {
-                rfq_id: rfqId,
-                bracket_order: b.bracketOrder,
-                max_dutiable_value_comp_curr: b.maxDutiableValueCompCurr ?? null,
-                charge_comp_curr: b.chargeCompCurr,
-            };
+            for (const b of project.ipcBrackets) {
+                activeOrders.add(b.bracketOrder);
+                const payload = {
+                    rfq_id: rfqId,
+                    bracket_order: b.bracketOrder,
+                    max_dutiable_value_comp_curr: b.maxDutiableValueCompCurr ?? null,
+                    charge_comp_curr: b.chargeCompCurr,
+                };
 
-            const existingId = ipcOrderMap.get(b.bracketOrder);
-            if (existingId) {
-                await patchItem("mm_rfq_ipc_brackets", existingId, payload);
-            } else {
-                await postItem("mm_rfq_ipc_brackets", payload);
+                const existingId = ipcOrderMap.get(b.bracketOrder);
+                if (existingId) {
+                    await patchItem("mm_rfq_ipc_brackets", existingId, payload);
+                } else {
+                    await postItem("mm_rfq_ipc_brackets", payload);
+                }
+            }
+
+            for (const [order, bId] of Array.from(ipcOrderMap.entries())) {
+                if (!activeOrders.has(order)) {
+                    await patchItem("mm_rfq_ipc_brackets", bId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+                }
             }
         }
-
-        for (const [order, bId] of Array.from(ipcOrderMap.entries())) {
-            if (!activeOrders.has(order)) {
-                await patchItem("mm_rfq_ipc_brackets", bId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
-            }
-        }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "IPC brackets", error: (err as Error).message },
+        };
     }
 
     // -------------------------------------------------------------
     // F. Sync mm_rfq_bids & child entities (bid_items, price_breaks, scores, attachments)
     // -------------------------------------------------------------
-    if (project.bids && Array.isArray(project.bids)) {
-        const existingBids = await fetchCollection<Record<string, unknown>>(
-            "mm_rfq_bids",
-            `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true`
-        );
-        const existingBidMap = new Map<number, Record<string, unknown>>();
-        existingBids.forEach((b) => existingBidMap.set(Number(b.id), b));
+    try {
+        if (project.bids && Array.isArray(project.bids)) {
+            const existingBids = await fetchCollection<Record<string, unknown>>(
+                "mm_rfq_bids",
+                `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true`
+            );
+            const existingBidMap = new Map<number, Record<string, unknown>>();
+            existingBids.forEach((b) => existingBidMap.set(Number(b.id), b));
 
-        const activeBidDbIds = new Set<number>();
+            const activeBidDbIds = new Set<number>();
 
-        for (const bid of project.bids) {
-            const bidDbId = parseDbId(bid.dbId) || parseDbId(bid.id);
-            const bidPayload = {
-                rfq_id: rfqId,
-                supplier_id: bid.supplierId || null,
-                supplier_name: bid.supplierName,
-                supplier_type: bid.supplierType || "LOCAL",
-                country: bid.country || "Philippines",
-                contact_person: bid.contactPerson || "",
-                contact_email: bid.contactEmail || "",
-                contact_phone: bid.contactPhone || "",
-                quote_currency: bid.quoteCurrency || "PHP",
-                quotation_ref: bid.quotationRef || "",
-                quote_date: bid.quoteDate ? bid.quoteDate.slice(0, 10) : null,
-                valid_until: bid.validUntil ? bid.validUntil.slice(0, 10) : null,
-                lead_time_days: bid.leadTimeDays ?? 0,
-                notes: bid.notes || "",
-                incoterm: bid.incoterm || "DELIVERED",
-                vat_pct: bid.vatPct ?? 12.0,
-                prices_include_vat: bid.pricesIncludeVat ? 1 : 0,
-                inland_trucking_comp_curr: bid.inlandTruckingCompCurr ?? 0,
-                freight_basis: bid.freightBasis || "LUMP_SUM",
-                freight_rate: bid.freightRate ?? 0,
-                freight_minimum: bid.freightMinimum ?? 0,
-                freight_currency: bid.freightCurrency || "PHP",
-                insurance_basis: bid.insuranceBasis || "PCT_GOODS_AND_FREIGHT",
-                insurance_rate_or_amount: bid.insuranceRateOrAmount ?? 0,
-                insurance_currency: bid.insuranceCurrency || "PHP",
-                duty_mode: bid.dutyMode || "PER_ITEM",
-                fta_agreement_name: bid.ftaAgreementName || null,
-                fta_duty_pct: bid.ftaDutyPct ?? 0,
-                single_duty_pct: bid.singleDutyPct ?? 0,
-                brokerage_comp_curr: bid.brokerageCompCurr ?? 0,
-                other_port_charges_comp_curr: bid.otherPortChargesCompCurr ?? 0,
-                shipment_type: bid.shipmentType || "AUTO",
-                containers_20ft: bid.containers20ft ?? 0,
-                containers_40ft: bid.containers40ft ?? 0,
-                declarations_count: bid.declarationsCount ?? 1,
-                paid_by_lc: bid.paidByLc ? 1 : 0,
-                down_payment_pct: bid.downPaymentPct ?? 0,
-                balance_due_days: bid.balanceDueDays ?? 0,
-                early_pay_discount_pct: bid.earlyPayDiscountPct ?? 0,
-                early_pay_discount_days: bid.earlyPayDiscountDays ?? 0,
-                take_early_pay_discount: bid.takeEarlyPayDiscount ? 1 : 0,
-                bank_fee_per_payment_comp_curr: bid.bankFeePerPaymentCompCurr ?? 0,
-            };
+            for (const bid of project.bids) {
+                const bidDbId = parseDbId(bid.dbId) || parseDbId(bid.id);
+                const bidPayload = {
+                    rfq_id: rfqId,
+                    supplier_id: bid.supplierId || null,
+                    supplier_name: bid.supplierName,
+                    supplier_type: bid.supplierType || "LOCAL",
+                    country: bid.country || "Philippines",
+                    contact_person: bid.contactPerson || "",
+                    contact_email: bid.contactEmail || "",
+                    contact_phone: bid.contactPhone || "",
+                    quote_currency: bid.quoteCurrency || "PHP",
+                    quotation_ref: bid.quotationRef || "",
+                    quote_date: bid.quoteDate ? bid.quoteDate.slice(0, 10) : null,
+                    valid_until: bid.validUntil ? bid.validUntil.slice(0, 10) : null,
+                    lead_time_days: bid.leadTimeDays ?? 0,
+                    notes: bid.notes || "",
+                    incoterm: bid.incoterm || "DELIVERED",
+                    vat_pct: bid.vatPct ?? 12.0,
+                    prices_include_vat: bid.pricesIncludeVat ? 1 : 0,
+                    inland_trucking_comp_curr: bid.inlandTruckingCompCurr ?? 0,
+                    freight_basis: bid.freightBasis || "LUMP_SUM",
+                    freight_rate: bid.freightRate ?? 0,
+                    freight_minimum: bid.freightMinimum ?? 0,
+                    freight_currency: bid.freightCurrency || "PHP",
+                    insurance_basis: bid.insuranceBasis || "PCT_GOODS_AND_FREIGHT",
+                    insurance_rate_or_amount: bid.insuranceRateOrAmount ?? 0,
+                    insurance_currency: bid.insuranceCurrency || "PHP",
+                    duty_mode: bid.dutyMode || "PER_ITEM",
+                    fta_agreement_name: bid.ftaAgreementName || null,
+                    fta_duty_pct: bid.ftaDutyPct ?? 0,
+                    single_duty_pct: bid.singleDutyPct ?? 0,
+                    brokerage_comp_curr: bid.brokerageCompCurr ?? 0,
+                    other_port_charges_comp_curr: bid.otherPortChargesCompCurr ?? 0,
+                    shipment_type: bid.shipmentType || "AUTO",
+                    containers_20ft: bid.containers20ft ?? 0,
+                    containers_40ft: bid.containers40ft ?? 0,
+                    declarations_count: bid.declarationsCount ?? 1,
+                    paid_by_lc: bid.paidByLc ? 1 : 0,
+                    down_payment_pct: bid.downPaymentPct ?? 0,
+                    balance_due_days: bid.balanceDueDays ?? 0,
+                    early_pay_discount_pct: bid.earlyPayDiscountPct ?? 0,
+                    early_pay_discount_days: bid.earlyPayDiscountDays ?? 0,
+                    take_early_pay_discount: bid.takeEarlyPayDiscount ? 1 : 0,
+                    bank_fee_per_payment_comp_curr: bid.bankFeePerPaymentCompCurr ?? 0,
+                };
 
-            let resolvedBidId: number;
-            if (bidDbId && existingBidMap.has(bidDbId)) {
-                await patchItem("mm_rfq_bids", bidDbId, bidPayload);
-                resolvedBidId = bidDbId;
-            } else {
-                const created = await postItem<{ id: number }>("mm_rfq_bids", bidPayload);
-                resolvedBidId = Number(created.id);
-            }
+                let resolvedBidId: number;
+                if (bidDbId && existingBidMap.has(bidDbId)) {
+                    await patchItem("mm_rfq_bids", bidDbId, bidPayload);
+                    resolvedBidId = bidDbId;
+                } else {
+                    const created = await postItem<{ id: number }>("mm_rfq_bids", bidPayload);
+                    resolvedBidId = Number(created.id);
+                }
 
-            bidIdMap.set(bid.id, resolvedBidId);
-            activeBidDbIds.add(resolvedBidId);
+                bidIdMap.set(bid.id, resolvedBidId);
+                activeBidDbIds.add(resolvedBidId);
 
-            // ---------------------------------------------------------
-            // F1. Sync mm_rfq_bid_items & mm_rfq_bid_price_breaks
-            // ---------------------------------------------------------
-            if (bid.quotations && typeof bid.quotations === "object") {
-                // Fetch ALL bid items for this bid (including soft-deleted) to prevent uq_bid_item constraint violation
-                const existingBidItems = await fetchCollection<Record<string, unknown>>(
-                    "mm_rfq_bid_items",
-                    `filter[rfq_bid_id][_eq]=${resolvedBidId}`
-                );
-                const existingBiMap = new Map<number, { id: number; isDeleted: boolean }>(); // rfq_item_id -> { id, isDeleted }
-                existingBidItems.forEach((bi) =>
-                    existingBiMap.set(Number(bi.rfq_item_id), {
-                        id: Number(bi.id),
-                        isDeleted: bi.deleted_at !== null && bi.deleted_at !== undefined,
-                    })
-                );
+                // ---------------------------------------------------------
+                // F1. Sync mm_rfq_bid_items & mm_rfq_bid_price_breaks
+                // ---------------------------------------------------------
+                if (bid.quotations && typeof bid.quotations === "object") {
+                    // Fetch ALL bid items for this bid (including soft-deleted) to prevent uq_bid_item constraint violation
+                    const existingBidItems = await fetchCollection<Record<string, unknown>>(
+                        "mm_rfq_bid_items",
+                        `filter[rfq_bid_id][_eq]=${resolvedBidId}`
+                    );
+                    const existingBiMap = new Map<number, { id: number; isDeleted: boolean }>(); // rfq_item_id -> { id, isDeleted }
+                    existingBidItems.forEach((bi) =>
+                        existingBiMap.set(Number(bi.rfq_item_id), {
+                            id: Number(bi.id),
+                            isDeleted: bi.deleted_at !== null && bi.deleted_at !== undefined,
+                        })
+                    );
 
-                const activeBiIds = new Set<number>();
+                    const activeBiIds = new Set<number>();
 
-                const quotationEntries = Object.entries(bid.quotations) as [string, ItemQuotation][];
-                for (const [rfqItemId, quotation] of quotationEntries) {
-                    const resolvedItemId = itemIdMap.get(rfqItemId) || parseDbId(rfqItemId);
-                    if (!resolvedItemId) continue;
+                    const quotationEntries = Object.entries(bid.quotations) as [string, ItemQuotation][];
+                    for (const [rfqItemId, quotation] of quotationEntries) {
+                        const resolvedItemId = itemIdMap.get(rfqItemId) || parseDbId(rfqItemId);
+                        if (!resolvedItemId) continue;
 
-                    const biPayload = {
-                        rfq_bid_id: resolvedBidId,
-                        rfq_item_id: resolvedItemId,
-                        discount_pct: quotation.discountPct ?? 0,
-                        deleted_at: null,
-                        deleted_by: null,
-                    };
+                        const biPayload = {
+                            rfq_bid_id: resolvedBidId,
+                            rfq_item_id: resolvedItemId,
+                            discount_pct: quotation.discountPct ?? 0,
+                            deleted_at: null,
+                            deleted_by: null,
+                        };
 
-                    let resolvedBiId: number;
-                    const existingBi = existingBiMap.get(resolvedItemId);
-                    if (existingBi) {
-                        await patchItem("mm_rfq_bid_items", existingBi.id, biPayload);
-                        resolvedBiId = existingBi.id;
-                    } else {
-                        const created = await postItem<{ id: number }>("mm_rfq_bid_items", biPayload);
-                        resolvedBiId = Number(created.id);
-                    }
+                        let resolvedBiId: number;
+                        const existingBi = existingBiMap.get(resolvedItemId);
+                        if (existingBi) {
+                            await patchItem("mm_rfq_bid_items", existingBi.id, biPayload);
+                            resolvedBiId = existingBi.id;
+                        } else {
+                            const created = await postItem<{ id: number }>("mm_rfq_bid_items", biPayload);
+                            resolvedBiId = Number(created.id);
+                        }
 
-                    bidItemIdMap.set(`${bid.id}_${rfqItemId}`, resolvedBiId);
-                    bidItemIdMap.set(`${resolvedBidId}_${resolvedItemId}`, resolvedBiId);
-                    bidItemIdMap.set(`${bid.id}_${resolvedItemId}`, resolvedBiId);
-                    bidItemIdMap.set(`${resolvedBidId}_${rfqItemId}`, resolvedBiId);
-                    activeBiIds.add(resolvedBiId);
+                        bidItemIdMap.set(`${bid.id}_${rfqItemId}`, resolvedBiId);
+                        bidItemIdMap.set(`${resolvedBidId}_${resolvedItemId}`, resolvedBiId);
+                        bidItemIdMap.set(`${bid.id}_${resolvedItemId}`, resolvedBiId);
+                        bidItemIdMap.set(`${resolvedBidId}_${rfqItemId}`, resolvedBiId);
+                        activeBiIds.add(resolvedBiId);
 
-                    // Price Breaks for this bid item
-                    if (quotation.priceBreaks && Array.isArray(quotation.priceBreaks)) {
-                        const existingPbs = await fetchCollection<Record<string, unknown>>(
-                            "mm_rfq_bid_price_breaks",
-                            `filter[rfq_bid_item_id][_eq]=${resolvedBiId}`
-                        );
-                        const existingPbQtyMap = new Map<number, { id: number; isDeleted: boolean }>(); // min_quantity -> { id, isDeleted }
-                        existingPbs.forEach((pb) =>
-                            existingPbQtyMap.set(Number(pb.min_quantity), {
-                                id: Number(pb.id),
-                                isDeleted: pb.deleted_at !== null && pb.deleted_at !== undefined,
-                            })
-                        );
+                        // Price Breaks for this bid item
+                        if (quotation.priceBreaks && Array.isArray(quotation.priceBreaks)) {
+                            const existingPbs = await fetchCollection<Record<string, unknown>>(
+                                "mm_rfq_bid_price_breaks",
+                                `filter[rfq_bid_item_id][_eq]=${resolvedBiId}`
+                            );
+                            const existingPbQtyMap = new Map<number, { id: number; isDeleted: boolean }>(); // min_quantity -> { id, isDeleted }
+                            existingPbs.forEach((pb) =>
+                                existingPbQtyMap.set(Number(pb.min_quantity), {
+                                    id: Number(pb.id),
+                                    isDeleted: pb.deleted_at !== null && pb.deleted_at !== undefined,
+                                })
+                            );
 
-                        const activePbIds = new Set<number>();
+                            const activePbIds = new Set<number>();
 
-                        for (const pb of quotation.priceBreaks) {
-                            const minQty = pb.minQuantity ?? 1;
-                            const pbPayload = {
-                                rfq_bid_item_id: resolvedBiId,
-                                min_quantity: minQty,
-                                unit_price: pb.unitPrice,
-                                deleted_at: null,
-                                deleted_by: null,
-                            };
+                            for (const pb of quotation.priceBreaks) {
+                                const minQty = pb.minQuantity ?? 1;
+                                const pbPayload = {
+                                    rfq_bid_item_id: resolvedBiId,
+                                    min_quantity: minQty,
+                                    unit_price: pb.unitPrice,
+                                    deleted_at: null,
+                                    deleted_by: null,
+                                };
 
-                            const existingPb = existingPbQtyMap.get(Number(minQty));
-                            if (existingPb) {
-                                await patchItem("mm_rfq_bid_price_breaks", existingPb.id, pbPayload);
-                                activePbIds.add(existingPb.id);
-                            } else {
-                                const createdPb = await postItem<{ id: number }>("mm_rfq_bid_price_breaks", pbPayload);
-                                activePbIds.add(Number(createdPb.id));
+                                const existingPb = existingPbQtyMap.get(Number(minQty));
+                                if (existingPb) {
+                                    await patchItem("mm_rfq_bid_price_breaks", existingPb.id, pbPayload);
+                                    activePbIds.add(existingPb.id);
+                                } else {
+                                    const createdPb = await postItem<{ id: number }>("mm_rfq_bid_price_breaks", pbPayload);
+                                    activePbIds.add(Number(createdPb.id));
+                                }
+                            }
+
+                            for (const [, pbEntry] of Array.from(existingPbQtyMap.entries())) {
+                                if (!activePbIds.has(pbEntry.id) && !pbEntry.isDeleted) {
+                                    await patchItem("mm_rfq_bid_price_breaks", pbEntry.id, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+                                }
                             }
                         }
+                    }
 
-                        for (const [, pbEntry] of Array.from(existingPbQtyMap.entries())) {
-                            if (!activePbIds.has(pbEntry.id) && !pbEntry.isDeleted) {
-                                await patchItem("mm_rfq_bid_price_breaks", pbEntry.id, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+                    // Soft-delete removed bid items
+                    for (const [, biEntry] of Array.from(existingBiMap.entries())) {
+                        if (!activeBiIds.has(biEntry.id) && !biEntry.isDeleted) {
+                            await patchItem("mm_rfq_bid_items", biEntry.id, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+                        }
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // F2. Sync mm_rfq_bid_scores
+                // ---------------------------------------------------------
+                if (bid.scores && typeof bid.scores === "object") {
+                    // Fetch ALL bid scores for this bid (including soft-deleted) to prevent uq_bid_score_criterion constraint violation
+                    const existingScores = await fetchCollection<Record<string, unknown>>(
+                        "mm_rfq_bid_scores",
+                        `filter[rfq_bid_id][_eq]=${resolvedBidId}`
+                    );
+                    const scoreCritMap = new Map<number, { id: number; isDeleted: boolean }>(); // criterion_id -> { id, isDeleted }
+                    existingScores.forEach((sc) =>
+                        scoreCritMap.set(Number(sc.criterion_id), {
+                            id: Number(sc.id),
+                            isDeleted: sc.deleted_at !== null && sc.deleted_at !== undefined,
+                        })
+                    );
+
+                    const activeCritIds = new Set<number>();
+
+                    const scoreEntries = Object.entries(bid.scores) as [
+                        string,
+                        { passFailResult?: "PASS" | "FAIL" | "NOT_CHECKED"; score?: number | null; evidenceRemarks?: string }
+                    ][];
+                    for (const [critId, scoreObj] of scoreEntries) {
+                        const resolvedCritId = critIdMap.get(critId) || parseDbId(critId);
+                        if (!resolvedCritId) continue;
+
+                        // Ensure score is 1-5 or null per MySQL chk_bid_score_range
+                        let sanitizedScore: number | null = null;
+                        if (typeof scoreObj.score === "number" && scoreObj.score >= 1 && scoreObj.score <= 5) {
+                            sanitizedScore = Math.round(scoreObj.score);
+                        }
+
+                        const scorePayload = {
+                            rfq_bid_id: resolvedBidId,
+                            criterion_id: resolvedCritId,
+                            pass_fail_result: scoreObj.passFailResult || "NOT_CHECKED",
+                            score: sanitizedScore,
+                            evidence_remarks: scoreObj.evidenceRemarks || "",
+                            deleted_at: null,
+                            deleted_by: null,
+                        };
+
+                        activeCritIds.add(resolvedCritId);
+                        const existingScore = scoreCritMap.get(resolvedCritId);
+                        if (existingScore) {
+                            await patchItem("mm_rfq_bid_scores", existingScore.id, scorePayload);
+                        } else {
+                            await postItem("mm_rfq_bid_scores", scorePayload);
+                        }
+                    }
+
+                    for (const [cId, entry] of Array.from(scoreCritMap.entries())) {
+                        if (!activeCritIds.has(cId) && !entry.isDeleted) {
+                            await patchItem("mm_rfq_bid_scores", entry.id, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+                        }
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // F3. Sync mm_rfq_bid_attachments
+                // ---------------------------------------------------------
+                if (bid.attachments && Array.isArray(bid.attachments)) {
+                    const existingAttachments = await fetchCollection<Record<string, unknown>>(
+                        "mm_rfq_bid_attachments",
+                        `filter[rfq_bid_id][_eq]=${resolvedBidId}&filter[deleted_at][_null]=true`
+                    );
+                    const existingAttMap = new Map<number, number>(); // att.id -> id
+                    existingAttachments.forEach((att) => existingAttMap.set(Number(att.id), Number(att.id)));
+
+                    const activeAttIds = new Set<number>();
+
+                    for (const att of bid.attachments) {
+                        const existingAttId = att.dbId || (typeof att.id === "number" ? att.id : parseDbId(att.id));
+
+                        // Directus file ID must be a valid 36-char string per schema
+                        const validDirectusId = (att.directusFileId && att.directusFileId.length === 36)
+                            ? att.directusFileId
+                            : crypto.randomUUID();
+
+                        const attPayload = {
+                            rfq_bid_id: resolvedBidId,
+                            directus_file_id: validDirectusId,
+                            file_name: att.fileName || "unnamed_document",
+                            mime_type: att.mimeType || "application/octet-stream",
+                            file_size: att.fileSize || 0,
+                            document_type: att.documentType || "Quotation",
+                        };
+
+                        if (existingAttId && existingAttMap.has(existingAttId)) {
+                            await patchItem("mm_rfq_bid_attachments", existingAttId, attPayload).catch(() => null);
+                            activeAttIds.add(existingAttId);
+                        } else {
+                            const createdAtt = await postItem<{ id: number }>("mm_rfq_bid_attachments", attPayload).catch(() => null);
+                            if (createdAtt?.id) {
+                                activeAttIds.add(Number(createdAtt.id));
                             }
                         }
                     }
-                }
 
-                // Soft-delete removed bid items
-                for (const [, biEntry] of Array.from(existingBiMap.entries())) {
-                    if (!activeBiIds.has(biEntry.id) && !biEntry.isDeleted) {
-                        await patchItem("mm_rfq_bid_items", biEntry.id, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
-                    }
-                }
-            }
-
-            // ---------------------------------------------------------
-            // F2. Sync mm_rfq_bid_scores
-            // ---------------------------------------------------------
-            if (bid.scores && typeof bid.scores === "object") {
-                // Fetch ALL bid scores for this bid (including soft-deleted) to prevent uq_bid_score_criterion constraint violation
-                const existingScores = await fetchCollection<Record<string, unknown>>(
-                    "mm_rfq_bid_scores",
-                    `filter[rfq_bid_id][_eq]=${resolvedBidId}`
-                );
-                const scoreCritMap = new Map<number, { id: number; isDeleted: boolean }>(); // criterion_id -> { id, isDeleted }
-                existingScores.forEach((sc) =>
-                    scoreCritMap.set(Number(sc.criterion_id), {
-                        id: Number(sc.id),
-                        isDeleted: sc.deleted_at !== null && sc.deleted_at !== undefined,
-                    })
-                );
-
-                const activeCritIds = new Set<number>();
-
-                const scoreEntries = Object.entries(bid.scores) as [
-                    string,
-                    { passFailResult?: "PASS" | "FAIL" | "NOT_CHECKED"; score?: number | null; evidenceRemarks?: string }
-                ][];
-                for (const [critId, scoreObj] of scoreEntries) {
-                    const resolvedCritId = critIdMap.get(critId) || parseDbId(critId);
-                    if (!resolvedCritId) continue;
-
-                    // Ensure score is 1-5 or null per MySQL chk_bid_score_range
-                    let sanitizedScore: number | null = null;
-                    if (typeof scoreObj.score === "number" && scoreObj.score >= 1 && scoreObj.score <= 5) {
-                        sanitizedScore = Math.round(scoreObj.score);
-                    }
-
-                    const scorePayload = {
-                        rfq_bid_id: resolvedBidId,
-                        criterion_id: resolvedCritId,
-                        pass_fail_result: scoreObj.passFailResult || "NOT_CHECKED",
-                        score: sanitizedScore,
-                        evidence_remarks: scoreObj.evidenceRemarks || "",
-                        deleted_at: null,
-                        deleted_by: null,
-                    };
-
-                    activeCritIds.add(resolvedCritId);
-                    const existingScore = scoreCritMap.get(resolvedCritId);
-                    if (existingScore) {
-                        await patchItem("mm_rfq_bid_scores", existingScore.id, scorePayload);
-                    } else {
-                        await postItem("mm_rfq_bid_scores", scorePayload);
-                    }
-                }
-
-                for (const [cId, entry] of Array.from(scoreCritMap.entries())) {
-                    if (!activeCritIds.has(cId) && !entry.isDeleted) {
-                        await patchItem("mm_rfq_bid_scores", entry.id, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
-                    }
-                }
-            }
-
-            // ---------------------------------------------------------
-            // F3. Sync mm_rfq_bid_attachments
-            // ---------------------------------------------------------
-            if (bid.attachments && Array.isArray(bid.attachments)) {
-                const existingAttachments = await fetchCollection<Record<string, unknown>>(
-                    "mm_rfq_bid_attachments",
-                    `filter[rfq_bid_id][_eq]=${resolvedBidId}&filter[deleted_at][_null]=true`
-                );
-                const existingAttMap = new Map<number, number>(); // att.id -> id
-                existingAttachments.forEach((att) => existingAttMap.set(Number(att.id), Number(att.id)));
-
-                const activeAttIds = new Set<number>();
-
-                for (const att of bid.attachments) {
-                    const existingAttId = att.dbId || (typeof att.id === "number" ? att.id : parseDbId(att.id));
-
-                    // Directus file ID must be a valid 36-char string per schema
-                    const validDirectusId = (att.directusFileId && att.directusFileId.length === 36)
-                        ? att.directusFileId
-                        : crypto.randomUUID();
-
-                    const attPayload = {
-                        rfq_bid_id: resolvedBidId,
-                        directus_file_id: validDirectusId,
-                        file_name: att.fileName || "unnamed_document",
-                        mime_type: att.mimeType || "application/octet-stream",
-                        file_size: att.fileSize || 0,
-                        document_type: att.documentType || "Quotation",
-                    };
-
-                    if (existingAttId && existingAttMap.has(existingAttId)) {
-                        await patchItem("mm_rfq_bid_attachments", existingAttId, attPayload).catch(() => null);
-                        activeAttIds.add(existingAttId);
-                    } else {
-                        const createdAtt = await postItem<{ id: number }>("mm_rfq_bid_attachments", attPayload).catch(() => null);
-                        if (createdAtt?.id) {
-                            activeAttIds.add(Number(createdAtt.id));
+                    for (const att of existingAttachments) {
+                        const attId = Number(att.id);
+                        if (!activeAttIds.has(attId)) {
+                            await patchItem("mm_rfq_bid_attachments", attId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
                         }
                     }
                 }
+            }
 
-                for (const att of existingAttachments) {
-                    const attId = Number(att.id);
-                    if (!activeAttIds.has(attId)) {
-                        await patchItem("mm_rfq_bid_attachments", attId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
-                    }
+            // Soft-delete removed bids
+            for (const eBidId of Array.from(existingBidMap.keys())) {
+                if (!activeBidDbIds.has(eBidId)) {
+                    await patchItem("mm_rfq_bids", eBidId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
                 }
             }
         }
-
-        // Soft-delete removed bids
-        for (const eBidId of Array.from(existingBidMap.keys())) {
-            if (!activeBidDbIds.has(eBidId)) {
-                await patchItem("mm_rfq_bids", eBidId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
-            }
-        }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "bids and quotations", error: (err as Error).message },
+        };
     }
 
     // -------------------------------------------------------------
     // G. Sync mm_rfq_awards
     // -------------------------------------------------------------
-    if (project.awards && Array.isArray(project.awards)) {
-        const existingAwards = await fetchCollection<Record<string, unknown>>(
-            "mm_rfq_awards",
-            `filter[rfq_id][_eq]=${rfqId}`
-        );
-        const existingAwardItemMap = new Map<number, { id: number; status: string }>(); // rfq_item_id -> { id, status }
-        existingAwards.forEach((aw) =>
-            existingAwardItemMap.set(Number(aw.rfq_item_id), {
-                id: Number(aw.id),
-                status: String(aw.status),
-            })
-        );
+    try {
+        if (project.awards && Array.isArray(project.awards)) {
+            const existingAwards = await fetchCollection<Record<string, unknown>>(
+                "mm_rfq_awards",
+                `filter[rfq_id][_eq]=${rfqId}`
+            );
+            const existingAwardItemMap = new Map<number, { id: number; status: string }>(); // rfq_item_id -> { id, status }
+            existingAwards.forEach((aw) =>
+                existingAwardItemMap.set(Number(aw.rfq_item_id), {
+                    id: Number(aw.id),
+                    status: String(aw.status),
+                })
+            );
 
-        const activeAwardItemIds = new Set<number>();
+            const activeAwardItemIds = new Set<number>();
 
-        for (const aw of project.awards) {
-            const resolvedItemId = itemIdMap.get(aw.rfqItemId) || parseDbId(aw.rfqItemId);
-            const resolvedBidId = bidIdMap.get(aw.rfqBidId) || parseDbId(aw.rfqBidId);
-            let resolvedBidItemId =
-                bidItemIdMap.get(`${aw.rfqBidId}_${aw.rfqItemId}`) ||
-                bidItemIdMap.get(`${resolvedBidId}_${resolvedItemId}`) ||
-                bidItemIdMap.get(`${aw.rfqBidId}_${resolvedItemId}`) ||
-                bidItemIdMap.get(`${resolvedBidId}_${aw.rfqItemId}`) ||
-                parseDbId(aw.id);
+            for (const aw of project.awards) {
+                const resolvedItemId = itemIdMap.get(aw.rfqItemId) || parseDbId(aw.rfqItemId);
+                const resolvedBidId = bidIdMap.get(aw.rfqBidId) || parseDbId(aw.rfqBidId);
+                let resolvedBidItemId =
+                    bidItemIdMap.get(`${aw.rfqBidId}_${aw.rfqItemId}`) ||
+                    bidItemIdMap.get(`${resolvedBidId}_${resolvedItemId}`) ||
+                    bidItemIdMap.get(`${aw.rfqBidId}_${resolvedItemId}`) ||
+                    bidItemIdMap.get(`${resolvedBidId}_${aw.rfqItemId}`) ||
+                    parseDbId(aw.id);
 
-            if (!resolvedItemId || !resolvedBidId) continue;
+                if (!resolvedItemId || !resolvedBidId) continue;
 
-            // If resolvedBidItemId wasn't in memory map, look it up or create it in mm_rfq_bid_items
-            if (!resolvedBidItemId) {
-                const foundBi = await fetchCollection<Record<string, unknown>>(
-                    "mm_rfq_bid_items",
-                    `filter[rfq_bid_id][_eq]=${resolvedBidId}&filter[rfq_item_id][_eq]=${resolvedItemId}&limit=1`
-                );
-                if (foundBi.length > 0) {
-                    resolvedBidItemId = Number(foundBi[0].id);
-                } else {
-                    const createdBi = await postItem<{ id: number }>("mm_rfq_bid_items", {
-                        rfq_bid_id: resolvedBidId,
-                        rfq_item_id: resolvedItemId,
-                        discount_pct: 0,
-                    }).catch(() => null);
-                    if (createdBi?.id) {
-                        resolvedBidItemId = Number(createdBi.id);
+                // If resolvedBidItemId wasn't in memory map, look it up or create it in mm_rfq_bid_items
+                if (!resolvedBidItemId) {
+                    const foundBi = await fetchCollection<Record<string, unknown>>(
+                        "mm_rfq_bid_items",
+                        `filter[rfq_bid_id][_eq]=${resolvedBidId}&filter[rfq_item_id][_eq]=${resolvedItemId}&limit=1`
+                    );
+                    if (foundBi.length > 0) {
+                        resolvedBidItemId = Number(foundBi[0].id);
+                    } else {
+                        const createdBi = await postItem<{ id: number }>("mm_rfq_bid_items", {
+                            rfq_bid_id: resolvedBidId,
+                            rfq_item_id: resolvedItemId,
+                            discount_pct: 0,
+                        }).catch(() => null);
+                        if (createdBi?.id) {
+                            resolvedBidItemId = Number(createdBi.id);
+                        }
                     }
+                }
+
+                if (!resolvedBidItemId) continue;
+
+                activeAwardItemIds.add(resolvedItemId);
+
+                const awardPayload = {
+                    rfq_id: rfqId,
+                    rfq_item_id: resolvedItemId,
+                    rfq_bid_id: resolvedBidId,
+                    awarded_bid_item_id: resolvedBidItemId,
+                    awarded_supplier_id: aw.awardedSupplierId || null,
+                    awarded_landed_unit_cost: aw.awardedLandedUnitCost,
+                    awarded_landed_total: aw.awardedLandedTotal,
+                    purchase_order_id: aw.purchaseOrderId || null,
+                    status: "ACTIVE",
+                    revoked_at: null,
+                    revoked_by: null,
+                    revocation_reason: null,
+                };
+
+                const existingAward = existingAwardItemMap.get(resolvedItemId);
+                if (existingAward) {
+                    await patchItem("mm_rfq_awards", existingAward.id, awardPayload);
+                } else {
+                    await postItem("mm_rfq_awards", awardPayload);
                 }
             }
 
-            if (!resolvedBidItemId) continue;
-
-            activeAwardItemIds.add(resolvedItemId);
-
-            const awardPayload = {
-                rfq_id: rfqId,
-                rfq_item_id: resolvedItemId,
-                rfq_bid_id: resolvedBidId,
-                awarded_bid_item_id: resolvedBidItemId,
-                awarded_supplier_id: aw.awardedSupplierId || null,
-                awarded_landed_unit_cost: aw.awardedLandedUnitCost,
-                awarded_landed_total: aw.awardedLandedTotal,
-                purchase_order_id: aw.purchaseOrderId || null,
-                status: "ACTIVE",
-                revoked_at: null,
-                revoked_by: null,
-                revocation_reason: null,
-            };
-
-            const existingAward = existingAwardItemMap.get(resolvedItemId);
-            if (existingAward) {
-                await patchItem("mm_rfq_awards", existingAward.id, awardPayload);
-            } else {
-                await postItem("mm_rfq_awards", awardPayload);
+            // Revoke active awards that are no longer selected
+            for (const [itemDbId, entry] of Array.from(existingAwardItemMap.entries())) {
+                if (!activeAwardItemIds.has(itemDbId) && entry.status === "ACTIVE") {
+                    await patchItem("mm_rfq_awards", entry.id, {
+                        status: "REVOKED",
+                        revoked_at: nowIso,
+                        revoked_by: userId,
+                        revocation_reason: "Award updated in Supplier Bid Comparison module",
+                    }).catch(() => null);
+                }
             }
         }
-
-        // Revoke active awards that are no longer selected
-        for (const [itemDbId, entry] of Array.from(existingAwardItemMap.entries())) {
-            if (!activeAwardItemIds.has(itemDbId) && entry.status === "ACTIVE") {
-                await patchItem("mm_rfq_awards", entry.id, {
-                    status: "REVOKED",
-                    revoked_at: nowIso,
-                    revoked_by: userId,
-                    revocation_reason: "Award updated in Supplier Bid Comparison module",
-                }).catch(() => null);
-            }
-        }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "awards", error: (err as Error).message },
+        };
     }
+
+    return {
+        resolvedIds: {
+            items: Object.fromEntries(itemIdMap),
+            criteria: Object.fromEntries(critIdMap),
+            bids: Object.fromEntries(bidIdMap),
+        },
+    };
 }
 
 /**
