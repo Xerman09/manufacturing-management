@@ -442,7 +442,7 @@ export default function WarehouseReceivingDetailModal({
                                                     <div className="flex items-center gap-3 sm:text-right">
                                                         <Badge variant="outline" className={receiptHistoryStatusClass(receipt.status)}>{receipt.status}</Badge>
                                                         <div>
-                                                            <p className="text-xs text-muted-foreground">Amount received</p>
+                                                            <p className="text-xs text-muted-foreground">Quantity received</p>
                                                             <p className="font-semibold text-sm">{formatQuantity(receipt.totalReceivedQuantity)} units</p>
                                                         </div>
                                                     </div>

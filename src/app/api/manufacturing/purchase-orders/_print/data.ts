@@ -372,9 +372,15 @@ async function loadReceivingData(
         "Unable to load committed receiving records.",
         true
     );
-    const filteredRows = selectedHeaderId
+    const candidateRows = selectedHeaderId
         ? receivingRows.filter(row => relationId(row.receiving_header_id, ["id"]) === selectedHeaderId)
         : receivingRows;
+    const filteredRows = candidateRows.filter(row => {
+        if (selectedHeaderId) return true;
+        const isPosted = row.isPosted === true || Number(row.isPosted) === 1;
+        const qaStatus = text(row.qa_status, "").toLowerCase();
+        return isPosted || (qaStatus && qaStatus !== "pending");
+    });
     const productById = new Map(lines.map(line => [line.productId, line]));
     const receivingIds = filteredRows.map(row => relationId(row, ["purchase_order_product_id", "id"])).filter((id): id is number => id !== null);
     const branchIds = [...new Set([
@@ -399,10 +405,9 @@ async function loadReceivingData(
             .filter((id): id is number => id !== null)
     );
     const printableHeaderRows = (selectedHeader ? [selectedHeader] : headerRows).filter(row => {
-        const postingStatus = text(row.posting_status, "").toLowerCase();
-        if (postingStatus && postingStatus !== "posted") return false;
         if (selectedHeader) return true;
-        if (committedHeaderIds.size === 0) return true;
+        const postingStatus = text(row.posting_status, "").toLowerCase();
+        if (postingStatus !== "posted") return false;
         const headerId = relationId(row, ["id"]);
         return headerId !== null && committedHeaderIds.has(headerId);
     });
