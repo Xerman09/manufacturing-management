@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Sparkles, RefreshCw, AlertCircle } from "lucide-react";
+import { Send, Bot, User, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AIExecutiveReportPayload, ChatMessage } from "../types";
@@ -123,18 +123,6 @@ export const ExecutiveChatBox: React.FC<Props> = ({ reportPayload }) => {
         } finally {
             setIsLoading(false);
         }
-    };
-
-    const handleReset = () => {
-        setMessages([
-            {
-                id: `reset-${Date.now()}`,
-                role: "assistant",
-                content: `Conversation reset. Grounded on latest report state for **${reportPayload.meta.plantName}**. How may I assist your review?`,
-                timestamp: new Date().toISOString()
-            }
-        ]);
-        setError(null);
     };
 
     return (

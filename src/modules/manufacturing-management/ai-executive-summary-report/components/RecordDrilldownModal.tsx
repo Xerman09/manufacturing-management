@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight } from "lucide-react";
-import type { DetailedKPIRow, DrilldownRecord } from "../types";
+import type { DetailedKPIRow } from "../types";
 
 interface Props {
     row: DetailedKPIRow | null;

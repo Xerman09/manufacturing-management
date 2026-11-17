@@ -4,7 +4,7 @@ import React from "react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, Download, Printer, Sparkles, Lock, Filter } from "lucide-react";
+import { RotateCcw, Download, Sparkles, Lock, Filter } from "lucide-react";
 import type { PlantOption, AIExecutiveReportFilters, AiTierInfo } from "../types";
 
 interface Props {
