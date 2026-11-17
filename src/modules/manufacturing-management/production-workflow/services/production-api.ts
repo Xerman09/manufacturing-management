@@ -323,6 +323,8 @@ export interface RecoverableShiftRunSession {
     scrapQuantity: number;
     loggedAt: string | null;
     canResume: boolean;
+    recoveryState?: "READY" | "TEMPORARY_FAILURE" | "PRECISION_REPAIR_REQUIRED" | "BALANCE_CONFLICT";
+    canDiscard?: boolean;
     recoveryError: {
         code?: string;
         message?: string;
@@ -550,4 +552,12 @@ export async function cancelJobOrder(
 
 export async function returnJobOrderMaterials(joId: string | number, reason?: string): Promise<JobOrderCancellationResponse> {
     return submitJobOrderCancellation({ action: "return-materials", joId, reason });
+}
+
+
+export async function cancelSavedShift(jobOrderId: number, sessionKey: string, reason: string) {
+    const response = await fetch("/api/manufacturing/production/shift-run-log/recovery", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"cancel",jobOrderId,sessionKey,reason})});
+    const data = await response.json();
+    if (!response.ok) throw new ShiftRunLogRequestError(data.error || "Cancellation failed",data.code,data.details);
+    return data;
 }

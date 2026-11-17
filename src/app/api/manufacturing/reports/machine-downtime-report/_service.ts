@@ -657,16 +657,8 @@ export async function assertProductionAssetOperational(assetId: number): Promise
     }
 }
 
-export async function recordWorkstationBreakdownMaintenance(
-    input: { jobOrderId: number; routeId: number; breakdownCategory: string; rootCause: string },
-    actorUserId: number
-): Promise<{ assetId: number; episodeId: number }> {
+export async function assertWorkstationBreakdownEligible(input: { jobOrderId: number; routeId: number }) {
     try {
-        const breakdownCategory = input.breakdownCategory.trim();
-        const rootCause = input.rootCause.trim();
-        if (!breakdownCategory || breakdownCategory.length > 120 || !rootCause || rootCause.length > 5000) {
-            throw new MachineDowntimeReportError("Enter a breakdown category and root cause within the allowed length.", 400, "BREAKDOWN_DETAILS_REQUIRED");
-        }
         const [jobOrder, route] = await Promise.all([
             getOne(
                 "manufacturing_job_orders",
@@ -703,8 +695,31 @@ export async function recordWorkstationBreakdownMaintenance(
         const linkedAsset = workCenter?.asset_id;
         const assetId = relationId(linkedAsset, ["id"]);
         if (!assetId || !isRecord(linkedAsset) || text(linkedAsset.asset_type) !== "Production") {
-            throw new MachineDowntimeReportError("The route work center must be linked to a Production machine before reporting a breakdown.", 422, "PRODUCTION_ASSET_REQUIRED");
+            const station = `WC-${workCenterId} - ${text(workCenter?.work_center_name) || "Work center"}`;
+            const item = isRecord(linkedAsset) && isRecord(linkedAsset.item_id) ? linkedAsset.item_id : null;
+            const machineName = text(item?.item_name) || "asset";
+            const assetType = text(isRecord(linkedAsset) ? linkedAsset.asset_type : null) || "Unknown";
+            const message = !assetId
+                ? `${station} has no linked machine. Ask an administrator to link a Production asset in Work Centers before reporting a machine breakdown.`
+                : `${station} is linked to ${machineName} (asset type: ${assetType}). A Production asset is required. Ask an administrator to review the Work Center machine link.`;
+            throw new MachineDowntimeReportError(message, 422, "PRODUCTION_ASSET_REQUIRED");
         }
+
+        return { assetId, workCenterId, workCenterName: text(workCenter?.work_center_name), assetType: "Production", assetName: isRecord(linkedAsset) && isRecord(linkedAsset.item_id) ? text(linkedAsset.item_id.item_name) : "Production machine" };
+    } catch(error) { throw apiError(error); }
+}
+
+export async function recordWorkstationBreakdownMaintenance(
+    input: { jobOrderId: number; routeId: number; breakdownCategory: string; rootCause: string },
+    actorUserId: number
+): Promise<{ assetId: number; episodeId: number }> {
+    try {
+        const breakdownCategory = input.breakdownCategory.trim();
+        const rootCause = input.rootCause.trim();
+        if (!breakdownCategory || breakdownCategory.length > 120 || !rootCause || rootCause.length > 5000) {
+            throw new MachineDowntimeReportError("Enter a breakdown category and root cause within the allowed length.", 400, "BREAKDOWN_DETAILS_REQUIRED");
+        }
+        const { assetId } = await assertWorkstationBreakdownEligible(input);
 
         const existingEpisode = await getOne(
             HISTORY_COLLECTION,
