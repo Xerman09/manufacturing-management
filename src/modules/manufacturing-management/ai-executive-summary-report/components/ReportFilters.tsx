@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -36,14 +36,31 @@ export const ReportFilters: React.FC<Props> = ({
     onToggleAICopilot,
     onExportPdf
 }) => {
-    // Format searchable plant options
-    const branchOptions = [
-        { value: "all", label: "All Plants & Facilities" },
-        ...branches.map((b) => ({
-            value: String(b.id),
-            label: `[${b.code}] ${b.name}`
-        }))
-    ];
+    // Format searchable plant options with distinct, unique labels to avoid clashing dropdown selections
+    const branchOptions = useMemo(() => {
+        // Count occurrences of [code] name to identify duplicate labels
+        const labelCounts = new Map<string, number>();
+        branches.forEach((b) => {
+            const baseKey = `[${b.code}] ${b.name}`;
+            labelCounts.set(baseKey, (labelCounts.get(baseKey) || 0) + 1);
+        });
+
+        return [
+            { value: "all", label: "All Plants & Facilities" },
+            ...branches.map((b) => {
+                const baseKey = `[${b.code}] ${b.name}`;
+                const hasDuplicate = (labelCounts.get(baseKey) || 0) > 1;
+                const label = hasDuplicate
+                    ? `[${b.code} #${b.id}] ${b.name}`
+                    : `[${b.code}] ${b.name}`;
+
+                return {
+                    value: String(b.id),
+                    label
+                };
+            })
+        ];
+    }, [branches]);
 
     // Standard preset options for date range
     const periodOptions = [

@@ -203,12 +203,6 @@ export default function AIExecutiveSummaryReportModule() {
                         High-level synthesis of plant productivity, weighted OEE, scrap rates, downtime, delivery adherence, and production variance.
                     </p>
                 </div>
-                {payload && (
-                    <div className="text-left sm:text-right text-xs text-muted-foreground">
-                        <div>Plant: <span className="font-bold text-foreground">{payload.meta.plantName}</span></div>
-                        <div>Last Freshness Sync: <span className="font-mono text-[11px]">{payload.meta.freshnessCutoff}</span></div>
-                    </div>
-                )}
             </div>
 
             {/* Filter Bar with SearchableSelect Date Presets & Explicit Apply Button */}

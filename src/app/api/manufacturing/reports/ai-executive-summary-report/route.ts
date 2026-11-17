@@ -191,10 +191,10 @@ export async function GET(request: Request) {
         // Filter yieldLedger or materials if plant filter applies
         let yieldLedger = rawYieldLedger;
         let jomRows = rawJomRows;
-        if (joIds.length > 0 && joIds.length > 100) {
+        if (plantId !== "all") {
             const joSet = new Set(joIds);
-            yieldLedger = yieldLedger.filter((y) => joSet.has(Number(y.job_order_id)));
-            jomRows = jomRows.filter((m) => joSet.has(Number(m.job_order_id)));
+            yieldLedger = rawYieldLedger.filter((y) => joSet.has(Number(y.job_order_id)));
+            jomRows = rawJomRows.filter((m) => joSet.has(Number(m.job_order_id)));
         }
 
         // Stage 3: Resolve Referenced Batch Lots & Unmapped Job Orders
@@ -336,16 +336,24 @@ export async function GET(request: Request) {
             scrapUnits += s;
             rejectedUnits += r;
 
-            const joNo = joNumberMap.get(jId) || `JO #${jId}`;
-            const pName = joProductMap.get(jId) || "Manufactured Batch";
+            const joNo = joNumberMap.get(jId) || `JO #${jId || "Unassigned"}`;
+            const pName = joProductMap.get(jId) || "Standard Manufactured Batch";
 
-            // Determine lot/batch label from mm_inventory_lots -> mm_lots -> yieldLedger.lot_number
+            // Determine lot/batch label from mm_inventory_lots -> mm_lots -> yieldLedger.lot_number with explicit graceful fallbacks
             const lotId = Number(yl.mm_lot_id || yl.rejected_mm_lot_id);
             const invBatchNo = lotId ? lotBatchMap.get(lotId) : null;
             const mmLotName = lotId ? lotNameMap.get(lotId) : null;
-            const lotLabel = invBatchNo
-                ? `Batch ${invBatchNo}`
-                : (mmLotName ? `Lot ${mmLotName}` : (yl.lot_number ? `Lot ${yl.lot_number}` : `Yield Run #${yl.ledger_id}`));
+
+            let lotLabel = `Run #${yl.ledger_id}`;
+            if (invBatchNo && invBatchNo.trim()) {
+                lotLabel = `Batch ${invBatchNo.trim()}`;
+            } else if (mmLotName && mmLotName.trim()) {
+                lotLabel = `Lot ${mmLotName.trim()}`;
+            } else if (yl.lot_number && String(yl.lot_number).trim()) {
+                lotLabel = `Lot ${String(yl.lot_number).trim()}`;
+            } else {
+                lotLabel = `Run #${yl.ledger_id} (Lot Unassigned)`;
+            }
 
             scrapRecords.push({
                 id: String(yl.ledger_id),
@@ -509,12 +517,12 @@ export async function GET(request: Request) {
             totalConsumedMaterial += consumed;
 
             const pObj = (typeof m.product_id === "object" && m.product_id !== null) ? (m.product_id as Record<string, unknown>) : null;
-            const pName = String(pObj?.product_name || `Item #${m.product_id || ""}`);
+            const pName = String(pObj?.product_name || `Raw Material Item #${m.product_id || m.jo_material_id || "Unassigned"}`);
             const diff = consumed - alloc;
             const diffPct = alloc > 0 ? ((diff / alloc) * 100).toFixed(1) : "0.0";
 
             const jId = Number(m.job_order_id);
-            const joNo = joNumberMap.get(jId) || `JO #${jId}`;
+            const joNo = joNumberMap.get(jId) || `JO #${jId || "Unassigned"}`;
             costRecords.push({
                 id: String(m.jo_material_id),
                 col1: joNo,
@@ -522,7 +530,7 @@ export async function GET(request: Request) {
                 col3: `${alloc.toLocaleString()} standard`,
                 col4: `${consumed.toLocaleString()} actual`,
                 status: diff <= 0 ? "Favorable" : "Excess",
-                notes: `${diff > 0 ? "+" : ""}${diffPct}% variance`
+                notes: alloc === 0 ? "Unscheduled direct consumption" : `${diff > 0 ? "+" : ""}${diffPct}% variance`
             });
         });
 
