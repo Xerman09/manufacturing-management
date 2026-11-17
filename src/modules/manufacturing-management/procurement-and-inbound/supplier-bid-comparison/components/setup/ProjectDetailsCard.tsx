@@ -20,9 +20,6 @@ const CURRENCIES = ["PHP", "USD", "CNY", "EUR", "JPY", "SGD", "GBP", "AUD"];
 
 export const ProjectDetailsCard: React.FC = () => {
     const { currentProject, updateProject, projectsList, saveError } = useBidComparisonStore();
-    if (!currentProject) return null;
-
-    const compCurr = currentProject.comparisonCurrency || "PHP";
 
     const isReferenceDuplicate = React.useMemo(() => {
         if (!currentProject?.rfqReference?.trim()) return false;
@@ -34,7 +31,11 @@ export const ProjectDetailsCard: React.FC = () => {
                 p.rfqReference?.trim().toLowerCase() === ref &&
                 (p.roundNo || 1) === round
         );
-    }, [currentProject?.rfqReference, currentProject?.roundNo, currentProject?.id, projectsList]);
+    }, [currentProject, projectsList]);
+
+    if (!currentProject) return null;
+
+    const compCurr = currentProject.comparisonCurrency || "PHP";
 
     const isSaveErrorConflict = Boolean(
         saveError && (saveError.toLowerCase().includes("reference") || saveError.toLowerCase().includes("unique"))
