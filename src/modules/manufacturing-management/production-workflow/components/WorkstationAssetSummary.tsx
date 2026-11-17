@@ -74,6 +74,8 @@ export function WorkstationAssetSummary({
                     {assetName || code || "No asset linked"}
                     {asset?.serial ? ` · ${asset.serial}` : ""}
                 </div>
+                {!asset?.id ? <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-400">No machine linked</p>
+                    : asset.asset_type && asset.asset_type !== "Production" ? <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-400">Linked asset is not Production ({asset.asset_type})</p> : null}
                 <Badge variant="outline" className={`mt-1 h-5 max-w-full truncate px-1.5 text-[9px] font-bold ${conditionClass(condition)}`}>
                     {condition}
                 </Badge>

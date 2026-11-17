@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
     calculateMaterialConsumptionDefaults,
     calculateWipTopUpShortfall,
+    materialConsumptionShortfalls,
     distributeConsumptionAcrossReservations,
     parseMaterialConsumptionInput,
     preserveExistingActualQuantities,
@@ -55,12 +56,12 @@ const shortageReservations = calculateMaterialConsumptionDefaults([
     { jo_material_id: 2, allocated_quantity: 100, available_stock: 60 }
 ], 10, 11);
 assert.deepEqual(shortageReservations, [
-    { theoreticalQuantity: 44, actualQuantity: "40.000000" },
-    { theoreticalQuantity: 66, actualQuantity: "60.000000" }
+    { theoreticalQuantity: 44, actualQuantity: "44.000000" },
+    { theoreticalQuantity: 66, actualQuantity: "66.000000" }
 ]);
 assert.equal(
     shortageReservations.reduce((sum, line) => sum + Number(line.actualQuantity), 0),
-    100
+    110
 );
 
 const topUpConsumption = distributeConsumptionAcrossReservations(30.15, [
@@ -93,7 +94,7 @@ const exactShortfallBeforeTopUp = calculateMaterialConsumptionDefaults([
     { jo_material_id: 20, allocated_quantity: 3.342181818, available_stock: 2.828 }
 ], 10, 11);
 assert.equal(exactShortfallBeforeTopUp[0].theoreticalQuantity, 3.6764);
-assert.equal(exactShortfallBeforeTopUp[0].actualQuantity, "2.828000");
+assert.equal(exactShortfallBeforeTopUp[0].actualQuantity, "3.676400");
 assert.equal(Number((exactShortfallBeforeTopUp[0].theoreticalQuantity - 2.828).toFixed(6)), 0.8484);
 
 const exactConsumptionAfterTopUp = calculateMaterialConsumptionDefaults([
@@ -110,8 +111,8 @@ const requiredQuantityFallback = calculateMaterialConsumptionDefaults([
     { jo_material_id: 3, required_quantity: 50, issued_to_wip_quantity: 6, available_stock: 0 }
 ], 10, 10);
 assert.deepEqual(requiredQuantityFallback, [
-    { theoreticalQuantity: 20, actualQuantity: "0.000000" },
-    { theoreticalQuantity: 30, actualQuantity: "0.000000" }
+    { theoreticalQuantity: 20, actualQuantity: "20.000000" },
+    { theoreticalQuantity: 30, actualQuantity: "30.000000" }
 ]);
 
 const zeroOutput = calculateMaterialConsumptionDefaults([
@@ -121,4 +122,31 @@ assert.deepEqual(zeroOutput, [
     { theoreticalQuantity: 0, actualQuantity: "0.000000" }
 ]);
 
+
+
+assert.deepEqual(materialConsumptionShortfalls(120,120,100), {actualShortfall:20,theoreticalShortfall:20,topUpShortfall:20});
+assert.deepEqual(materialConsumptionShortfalls(90,120,100), {actualShortfall:0,theoreticalShortfall:20,topUpShortfall:20});
+assert.deepEqual(materialConsumptionShortfalls(110,120,100), {actualShortfall:10,theoreticalShortfall:20,topUpShortfall:10});
+assert.deepEqual(materialConsumptionShortfalls(130,120,100), {actualShortfall:30,theoreticalShortfall:20,topUpShortfall:30});
+assert.deepEqual(materialConsumptionShortfalls(100,100,100), {actualShortfall:0,theoreticalShortfall:0,topUpShortfall:0});
+assert.equal(materialConsumptionShortfalls(0.000002,0.000002,0.000001).topUpShortfall,0.000001);
+
+// The over-target default is demand, not an inventory allocation.
+const overTarget = calculateMaterialConsumptionDefaults([{jo_material_id: 1, allocated_quantity:100, available_stock:100}],100,120);
+assert.equal(overTarget[0].actualQuantity,"120.000000");
+const partial = distributeConsumptionAcrossReservations(Number(overTarget[0].actualQuantity),[
+    {reservationKey:"1:10",availableStock:100}, {reservationKey:"1:11",availableStock:10}
+]);
+assert.equal(partial.remainingQuantity,10);
+assert.equal(partial.allocations.reduce((sum,row)=>sum+Number(row.actualQuantity),0)+partial.remainingQuantity,120);
+assert.equal(distributeConsumptionAcrossReservations(120,[
+    {reservationKey:"1:10",availableStock:100}, {reservationKey:"1:11",availableStock:20}
+]).remainingQuantity,0);
+// Output changes update untouched defaults, while actual measurements stay intact.
+const refreshed = calculateMaterialConsumptionDefaults([{jo_material_id:1,allocated_quantity:100,available_stock:100}],100,130);
+assert.equal(refreshed[0].actualQuantity,"130.000000");
+assert.equal(preserveExistingActualQuantities([
+    {jo_material_id:1,reservation_id:10,actual_qty:refreshed[0].actualQuantity}
+],[{jo_material_id:1,reservation_id:10,actual_qty:"90"}],new Set(["1:10"]))[0].actual_qty,"90");
+assert.equal(calculateMaterialConsumptionDefaults([{jo_material_id:1,allocated_quantity:100,available_stock:100}],0,120)[0].actualQuantity,"0.000000");
 console.log("material-consumption assertions passed");

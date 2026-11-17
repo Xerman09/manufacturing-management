@@ -24,6 +24,7 @@ import {
 } from "../../job-orders/_operator-assignment-service";
 import {
     MachineDowntimeReportError,
+    assertWorkstationBreakdownEligible,
     recordWorkstationBreakdownMaintenance
 } from "../../reports/machine-downtime-report/_service";
 
@@ -478,6 +479,8 @@ export async function handlePATCH(request: Request) {
 
             const productionResponse = await productionMutationResponse(parsedJobOrderId);
             if (productionResponse) return productionResponse;
+
+            await assertWorkstationBreakdownEligible({ jobOrderId: parsedJobOrderId, routeId: parsedRouteId });
 
             for (const evidenceImage of breakdownEvidenceImages) {
                 uploadedBreakdownEvidenceImageIds.push(await uploadJobOrderWorkflowEvidence(
