@@ -119,6 +119,7 @@ export interface BidAttachment {
     uploadedAt?: string;
     fileUrl?: string;
     dataUrl?: string;
+    rawText?: string;
 }
 
 export interface SupplierBid {

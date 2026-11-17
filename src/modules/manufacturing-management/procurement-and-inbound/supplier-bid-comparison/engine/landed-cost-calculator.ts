@@ -647,7 +647,7 @@ export function calculateSupplierLandedCost(
     // Check pass/fail requirements explicitly by criterion name
     const passFailCriteria = (project.qualityCriteria || []).filter((c) => c.criterionType === "PASS_FAIL");
     for (const crit of passFailCriteria) {
-        const evalResult = bid.scores?.[crit.id];
+        const evalResult = bid.scores?.[crit.id] || (crit.dbId ? bid.scores?.[String(crit.dbId)] : undefined);
         if (!evalResult || evalResult.passFailResult === "NOT_CHECKED") {
             warnings.push(`Mandatory requirement pending evaluation: "${crit.criterionName}"`);
         } else if (evalResult.passFailResult === "FAIL") {
@@ -666,7 +666,7 @@ export function calculateSupplierLandedCost(
 
     for (const crit of project.qualityCriteria || []) {
         if (crit.criterionType === "SCORED") {
-            const scoreObj = bid.scores?.[crit.id];
+            const scoreObj = bid.scores?.[crit.id] || (crit.dbId ? bid.scores?.[String(crit.dbId)] : undefined);
             if (scoreObj && typeof scoreObj.score === "number" && scoreObj.score >= 1) {
                 totalScoreWeight += crit.weightPct;
                 weightedScoreSum += crit.weightPct * (scoreObj.score / 5);

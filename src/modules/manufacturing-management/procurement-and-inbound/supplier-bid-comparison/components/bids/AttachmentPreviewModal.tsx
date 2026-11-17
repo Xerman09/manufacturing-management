@@ -18,8 +18,11 @@ import {
     FileText,
     Image as ImageIcon,
     File,
+    FileCode,
+    Loader2,
     X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { BidAttachment } from "../../types";
 
 interface AttachmentPreviewModalProps {
@@ -67,12 +70,83 @@ const AttachmentPreviewContent: React.FC<AttachmentPreviewContentProps> = ({
         /\.pdf$/i.test(attachment.fileName)
     );
 
+    const isHtml = Boolean(
+        attachment.mimeType?.includes("html") ||
+        /\.html?$/i.test(attachment.fileName)
+    );
+
+    const isJson = Boolean(
+        attachment.mimeType?.includes("json") ||
+        /\.json$/i.test(attachment.fileName)
+    );
+
+    const isText = Boolean(
+        attachment.mimeType?.startsWith("text/") ||
+        /\.(txt|csv|log|md|xml|yml|yaml)$/i.test(attachment.fileName)
+    );
+
     const fileSource =
         attachment.dataUrl ||
         attachment.fileUrl ||
-        (attachment.directusFileId && attachment.directusFileId.length === 36
-            ? `/api/manufacturing/procurement-and-inbound/supplier-bid-comparison/attachments?fileId=${attachment.directusFileId}`
+        (attachment.directusFileId && !attachment.directusFileId.startsWith("local-")
+            ? `/api/manufacturing/procurement-and-inbound/supplier-bid-comparison/attachments?fileId=${attachment.directusFileId}&fileName=${encodeURIComponent(attachment.fileName)}`
             : "");
+
+    const [textContent, setTextContent] = useState<string | null>(null);
+    const [isLoadingText, setIsLoadingText] = useState<boolean>(false);
+    const [textError, setTextError] = useState<string | null>(null);
+
+    React.useEffect(() => {
+        if (attachment.rawText) {
+            if (isJson) {
+                try {
+                    const parsed = JSON.parse(attachment.rawText);
+                    setTextContent(JSON.stringify(parsed, null, 2));
+                } catch {
+                    setTextContent(attachment.rawText);
+                }
+            } else {
+                setTextContent(attachment.rawText);
+            }
+            setIsLoadingText(false);
+            setTextError(null);
+            return;
+        }
+
+        if (!fileSource || (!isJson && !isText)) return;
+        let isMounted = true;
+        setIsLoadingText(true);
+        setTextError(null);
+
+        fetch(fileSource)
+            .then(async (res) => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.text();
+            })
+            .then((text) => {
+                if (!isMounted) return;
+                if (isJson) {
+                    try {
+                        const parsed = JSON.parse(text);
+                        setTextContent(JSON.stringify(parsed, null, 2));
+                    } catch {
+                        setTextContent(text);
+                    }
+                } else {
+                    setTextContent(text);
+                }
+            })
+            .catch((err) => {
+                if (isMounted) setTextError(err.message || "Failed to load document content");
+            })
+            .finally(() => {
+                if (isMounted) setIsLoadingText(false);
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [fileSource, isJson, isText, attachment.rawText]);
 
     // Zoom Controls
     const handleZoomIn = () => setScale((prev) => Math.min(Number((prev + 0.25).toFixed(3)), 5));
@@ -124,13 +198,28 @@ const AttachmentPreviewContent: React.FC<AttachmentPreviewContentProps> = ({
     };
 
     const handleDownload = () => {
-        if (!fileSource) return;
+        let downloadUrl = "";
+        let isBlobUrl = false;
+        if (attachment.rawText) {
+            downloadUrl = URL.createObjectURL(
+                new Blob([attachment.rawText], { type: attachment.mimeType || "text/plain;charset=utf-8" })
+            );
+            isBlobUrl = true;
+        } else if (fileSource) {
+            downloadUrl = fileSource.startsWith("data:") || fileSource.startsWith("blob:")
+                ? fileSource
+                : fileSource + (fileSource.includes("?") ? "&download=true" : "?download=true");
+        }
+        if (!downloadUrl) return;
         const a = document.createElement("a");
-        a.href = fileSource;
+        a.href = downloadUrl;
         a.download = attachment.fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        if (isBlobUrl) {
+            setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+        }
     };
 
     // Normalized visual angle for the angle badge: (cum % 360 + 360) % 360
@@ -150,6 +239,8 @@ const AttachmentPreviewContent: React.FC<AttachmentPreviewContentProps> = ({
                             <ImageIcon className="w-4 h-4 text-emerald-600 shrink-0" />
                         ) : isPdf ? (
                             <FileText className="w-4 h-4 text-red-600 shrink-0" />
+                        ) : isHtml || isJson || isText ? (
+                            <FileCode className="w-4 h-4 text-blue-600 shrink-0" />
                         ) : (
                             <File className="w-4 h-4 text-primary shrink-0" />
                         )}
@@ -310,6 +401,72 @@ const AttachmentPreviewContent: React.FC<AttachmentPreviewContentProps> = ({
                                 </Button>
                             </div>
                         )
+                    ) : isHtml ? (
+                        attachment.rawText ? (
+                            <iframe
+                                srcDoc={attachment.rawText}
+                                title={attachment.fileName}
+                                sandbox="allow-same-origin allow-scripts"
+                                className="w-full h-full rounded border-0 bg-white"
+                            />
+                        ) : fileSource ? (
+                            <iframe
+                                src={fileSource}
+                                title={attachment.fileName}
+                                sandbox="allow-same-origin allow-scripts"
+                                className="w-full h-full rounded border-0 bg-white"
+                            />
+                        ) : (
+                            <div className="text-center text-muted-foreground p-8 space-y-3">
+                                <FileCode className="w-12 h-12 mx-auto text-blue-400 opacity-80" />
+                                <p className="text-sm text-neutral-200">HTML Document: {attachment.fileName}</p>
+                                <Button size="sm" onClick={handleDownload} className="gap-1.5">
+                                    <Download className="w-4 h-4" /> Download to Open
+                                </Button>
+                            </div>
+                        )
+                    ) : isJson || isText ? (
+                        <div className="w-full h-full p-4 flex flex-col bg-slate-950 text-slate-100 rounded overflow-hidden">
+                            <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-xs text-slate-400">
+                                <span className="font-medium text-slate-300">
+                                    {isJson ? "JSON Document Preview" : "Text Document Preview"}
+                                </span>
+                                {textContent && (
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(textContent);
+                                            toast.success("Copied to clipboard");
+                                        }}
+                                        className="h-6 text-[11px] px-2 text-slate-300 hover:text-white hover:bg-slate-800"
+                                    >
+                                        Copy Content
+                                    </Button>
+                                )}
+                            </div>
+                            <div className="flex-1 overflow-auto pt-3">
+                                {isLoadingText ? (
+                                    <div className="flex items-center justify-center h-full text-slate-400 text-xs gap-2">
+                                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                                        <span>Loading document content...</span>
+                                    </div>
+                                ) : textError ? (
+                                    <div className="p-4 text-center text-rose-400 text-xs space-y-2">
+                                        <p>{textError}</p>
+                                        {fileSource && (
+                                            <Button size="sm" onClick={handleDownload} className="gap-1.5">
+                                                <Download className="w-4 h-4" /> Download File
+                                            </Button>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <pre className="font-mono text-xs whitespace-pre leading-relaxed select-text font-normal text-emerald-400 dark:text-emerald-300">
+                                        {textContent}
+                                    </pre>
+                                )}
+                            </div>
+                        </div>
                     ) : (
                         <div className="text-center text-muted-foreground p-8 space-y-3">
                             <File className="w-12 h-12 mx-auto text-primary opacity-80" />
