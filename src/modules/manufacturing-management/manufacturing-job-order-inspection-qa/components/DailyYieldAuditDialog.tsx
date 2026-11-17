@@ -107,6 +107,8 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
     const shiftName = displayShiftName || yieldRecord?.shiftName || "Shift not specified";
     const parsedAcceptedOutputQuantity = parseQAOutputQuantity(controller.dailyAcceptedOutputQuantity);
     const parsedRejectedOutputQuantity = parseQAOutputQuantity(controller.dailyRejectedOutputQuantity);
+    const acceptedCountError = parsedAcceptedOutputQuantity === null ? "Enter the inspected accepted quantity, including 0 when none." : null;
+    const rejectedCountError = parsedRejectedOutputQuantity === null ? "Enter the inspected rejected quantity, including 0 when none." : null;
     const acceptedOutputQuantity = parsedAcceptedOutputQuantity ?? 0;
     const rejectedOutputQuantity = parsedRejectedOutputQuantity ?? 0;
     const loggedOutputQuantity = sumQAOutputQuantities(
@@ -813,18 +815,20 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                         <Input
                                             id="daily-yield-accepted-quantity"
                                             type="number"
+                                            placeholder="Enter inspected quantity"
                                             min="0"
                                             step="0.000001"
                                             value={controller.dailyAcceptedOutputQuantity}
                                             onChange={(event) => controller.setDailyAcceptedOutputQuantity(event.target.value)}
                                             className={`h-9 rounded-lg bg-background text-foreground text-xs font-mono ${quantityAllocationError ? "border-destructive focus-visible:ring-destructive" : "border-border/80"}`}
-                                            aria-invalid={Boolean(quantityAllocationError)}
-                                            aria-describedby={quantityAllocationError ? "daily-yield-output-allocation-error" : undefined}
+                                            aria-invalid={Boolean(quantityAllocationError || acceptedCountError)}
+                                            aria-describedby={acceptedCountError ? "qa-accepted-count-error" : quantityAllocationError ? "daily-yield-output-allocation-error" : undefined}
                                             disabled={controller.actionLoading || isVerified || !hasOutput}
                                             required={hasOutput}
                                         />
+                                        {!isVerified && acceptedCountError && <p id="qa-accepted-count-error" role="alert" className="text-xs text-destructive">{acceptedCountError}</p>}
                                         <p className="text-[10px] text-muted-foreground">
-                                            Job Order production: {numericText(details?.totalProducedQuantity)} {details?.productUom || "units"}. Available for this audit: {numericText(yieldRecord?.qaAllocationLimit)} {details?.productUom || "units"}. Operator logged: {numericText(loggedOutputQuantity)}.
+                                            Enter quantities verified during this inspection. Operator-reported quantities are shown for reference. Job Order production: {numericText(details?.totalProducedQuantity)} {details?.productUom || "units"}. Available for this audit: {numericText(yieldRecord?.qaAllocationLimit)} {details?.productUom || "units"}. Operator logged: {numericText(loggedOutputQuantity)}.
                                         </p>
                                     </div>
 
@@ -938,16 +942,18 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                             <Input
                                                 id="daily-yield-rejected-output-quantity"
                                                 type="number"
+                                            placeholder="Enter inspected quantity"
                                                 min="0"
                                                 step="0.000001"
                                                 value={controller.dailyRejectedOutputQuantity}
                                                 onChange={(event) => controller.setDailyRejectedOutputQuantity(event.target.value)}
                                                 className={`h-9 rounded-lg bg-background text-foreground text-xs font-mono ${quantityAllocationError ? "border-destructive focus-visible:ring-destructive" : "border-rose-500/30"}`}
-                                                aria-invalid={Boolean(quantityAllocationError)}
-                                                aria-describedby={quantityAllocationError ? "daily-yield-output-allocation-error" : undefined}
-                                                disabled={controller.actionLoading || isVerified || rejectedOutputRegistered || !hasOutput}
+                                                aria-invalid={Boolean(quantityAllocationError || rejectedCountError)}
+                                                aria-describedby={rejectedCountError ? "qa-rejected-count-error" : quantityAllocationError ? "daily-yield-output-allocation-error" : undefined}
+                                                disabled={controller.actionLoading || isVerified || !hasOutput}
                                                 required={hasOutput}
                                             />
+                                        {!isVerified && rejectedCountError && <p id="qa-rejected-count-error" role="alert" className="text-xs text-destructive">{rejectedCountError}</p>}
                                         </div>
 
                                         {hasAllocationVariance && auditedOutputQuantity !== null && (
@@ -977,7 +983,7 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                                             <div className="space-y-1">
                                                                 <Label htmlFor={"rejected-allocation-quantity-" + allocation.allocationKey} className="text-muted-foreground font-medium text-[11px]">Allocation Quantity <span className="text-destructive">*</span></Label>
-                                                                <Input id={"rejected-allocation-quantity-" + allocation.allocationKey} type="number" min="0" step="0.000001" value={allocation.quantity} onChange={(event) => controller.updateRejectedAllocation(allocation.allocationKey, "quantity", event.target.value)} className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs font-mono" disabled={rejectedOutputLocked || isVerified} required />
+                                                                <Input id={"rejected-allocation-quantity-" + allocation.allocationKey} type="number" min="0" step="0.000001" value={allocation.quantity} onChange={(event) => controller.updateRejectedAllocation(allocation.allocationKey, "quantity", event.target.value)} className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs font-mono" disabled={controller.actionLoading || isVerified} required />
                                                             </div>
                                                             <div className="space-y-1">
                                                                 <Label htmlFor={"rejected-allocation-batch-" + allocation.allocationKey} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Tag className="h-3.5 w-3.5 text-rose-500" /> Rejected Batch / Lot No <span className="text-destructive">*</span></Label>
@@ -1153,7 +1159,7 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                     <DialogFooter className="shrink-0 pt-3 mt-1 border-t border-border gap-2 flex items-center justify-end bg-background">
                         <Button type="button" variant="outline" onClick={controller.closeAudit} disabled={controller.actionLoading} title={controller.actionLoading ? "Wait for the save to finish or time out." : undefined} className="border-border hover:bg-muted text-foreground min-h-10 text-xs font-semibold">{isVerified ? "Close" : "Cancel"}</Button>
                         {!isVerified && (
-                            <Button type="submit" disabled={controller.actionLoading || controller.referenceLoading || controller.saveOutcomeUnclear || Boolean(labDispositionError)} title={labDispositionError || (controller.referenceLoading ? "Wait for the audit reference data to finish loading." : controller.saveOutcomeUnclear ? "Close and reopen this yield to check its latest saved status before retrying." : undefined)} className="bg-primary hover:bg-primary/95 text-white font-bold min-h-10 text-xs px-4">
+                            <Button type="submit" disabled={controller.actionLoading || controller.referenceLoading || controller.saveOutcomeUnclear || Boolean(labDispositionError) || Boolean(acceptedCountError) || Boolean(rejectedCountError)} title={labDispositionError || (controller.referenceLoading ? "Wait for the audit reference data to finish loading." : controller.saveOutcomeUnclear ? "Close and reopen this yield to check its latest saved status before retrying." : undefined)} className="bg-primary hover:bg-primary/95 text-white font-bold min-h-10 text-xs px-4">
                                 {controller.actionLoading ? (
                                     <span role="status" className="inline-flex items-center gap-2">
                                         <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

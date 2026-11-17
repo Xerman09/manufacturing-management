@@ -42,6 +42,7 @@ import {
 import {
     calculateQAOutputAllocationCapacity,
     parseQAOutputQuantity,
+    explicitQAOutputAllocation,
     qaOutputAllocationCapacityErrorMessage,
     qaOutputAllocationWithinCapacity,
     sumQAOutputQuantities,
@@ -236,18 +237,12 @@ async function validateActiveRejectionReasons(rows: DailyQAOutputAllocation[], s
     }
 }
 
-function normalizeQAOutputAllocation(body: Record<string, any>, ledger: Record<string, any>): QAOutputAllocation {
-    const loggedRejectedQuantity = sumQAOutputQuantities(ledger.rejected_quantity, ledger.scrap_quantity);
-    const acceptedQuantity = parseQAOutputQuantity(
-        body?.acceptedQuantity ?? ledger.qa_accepted_quantity ?? ledger.yield_quantity ?? 0
-    );
-    const rejectedQuantity = parseQAOutputQuantity(
-        body?.rejectedQuantity ?? ledger.qa_rejected_quantity ?? loggedRejectedQuantity ?? 0
-    );
-    if (acceptedQuantity === null || rejectedQuantity === null) {
-        throw new DailyQAValidationError(422, "INVALID_QA_OUTPUT_QUANTITY", "Accepted and rejected quantities must be nonnegative numbers with no more than six decimal places.");
+function normalizeQAOutputAllocation(body: Record<string, any>): QAOutputAllocation {
+    const allocation = explicitQAOutputAllocation(body);
+    if (!allocation) {
+        throw new DailyQAValidationError(422, "INVALID_QA_OUTPUT_QUANTITY", "Enter both inspected accepted and rejected quantities, including 0 when none, with no more than six decimal places.");
     }
-    return { acceptedQuantity, rejectedQuantity };
+    return allocation;
 }
 
 function productUomValue(jobOrder: Record<string, any>): string {
@@ -1040,7 +1035,7 @@ async function registerRejectedOutputOnly(body: Record<string, any>, signal: Abo
         ),
         loadQAOutputAllocationCapacity(jobOrderId, ledgerId, signal)
     ]);
-    const allocation = normalizeQAOutputAllocation(body, ledger);
+    const allocation = normalizeQAOutputAllocation(body);
     validateQAOutputAllocationCapacity(allocation, capacity, jobOrder);
     const rejectedQuantity = allocation.rejectedQuantity;
     if (!(rejectedQuantity > 0)) {
@@ -1516,7 +1511,7 @@ export async function POST(request: Request) {
         ]);
         const productId = relationId(jobOrder.product_id, ["product_id", "id"]);
         const branchId = relationId(jobOrder.branch_id, ["branch_id", "id"]);
-        const outputAllocation = normalizeQAOutputAllocation(isEnvelope ? body : {}, ledger);
+        const outputAllocation = normalizeQAOutputAllocation(isEnvelope ? body : {});
         validateQAOutputAllocationCapacity(outputAllocation, capacity, jobOrder);
         const goodOutputQuantity = outputAllocation.acceptedQuantity;
         const rejectedOutputQuantity = outputAllocation.rejectedQuantity;

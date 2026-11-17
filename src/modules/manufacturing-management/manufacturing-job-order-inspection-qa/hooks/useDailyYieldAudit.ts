@@ -18,6 +18,7 @@ import { fetchJobOrderOperatorSnapshot, fetchUsersList } from "../../production-
 import { fetchJobOrderDailyYieldDetails, revokeJobOrderYieldAudit } from "../services/job-order-inspection-qa-api";
 import {
     parseQAOutputQuantity,
+    initialQAInspectionCounts,
     qaOutputAllocationCapacityErrorMessage,
     qaOutputAllocationWithinCapacity,
     sumQAOutputQuantities
@@ -611,8 +612,9 @@ export function useDailyYieldAudit({ onSaved, inspectorName }: UseDailyYieldAudi
         setSavedLabStatus(restoredLabStatus);
         setDailyActionTaken(restoredAction || "Released");
         setDailyRemarks("");
-        setDailyAcceptedOutputQuantity(String(yieldRecord.qaAcceptedQuantity ?? yieldRecord.goodQuantity));
-        setDailyRejectedOutputQuantity(String(yieldRecord.qaRejectedQuantity ?? (yieldRecord.rejectedQuantity + yieldRecord.scrapQuantity)));
+        const initialCounts = initialQAInspectionCounts(yieldRecord.qaStatus === "Passed", yieldRecord.qaAcceptedQuantity ?? yieldRecord.goodQuantity, yieldRecord.qaRejectedQuantity ?? (yieldRecord.rejectedQuantity + yieldRecord.scrapQuantity));
+        setDailyAcceptedOutputQuantity(initialCounts.accepted);
+        setDailyRejectedOutputQuantity(initialCounts.rejected);
         setAcceptedEvidenceFiles([]);
         setAcceptedEvidenceError(null);
         setRejectedEvidenceFiles([]);
@@ -625,7 +627,7 @@ export function useDailyYieldAudit({ onSaved, inspectorName }: UseDailyYieldAudi
                 : ""
         );
         const acceptedRows = allocationDrafts(yieldRecord.acceptedAllocations, {
-            quantity: String(yieldRecord.qaAcceptedQuantity ?? yieldRecord.goodQuantity),
+            quantity: initialCounts.accepted,
             mmLotId: yieldRecord.mmLotId ? String(yieldRecord.mmLotId) : "",
             lotName: yieldRecord.lotName || "",
             batchNo: yieldRecord.batchNo || "",
@@ -633,6 +635,7 @@ export function useDailyYieldAudit({ onSaved, inspectorName }: UseDailyYieldAudi
             expiryDate: outputExpiryDate,
             rejectionReasonId: ""
         });
+        if (yieldRecord.qaStatus !== "Passed") acceptedRows.forEach(row => { row.quantity = ""; });
         setAcceptedOutputAllocations(acceptedRows);
         setDailyOutputEligibleLots([]);
         setDailyOutputLotsLoading(false);
@@ -645,7 +648,7 @@ export function useDailyYieldAudit({ onSaved, inspectorName }: UseDailyYieldAudi
                 : yieldRecord.expiryDate || ""
         );
         const rejectedRows = allocationDrafts(yieldRecord.rejectedAllocations, {
-            quantity: String(yieldRecord.qaRejectedQuantity ?? (yieldRecord.rejectedQuantity + yieldRecord.scrapQuantity)),
+            quantity: initialCounts.rejected,
             mmLotId: yieldRecord.rejectedMmLotId ? String(yieldRecord.rejectedMmLotId) : "",
             lotName: yieldRecord.rejectedLotName || "",
             batchNo: yieldRecord.rejectedBatchNo || "",
@@ -653,6 +656,7 @@ export function useDailyYieldAudit({ onSaved, inspectorName }: UseDailyYieldAudi
             expiryDate: rejectedOutputExpiryDate,
             rejectionReasonId: ""
         });
+        if (yieldRecord.qaStatus !== "Passed") rejectedRows.forEach(row => { row.quantity = ""; });
         setRejectedOutputAllocations(rejectedRows);
         setDailyRejectedOutputEligibleLots([]);
         setDailyRejectedOutputLotsLoading(false);
@@ -676,14 +680,9 @@ export function useDailyYieldAudit({ onSaved, inspectorName }: UseDailyYieldAudi
         rejectedLotRequestId.current += 1;
         setIsOpen(true);
         void loadAuditReferences(details);
-        const editable = yieldRecord.qaStatus !== "Passed";
-        const acceptedQuantity = Number(yieldRecord.qaAcceptedQuantity ?? yieldRecord.goodQuantity);
-        const rejectedQuantity = Number(yieldRecord.qaRejectedQuantity ?? (yieldRecord.rejectedQuantity + yieldRecord.scrapQuantity));
-        if (editable && acceptedQuantity > 0) void loadOutputLots(details, acceptedRows);
-        if (editable && rejectedQuantity > 0 && !yieldRecord.rejectedMmLotId) void loadRejectedOutputLots(details, rejectedRows);
         void loadRouteOperators(Number(details.jobOrderId), sortedRoutes.map((route) => route.id));
         void loadInspectorNames();
-    }, [loadAuditReferences, loadOutputLots, loadRejectedOutputLots, loadRouteOperators, loadInspectorNames]);
+    }, [loadAuditReferences, loadRouteOperators, loadInspectorNames]);
 
     const closeAudit = useCallback(() => {
         if (actionLoading) return;
