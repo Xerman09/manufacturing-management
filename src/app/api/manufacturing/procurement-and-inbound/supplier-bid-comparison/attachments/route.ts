@@ -94,14 +94,43 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        const contentType = res.headers.get("content-type") || "application/octet-stream";
-        const contentDisposition = res.headers.get("content-disposition") || `inline; filename="${fileId}"`;
+        const isDownload = searchParams.get("download") === "true";
+        const customFileName = searchParams.get("fileName");
+
+        const rawDisposition = res.headers.get("content-disposition") || "";
+        const filenameMatch = rawDisposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]+)["']?/i);
+        let filename = customFileName || (filenameMatch ? decodeURIComponent(filenameMatch[1]) : fileId);
+        // Clean filename of potential invalid characters
+        filename = filename.replace(/[/\\]/g, "_");
+
+        let contentType = res.headers.get("content-type") || "application/octet-stream";
+        const lowerName = filename.toLowerCase();
+
+        // Ensure proper MIME type for inline preview if Directus returned generic octet-stream
+        if (contentType.includes("octet-stream") || !contentType || contentType === "application/download") {
+            if (lowerName.endsWith(".pdf")) contentType = "application/pdf";
+            else if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) contentType = "image/jpeg";
+            else if (lowerName.endsWith(".png")) contentType = "image/png";
+            else if (lowerName.endsWith(".webp")) contentType = "image/webp";
+            else if (lowerName.endsWith(".gif")) contentType = "image/gif";
+            else if (lowerName.endsWith(".svg")) contentType = "image/svg+xml";
+            else if (lowerName.endsWith(".html") || lowerName.endsWith(".htm")) contentType = "text/html; charset=utf-8";
+            else if (lowerName.endsWith(".json")) contentType = "application/json; charset=utf-8";
+            else if (lowerName.endsWith(".txt") || lowerName.endsWith(".csv") || lowerName.endsWith(".log") || lowerName.endsWith(".md") || lowerName.endsWith(".xml")) {
+                contentType = "text/plain; charset=utf-8";
+            }
+        }
+
+        const contentDisposition = isDownload
+            ? `attachment; filename="${encodeURIComponent(filename)}"`
+            : "inline";
 
         return new NextResponse(res.body, {
             status: 200,
             headers: {
                 "Content-Type": contentType,
                 "Content-Disposition": contentDisposition,
+                "X-Content-Type-Options": "nosniff",
                 "Cache-Control": "public, max-age=3600",
             },
         });

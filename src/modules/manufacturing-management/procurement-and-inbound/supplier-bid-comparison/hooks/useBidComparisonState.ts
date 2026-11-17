@@ -9,6 +9,7 @@ import {
     QualityCriterion,
     SupplierBid,
     ItemQuotation,
+    ItemAward,
     StorageSyncStatus,
 } from "../types";
 import {
@@ -86,10 +87,16 @@ interface BidComparisonState {
         updatedAt?: string;
     }>;
     currentProject: RfqProject | null;
+    isLoadingProject: boolean;
+    switchingToProjectId: string | null;
 
     // Master data
     lookups: MasterLookupData;
     isLoadingLookups: boolean;
+
+    // User session
+    currentUser: { name?: string; email?: string } | null;
+    setCurrentUser: (user: { name?: string; email?: string } | null) => void;
 
     // Actions
     setCurrentStep: (step: number) => void;
@@ -97,7 +104,9 @@ interface BidComparisonState {
     fetchProjects: () => Promise<void>;
     fetchLookups: () => Promise<void>;
     selectProject: (projectId: string) => Promise<void>;
+    clearCurrentProject: () => void;
     createNewProject: (title?: string, ref?: string) => void;
+    importFullProject: (project: RfqProject) => void;
     updateProject: (updater: (prev: RfqProject) => RfqProject, allowWhenLocked?: boolean) => void;
     duplicateProject: (newTitle?: string) => void;
     deleteProject: () => Promise<boolean>;
@@ -108,6 +117,7 @@ interface BidComparisonState {
 
 const LOCAL_STORAGE_KEY_PREFIX = "mm_rfq_project_";
 const LOCAL_STORAGE_INDEX_KEY = "mm_rfq_projects_index";
+export const ACTIVE_PROJECT_ID_KEY = "mm_rfq_active_project_id";
 
 function parseDbId(val: unknown): number | null {
     if (typeof val === "number" && !isNaN(val)) return val;
@@ -224,6 +234,49 @@ let lastSavedContentHash = "";
 const DEBOUNCE_DELAY_MS = 2500;
 const MAX_WAIT_MS = 10000;
 
+function formatUserFriendlySaveError(raw: unknown): string {
+    if (!raw) return "An unexpected error occurred while saving.";
+    const str = typeof raw === "string" ? raw : (raw as Error)?.message || String(raw);
+    let msg = str.replace(/^Directus (PATCH|POST) [a-zA-Z0-9_/-]+ failed:\s*/i, "");
+    if (msg.includes("Incorrect date value")) {
+        if (msg.includes("valid_until")) {
+            return 'Invalid date in bid validity date ("Valid Until"). Please enter a valid 4-digit year (YYYY-MM-DD).';
+        }
+        if (msg.includes("quote_date")) {
+            return 'Invalid quotation date. Please enter a valid 4-digit year (YYYY-MM-DD).';
+        }
+        if (msg.includes("target_date")) {
+            return 'Invalid target delivery date. Please enter a valid 4-digit year (YYYY-MM-DD).';
+        }
+        return 'Incorrect date value detected. Please enter a valid 4-digit year (YYYY-MM-DD).';
+    }
+    if (msg.includes('Invalid Date format in field "valid_until"')) {
+        return 'Invalid date in bid validity date ("Valid Until"). Please enter a valid date (YYYY-MM-DD).';
+    }
+    if (msg.includes('Invalid Date format in field "quote_date"')) {
+        return 'Invalid quotation date format. Please enter a valid date (YYYY-MM-DD).';
+    }
+    if (msg.includes('Invalid Date format in field "target_date"')) {
+        return 'Invalid target delivery date format. Please enter a valid date (YYYY-MM-DD).';
+    }
+    if (msg.includes("uq_rfq_currency")) {
+        return "Duplicate currency code in exchange rates. Each currency code can only be added once.";
+    }
+    if (msg.includes("uq_bid_item")) {
+        return "Duplicate item quotation detected for this supplier.";
+    }
+    if (msg.includes("chk_bid_score_range")) {
+        return "Quality score must be between 1 and 5.";
+    }
+    if (msg.includes('Value in collection "mm_rfq" has to be unique') || msg.includes("uq_rfq_reference_round")) {
+        return 'Reference Number Conflict: The Reference Number entered already exists in the system. Please change the "Reference no." field in Project Details to a unique value.';
+    }
+    if (msg.includes(" - ")) {
+        msg = msg.split(" - ").pop() || msg;
+    }
+    return msg;
+}
+
 export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
     currentStep: 1,
     activeBidId: null,
@@ -239,8 +292,13 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
 
     projectsList: [],
     currentProject: null,
+    isLoadingProject: false,
+    switchingToProjectId: null,
     lookups: { suppliers: [], products: [], units: [], forex: [], evaluations: [] },
     isLoadingLookups: false,
+
+    currentUser: null,
+    setCurrentUser: (user) => set({ currentUser: user }),
 
     setCurrentStep: (step) => set({ currentStep: step }),
     setActiveBidId: (id) => set({ activeBidId: id }),
@@ -308,58 +366,117 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         lastSavedContentHash = "";
         let loadedFromLocal = false;
 
-        // 1. Instant hydration from localStorage if available
+        set({ isLoadingProject: true, switchingToProjectId: projectId });
+
+        // Save active project ID immediately so refresh preserves choice
         if (typeof window !== "undefined") {
-            const saved = localStorage.getItem(LOCAL_STORAGE_KEY_PREFIX + projectId);
-            if (saved) {
-                try {
-                    const parsed: RfqProject = JSON.parse(saved);
-                    set({
-                        currentProject: parsed,
-                        activeBidId: parsed.bids.length > 0 ? parsed.bids[0].id : null,
-                        storageStatus: parsed.status === "Approved" || parsed.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
-                        lastSavedTimestamp: getPhilippineTimestamp(),
-                    });
-                    loadedFromLocal = true;
-                } catch {
-                    // JSON parse error
-                }
+            try {
+                localStorage.setItem(ACTIVE_PROJECT_ID_KEY, projectId);
+            } catch {
+                // Ignore storage error
             }
         }
 
-        // 2. Fetch live project from Directus API
         try {
-            const res = await fetch(`/api/manufacturing/procurement-and-inbound/supplier-bid-comparison?id=${encodeURIComponent(projectId)}`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data.project) {
-                    const proj: RfqProject = data.project;
-                    set({
-                        currentProject: proj,
-                        activeBidId: proj.bids && proj.bids.length > 0 ? proj.bids[0].id : null,
-                        storageStatus: proj.status === "Approved" || proj.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
-                        lastSavedTimestamp: getPhilippineTimestamp(),
-                    });
-
-                    // Sync to localStorage
-                    if (typeof window !== "undefined") {
-                        try {
-                            localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + proj.id, JSON.stringify(proj));
-                        } catch {
-                            // localStorage quota or disabled
-                        }
+            // 1. Instant hydration from localStorage if available
+            if (typeof window !== "undefined") {
+                const saved = localStorage.getItem(LOCAL_STORAGE_KEY_PREFIX + projectId);
+                if (saved) {
+                    try {
+                        const parsed: RfqProject = JSON.parse(saved);
+                        set({
+                            currentProject: parsed,
+                            activeBidId: parsed.bids.length > 0 ? parsed.bids[0].id : null,
+                            storageStatus: parsed.status === "Approved" || parsed.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
+                            lastSavedTimestamp: getPhilippineTimestamp(),
+                        });
+                        loadedFromLocal = true;
+                    } catch {
+                        // JSON parse error
                     }
-                    return;
                 }
             }
-        } catch {
-            // Network failure or offline
-        }
 
-        // 3. Fallback: if not loaded from local and backend failed, create empty project so UI never hangs
-        if (!loadedFromLocal && !get().currentProject) {
-            get().createNewProject();
+            // 2. Fetch live project from Directus API
+            try {
+                const res = await fetch(`/api/manufacturing/procurement-and-inbound/supplier-bid-comparison?id=${encodeURIComponent(projectId)}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.project) {
+                        const proj: RfqProject = data.project;
+
+                        // Guard: If user navigated away to "All RFQs" or switched projects while fetch was in-flight, discard
+                        const currentActiveId = typeof window !== "undefined" ? localStorage.getItem(ACTIVE_PROJECT_ID_KEY) : null;
+                        if (!currentActiveId || currentActiveId !== projectId || get().currentProject === null) {
+                            return;
+                        }
+
+                        set({
+                            currentProject: proj,
+                            activeBidId: proj.bids && proj.bids.length > 0 ? proj.bids[0].id : null,
+                            storageStatus: proj.status === "Approved" || proj.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
+                            lastSavedTimestamp: getPhilippineTimestamp(),
+                        });
+
+                        // Sync to localStorage
+                        if (typeof window !== "undefined") {
+                            try {
+                                localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + proj.id, JSON.stringify(proj));
+                            } catch {
+                                // localStorage quota or disabled
+                            }
+                        }
+                        return;
+                    }
+                }
+            } catch {
+                // Network failure or offline
+            }
+
+            // 3. Fallback: only create project if user is still actively on this project
+            const stillActive = typeof window !== "undefined" ? localStorage.getItem(ACTIVE_PROJECT_ID_KEY) : null;
+            if (!loadedFromLocal && !get().currentProject && stillActive === projectId) {
+                get().createNewProject();
+            }
+        } finally {
+            set({ isLoadingProject: false, switchingToProjectId: null });
         }
+    },
+
+    clearCurrentProject: () => {
+        // Cancel all in-flight and scheduled timers immediately
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
+        if (maxWaitTimer) {
+            clearTimeout(maxWaitTimer);
+            maxWaitTimer = null;
+        }
+        if (localStorageTimer) {
+            clearTimeout(localStorageTimer);
+            localStorageTimer = null;
+        }
+        inFlightSave = null;
+        queuedSaveNeeded = false;
+        lastSavedContentHash = "";
+
+        if (typeof window !== "undefined") {
+            try {
+                localStorage.removeItem(ACTIVE_PROJECT_ID_KEY);
+            } catch {
+                // Ignore storage error
+            }
+        }
+        set({
+            currentProject: null,
+            activeBidId: null,
+            isDirty: false,
+            isLoadingProject: false,
+            switchingToProjectId: null,
+            saveError: null,
+            storageStatus: "SHARED_LIVE",
+        });
     },
 
     createNewProject: (title, ref) => {
@@ -391,6 +508,8 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             currentProject: newProj,
             activeBidId: null,
             currentStep: 1,
+            isLoadingProject: false,
+            switchingToProjectId: null,
             projectsList: updatedList,
             storageStatus: "SHARED_LIVE",
             lastSavedTimestamp: getPhilippineTimestamp(),
@@ -399,9 +518,124 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         if (typeof window !== "undefined") {
             localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + newProj.id, JSON.stringify(newProj));
             localStorage.setItem(LOCAL_STORAGE_INDEX_KEY, JSON.stringify(updatedList));
+            localStorage.setItem(ACTIVE_PROJECT_ID_KEY, newProj.id);
         }
 
         toast.success(`Created project "${newProj.rfqTitle}"`);
+    },
+
+    importFullProject: (importedProject: RfqProject) => {
+        lastSavedContentHash = "";
+        const id = "rfq-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+        // Ensure unique reference against projectsList to prevent "Value in collection mm_rfq has to be unique"
+        let safeRef = (importedProject.rfqReference || `RFQ-${Date.now().toString().slice(-6)}`).trim();
+        const baseRef = safeRef;
+        let attempt = 1;
+        while (
+            get().projectsList.some((p) => p.rfqReference?.toLowerCase().trim() === safeRef.toLowerCase().trim()) &&
+            attempt <= 20
+        ) {
+            attempt++;
+            safeRef = `${baseRef}-COPY${attempt > 2 ? `-${attempt}` : ""}`;
+        }
+
+        // Strip dbId from items so they become fresh rows in Directus
+        const cleanItems: RequestedItem[] = (importedProject.items || []).map((it) => ({
+            ...it,
+            dbId: undefined,
+        }));
+
+        // Strip dbId from quality criteria
+        const cleanQualityCriteria: QualityCriterion[] = (importedProject.qualityCriteria || []).map((qc) => ({
+            ...qc,
+            dbId: undefined,
+        }));
+
+        // Strip dbId from bids, quotations, price breaks; keep quality scores and attachments intact
+        const cleanBids: SupplierBid[] = (importedProject.bids || []).map((b) => {
+            const cleanQuotes: Record<string, ItemQuotation> = {};
+            if (b.quotations) {
+                Object.entries(b.quotations).forEach(([itemId, q]) => {
+                    cleanQuotes[itemId] = {
+                        ...q,
+                        dbId: undefined,
+                        priceBreaks: (q.priceBreaks || []).map((pb) => ({
+                            ...pb,
+                            dbId: undefined,
+                        })),
+                    };
+                });
+            }
+
+            return {
+                ...b,
+                dbId: undefined,
+                quotations: cleanQuotes,
+                scores: { ...(b.scores || {}) },
+                attachments: [...(b.attachments || [])],
+            };
+        });
+
+        // Strip dbId from awards
+        const cleanAwards: ItemAward[] = (importedProject.awards || []).map((a) => ({
+            ...a,
+            dbId: undefined,
+        }));
+
+        const newProject: RfqProject = {
+            ...importedProject,
+            id,
+            dbId: undefined, // CRITICAL: Reset dbId so saving inserts a new record in mm_rfq!
+            rfqReference: safeRef,
+            status: "Draft", // CRITICAL: Enforce Draft status
+            version: 1,
+            rejectionReason: undefined,
+            approvalRemarks: undefined,
+            items: cleanItems,
+            qualityCriteria: cleanQualityCriteria,
+            bids: cleanBids,
+            awards: cleanAwards,
+            approvalHistory: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+
+        const updatedList = [
+            {
+                id: newProject.id,
+                rfqTitle: newProject.rfqTitle,
+                rfqReference: newProject.rfqReference,
+                status: newProject.status,
+                roundNo: newProject.roundNo || 1,
+                updatedAt: newProject.updatedAt,
+            },
+            ...get().projectsList.filter((p) => p.id !== newProject.id),
+        ];
+
+        set({
+            currentProject: newProject,
+            activeBidId: newProject.bids.length > 0 ? newProject.bids[0].id : null,
+            currentStep: 1,
+            projectsList: updatedList,
+            storageStatus: "SHARED_LIVE",
+            lastSavedTimestamp: getPhilippineTimestamp(),
+            isDirty: true,
+        });
+
+        if (typeof window !== "undefined") {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + newProject.id, JSON.stringify(newProject));
+                localStorage.setItem(LOCAL_STORAGE_INDEX_KEY, JSON.stringify(updatedList));
+                localStorage.setItem(ACTIVE_PROJECT_ID_KEY, newProject.id);
+            } catch {
+                // Storage quota handled safely
+            }
+        }
+
+        toast.success(`Imported project "${newProject.rfqTitle}" (${newProject.bids.length} suppliers) as Draft`);
+        // Trigger save to backend
+        get().saveProjectNow();
     },
 
     updateProject: (updater, allowWhenLocked = false) => {
@@ -555,6 +789,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         if (typeof window !== "undefined") {
             localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + duplicated.id, JSON.stringify(duplicated));
             localStorage.setItem(LOCAL_STORAGE_INDEX_KEY, JSON.stringify(updatedList));
+            localStorage.setItem(ACTIVE_PROJECT_ID_KEY, duplicated.id);
         }
 
         toast.success(`Duplicated as Round ${nextRound}`);
@@ -597,6 +832,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         });
 
         if (typeof window !== "undefined") {
+            localStorage.removeItem(ACTIVE_PROJECT_ID_KEY);
             localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + currentProject.id);
             if (serverDbId) {
                 localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + serverDbId);
@@ -679,48 +915,94 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                 if (res.ok) {
                     const data = await res.json();
                     if (data.backendUnavailable || !data.success) {
+                        const rawErr = data.error || (data.partialFailure ? `Partial failure in ${data.partialFailure.section}: ${data.partialFailure.error}` : "Backend storage currently unavailable");
+                        const errMsg = formatUserFriendlySaveError(rawErr);
+                        toast.error(errMsg);
                         set({
                             isSaving: false,
-                            saveError: data.error || "Backend storage currently unavailable",
+                            saveError: errMsg,
                             storageStatus: "SAVED_LOCAL",
+                            isDirty: true,
+                        });
+                        return;
+                    }
+
+                    if (data.partialFailure) {
+                        const sectionError = formatUserFriendlySaveError(data.partialFailure.error);
+                        toast.error(`Save issue in "${data.partialFailure.section}": ${sectionError}. Retrying automatically.`);
+                        set({
+                            isSaving: false,
+                            saveError: `Save issue in ${data.partialFailure.section}`,
+                            storageStatus: "SAVED_LOCAL",
+                            isDirty: true,
                         });
                         return;
                     }
 
                     // CRITICAL: Always preserve user's in-progress keystrokes and live state
                     const liveProject = get().currentProject;
-                    if (!liveProject) {
+                    const activeKey = typeof window !== "undefined" ? localStorage.getItem(ACTIVE_PROJECT_ID_KEY) : null;
+                    if (!liveProject || !activeKey) {
                         set({ isSaving: false });
                         return;
                     }
 
-                    if (data.project) {
-                        const serverId = String(data.project.id);
-                        const serverDbId = data.project.dbId || (typeof data.project.id === "number" ? data.project.id : undefined);
-                        const oldId = liveProject.id;
+                    const serverId = data.project ? String(data.project.id) : liveProject.id;
+                    const serverDbId = data.project?.dbId || (typeof data.project?.id === "number" ? data.project.id : undefined);
+                    const oldId = liveProject.id;
 
-                        if (serverId !== oldId || (serverDbId && liveProject.dbId !== serverDbId)) {
-                            // Update IDs on the live project without overwriting user's active fields
-                            const updatedProject = {
-                                ...liveProject,
-                                id: serverId,
-                                dbId: serverDbId || liveProject.dbId,
-                            };
+                    // Stamp resolved database IDs for child entities to prevent duplicate rows on next save
+                    const updatedProject = {
+                        ...liveProject,
+                        id: serverId,
+                        dbId: serverDbId || liveProject.dbId,
+                        rfqReference: data.project?.rfqReference || liveProject.rfqReference,
+                    };
 
-                            if (typeof window !== "undefined") {
-                                try {
-                                    localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + oldId);
-                                    localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + serverId, JSON.stringify(updatedProject));
-                                    const updatedList = get().projectsList.map((p) =>
-                                        p.id === oldId ? { ...p, id: serverId } : p
-                                    );
-                                    localStorage.setItem(LOCAL_STORAGE_INDEX_KEY, JSON.stringify(updatedList));
-                                    set({ currentProject: updatedProject, projectsList: updatedList });
-                                } catch {
-                                    // LocalStorage quota error handled safely
-                                }
-                            }
+                    if (data.resolvedIds) {
+                        const { items: itemMap, criteria: critMap, bids: bidMap } = data.resolvedIds as {
+                            items?: Record<string, number>;
+                            criteria?: Record<string, number>;
+                            bids?: Record<string, number>;
+                        };
+
+                        if (itemMap && updatedProject.items) {
+                            updatedProject.items = updatedProject.items.map((it) =>
+                                itemMap[it.id] ? { ...it, dbId: itemMap[it.id] } : it
+                            );
                         }
+                        if (critMap && updatedProject.qualityCriteria) {
+                            updatedProject.qualityCriteria = updatedProject.qualityCriteria.map((qc) =>
+                                critMap[qc.id] ? { ...qc, dbId: critMap[qc.id] } : qc
+                            );
+                        }
+                        if (bidMap && updatedProject.bids) {
+                            updatedProject.bids = updatedProject.bids.map((b) =>
+                                bidMap[b.id] ? { ...b, dbId: bidMap[b.id] } : b
+                            );
+                        }
+                    }
+
+                    if (typeof window !== "undefined") {
+                        try {
+                            if (serverId !== oldId) {
+                                localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + oldId);
+                                localStorage.setItem(ACTIVE_PROJECT_ID_KEY, serverId);
+                            }
+                            localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + serverId, JSON.stringify(updatedProject));
+                            const updatedList = get().projectsList.map((p) =>
+                                p.id === oldId
+                                    ? { ...p, id: serverId, rfqTitle: updatedProject.rfqTitle, rfqReference: updatedProject.rfqReference, status: updatedProject.status, updatedAt: updatedProject.updatedAt }
+                                    : p
+                            );
+                            localStorage.setItem(LOCAL_STORAGE_INDEX_KEY, JSON.stringify(updatedList));
+                            set({ currentProject: updatedProject, projectsList: updatedList });
+                        } catch {
+                            // LocalStorage quota error handled safely
+                            set({ currentProject: updatedProject });
+                        }
+                    } else {
+                        set({ currentProject: updatedProject });
                     }
 
                     // Update fingerprint cache on successful backend persist
@@ -740,9 +1022,12 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                     });
                 } else {
                     const errJson = await res.json().catch(() => null);
+                    const rawError = errJson?.error || `HTTP ${res.status}`;
+                    const userError = formatUserFriendlySaveError(rawError);
+                    toast.error(userError);
                     set({
                         isSaving: false,
-                        saveError: errJson?.error || `HTTP ${res.status}`,
+                        saveError: userError,
                         storageStatus: "SAVED_LOCAL",
                     });
                 }

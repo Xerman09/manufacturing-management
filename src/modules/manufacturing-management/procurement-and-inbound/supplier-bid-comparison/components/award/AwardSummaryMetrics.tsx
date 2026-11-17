@@ -35,10 +35,11 @@ export const AwardSummaryMetrics: React.FC = () => {
 
     for (const award of awards) {
         const itemLandedQuotes: number[] = [];
+        const matchingItem = items.find((it) => it.id === award.rfqItemId || (it.dbId && String(it.dbId) === String(award.rfqItemId)));
         for (const bid of currentProject.bids) {
             const res = summary.results[bid.id];
             if (!res?.isValid) continue;
-            const itemCost = res.items[award.rfqItemId]?.totalLandedCompCurr;
+            const itemCost = res.items[award.rfqItemId]?.totalLandedCompCurr ?? (matchingItem ? res.items[matchingItem.id]?.totalLandedCompCurr : undefined);
             if (typeof itemCost === "number" && itemCost > 0) {
                 itemLandedQuotes.push(itemCost);
             }

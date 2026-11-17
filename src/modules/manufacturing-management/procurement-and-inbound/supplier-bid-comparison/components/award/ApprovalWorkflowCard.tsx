@@ -20,8 +20,9 @@ import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
 import { ApprovalHistoryEntry, ProjectStatus } from "../../types";
 import { toast } from "sonner";
 
+
 export const ApprovalWorkflowCard: React.FC = () => {
-    const { currentProject, updateProject } = useBidComparisonStore();
+    const { currentProject, updateProject, currentUser } = useBidComparisonStore();
     const [actionComment, setActionComment] = useState("");
     const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
     const [rejectionReason, setRejectionReason] = useState("");
@@ -53,12 +54,16 @@ export const ApprovalWorkflowCard: React.FC = () => {
         toStatus: ProjectStatus,
         comment: string
     ) => {
+        const actorName = (currentUser?.name && currentUser.name !== "-")
+            ? currentUser.name
+            : (currentUser?.email || "-");
+
         const newEntry: ApprovalHistoryEntry = {
             id: "hist-" + Date.now(),
             action,
             fromStatus,
             toStatus,
-            actorName: currentProject.preparedBy || "Current User",
+            actorName: actorName || "-",
             comment,
             createdAt: new Date().toISOString(),
         };
@@ -77,13 +82,13 @@ export const ApprovalWorkflowCard: React.FC = () => {
             "SUBMIT",
             "Draft",
             "Submitted",
-            actionComment.trim() || "Submitted for BAC executive approval."
+            actionComment.trim() || ""
         );
 
         updateProject((prev) => ({
             ...prev,
             status: "Submitted",
-            approvalRemarks: actionComment.trim() || "Submitted for BAC executive approval.",
+            approvalRemarks: actionComment.trim() || "",
             approvalHistory: newHistory,
         }));
 
@@ -97,14 +102,14 @@ export const ApprovalWorkflowCard: React.FC = () => {
             "APPROVE",
             "Submitted",
             "Approved",
-            actionComment.trim() || "Award approved by authority."
+            actionComment.trim() || ""
         );
 
         updateProject((prev) => ({
             ...prev,
             status: "Approved",
-            approvalRemarks: actionComment.trim() || "Award approved by authority.",
-            approvedBy: prev.approvedBy || prev.reviewedBy || "Approving Authority",
+            approvalRemarks: actionComment.trim() || "",
+            approvedBy: prev.approvedBy || prev.reviewedBy || "",
             approvalHistory: newHistory,
         }));
 
@@ -198,7 +203,7 @@ export const ApprovalWorkflowCard: React.FC = () => {
                         onChange={(e) => updateProject((prev) => ({ ...prev, justification: e.target.value }))}
                         placeholder="State the commercial and technical reasons for the chosen award (e.g. Lowest total landed cost compliant with specifications; certified ISO 9001)."
                         disabled={status === "Submitted" || status === "Approved"}
-                        className="text-xs resize-none h-20"
+                        className="text-xs resize-none h-40"
                     />
                     <span className="text-[10px] text-muted-foreground block">
                         Mandatory for submission. This statement is permanently printed on the official Abstract of Bids.

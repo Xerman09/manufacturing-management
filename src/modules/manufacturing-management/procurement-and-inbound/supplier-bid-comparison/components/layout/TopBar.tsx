@@ -10,11 +10,13 @@ import {
     Download,
     Upload,
     ChevronDown,
-    FolderKanban,
+ 
     Printer,
     Save,
     Loader2,
     Check,
+    ArrowLeft,
+    AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +46,7 @@ import {
     exportFullProjectTemplate,
 } from "../../engine/excel-export";
 import { StorageStatusPill } from "./StorageStatusPill";
+import { ProjectSelectCombobox } from "../shared/ProjectSelectCombobox";
 import { toast } from "sonner";
  
 interface TopBarProps {
@@ -61,6 +64,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         currentProject,
         projectsList,
         selectProject,
+        clearCurrentProject,
         createNewProject,
         duplicateProject,
         deleteProject,
@@ -69,6 +73,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         isDirty,
         isSaving,
         saveProjectNow,
+        isLoadingProject,
     } = useBidComparisonStore();
 
     // Dialog states
@@ -81,10 +86,22 @@ export const TopBar: React.FC<TopBarProps> = ({
     const [newRef, setNewRef] = useState("");
     const [dupTitle, setDupTitle] = useState("");
 
+    const isNewRefDuplicate = React.useMemo(() => {
+        if (!newRef.trim()) return false;
+        const ref = newRef.trim().toLowerCase();
+        return projectsList.some(
+            (p) => p.rfqReference?.trim().toLowerCase() === ref && (p.roundNo || 1) === 1
+        );
+    }, [newRef, projectsList]);
+
     const handleCreateSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!newTitle.trim()) {
             toast.error("Project title is required");
+            return;
+        }
+        if (isNewRefDuplicate) {
+            toast.error(`Reference number "${newRef.trim()}" is already in use. Please enter a unique reference.`);
             return;
         }
         createNewProject(newTitle.trim(), newRef.trim());
@@ -131,50 +148,47 @@ export const TopBar: React.FC<TopBarProps> = ({
     return (
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-4 py-3 bg-card border-b rounded-t-xl shadow-xs print:hidden">
             {/* Left: Project Selector & Status */}
-            <div className="flex flex-wrap items-center gap-2.5 min-w-0">
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" className="h-8 gap-2 max-w-[280px] sm:max-w-[340px] justify-between">
-                            <FolderKanban className="h-4 w-4 text-primary shrink-0" />
-                            <span className="truncate font-semibold text-xs">
-                                {currentProject?.rfqTitle || "Select Project..."}
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+                {currentProject && (
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            clearCurrentProject();
+                        }}
+                        className="h-8 px-2 text-xs gap-1.5 text-muted-foreground hover:text-foreground font-medium"
+                        title="Return to RFQ Directory"
+                    >
+                        <ArrowLeft className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">All RFQs</span>
+                    </Button>
+                )}
+
+                <ProjectSelectCombobox
+                    projects={projectsList}
+                    currentProjectId={currentProject?.id}
+                    isLoading={isLoadingProject}
+                    onSelectProject={(id) => selectProject(id)}
+                    onOpenNewProjectDialog={() => {
+                        setNewTitle("");
+                        setNewRef("");
+                        setIsNewDialogOpen(true);
+                    }}
+                />
+
+                {currentProject && (
+                    <>
+                        {statusBadge()}
+                        <StorageStatusPill />
+                        {lastSavedTimestamp && (
+                            <span className="text-[11px] text-muted-foreground hidden lg:inline-block">
+                                Edited {lastSavedTimestamp}
                             </span>
-                            <ChevronDown className="h-3.5 w-3.5 opacity-50 shrink-0" />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-[320px] max-h-72 overflow-y-auto">
-                        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                            RFQ Projects ({projectsList.length})
-                        </div>
-                        <DropdownMenuSeparator />
-                        {projectsList.map((p) => (
-                            <DropdownMenuItem
-                                key={p.id}
-                                onClick={() => selectProject(p.id)}
-                                className="flex items-center justify-between py-2 cursor-pointer text-xs"
-                            >
-                                <div className="flex flex-col min-w-0 pr-2">
-                                    <span className="font-medium truncate">{p.rfqTitle}</span>
-                                    <span className="text-[10px] text-muted-foreground truncate">
-                                        {p.rfqReference} {p.roundNo > 1 ? `· Round ${p.roundNo}` : ""}
-                                    </span>
-                                </div>
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted font-mono shrink-0">
-                                    {p.status}
-                                </span>
-                            </DropdownMenuItem>
-                        ))}
-                    </DropdownMenuContent>
-                </DropdownMenu>
-
-                {statusBadge()}
-
-                <StorageStatusPill />
-
-                {lastSavedTimestamp && (
-                    <span className="text-[11px] text-muted-foreground hidden lg:inline-block">
-                        Edited {lastSavedTimestamp}
-                    </span>
+                        )}
+                    </>
                 )}
             </div>
 
@@ -193,6 +207,19 @@ export const TopBar: React.FC<TopBarProps> = ({
                     <Plus className="h-3.5 w-3.5" />
                     New
                 </Button>
+
+                {!currentProject && onOpenImportModal && (
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs gap-1.5"
+                        onClick={onOpenImportModal}
+                        title="Import RFQ Project from Excel or JSON Backup"
+                    >
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>Import</span>
+                    </Button>
+                )}
 
                 {currentProject && (
                     <>
@@ -337,7 +364,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                         <DialogHeader>
                             <DialogTitle>Create New RFQ Project</DialogTitle>
                             <DialogDescription>
-                                Set up a new supplier bid comparison round.
+                                Set up a new supplier comparison round.
                             </DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-3 py-4 text-xs">
@@ -353,14 +380,31 @@ export const TopBar: React.FC<TopBarProps> = ({
                                 />
                             </div>
                             <div className="space-y-1">
-                                <Label htmlFor="new-ref">Reference Number</Label>
+                                <div className="flex items-center justify-between">
+                                    <Label htmlFor="new-ref" className={isNewRefDuplicate ? "text-destructive" : ""}>
+                                        Reference Number
+                                    </Label>
+                                    {isNewRefDuplicate && (
+                                        <span className="text-[10px] text-destructive font-semibold">Already taken</span>
+                                    )}
+                                </div>
                                 <Input
                                     id="new-ref"
                                     placeholder="e.g. RFQ-2026-118"
                                     value={newRef}
                                     onChange={(e) => setNewRef(e.target.value)}
-                                    className="h-8 text-xs"
+                                    className={`h-8 text-xs font-mono transition-colors ${
+                                        isNewRefDuplicate
+                                            ? "border-destructive text-destructive focus-visible:ring-destructive bg-destructive/5"
+                                            : ""
+                                    }`}
                                 />
+                                {isNewRefDuplicate && (
+                                    <p className="text-[11px] text-destructive font-medium flex items-center gap-1.5 pt-0.5 animate-in fade-in duration-150">
+                                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                        <span>Reference is already used by another project. Please enter a unique reference.</span>
+                                    </p>
+                                )}
                             </div>
                         </div>
                         <DialogFooter>

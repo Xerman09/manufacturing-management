@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getJwtSubFromReq } from "@/lib/directus";
+import { decodeJwtPayload } from "@/lib/auth-utils";
 import {
     RfqProject,
     RequestedItem,
@@ -38,6 +39,21 @@ function getHeaders(): Record<string, string> {
 }
 
 /**
+ * Extract authenticated user's display name from request session token
+ */
+function getUserNameFromReq(req: NextRequest): string {
+    const token = req.cookies.get("vos_access_token")?.value;
+    if (!token) return "-";
+    const payload = decodeJwtPayload(token);
+    if (!payload) return "-";
+    const first = String(payload.FirstName ?? payload.Firstname ?? payload.firstName ?? "").trim();
+    const last = String(payload.LastName ?? payload.Lastname ?? payload.lastName ?? "").trim();
+    const email = String(payload.email ?? payload.Email ?? "").trim();
+    const fullName = [first, last].filter(Boolean).join(" ");
+    return fullName || email || "-";
+}
+
+/**
  * Safely parse numeric DB ID or null
  */
 function parseDbId(val: unknown): number | null {
@@ -49,6 +65,169 @@ function parseDbId(val: unknown): number | null {
         }
     }
     return null;
+}
+
+/**
+ * Safely parse a date input to 'YYYY-MM-DD' or null for Directus/MySQL DATE fields
+ * Strictly enforces 4-digit years between 1900 and 2100 to prevent MySQL 22007 out-of-range errors.
+ */
+function parseDateOnly(val: unknown): string | null {
+    if (!val || typeof val !== "string") return null;
+    const trimmed = val.trim();
+    if (!trimmed || trimmed === "null" || trimmed === "undefined" || trimmed === "—" || trimmed === "-") {
+        return null;
+    }
+
+    // Match YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+        const year = parseInt(isoMatch[1], 10);
+        const month = parseInt(isoMatch[2], 10);
+        const day = parseInt(isoMatch[3], 10);
+        if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+        }
+        return null; // Reject runaway years like 111111 or invalid day/month
+    }
+
+    // Match MM/DD/YYYY
+    const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slashMatch) {
+        const month = parseInt(slashMatch[1], 10);
+        const day = parseInt(slashMatch[2], 10);
+        const year = parseInt(slashMatch[3], 10);
+        if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        }
+        return null;
+    }
+
+    const d = new Date(trimmed);
+    if (isNaN(d.getTime())) return null;
+    const fullYear = d.getFullYear();
+    if (fullYear < 1900 || fullYear > 2100) return null;
+    return `${fullYear}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Field-level delta diffing: compares incoming record against existing database record.
+ * Returns only the properties that actually changed so PATCH touches only user-edited columns.
+ */
+function computeDelta(
+    incoming: Record<string, unknown>,
+    existing: Record<string, unknown>
+): Record<string, unknown> {
+    const delta: Record<string, unknown> = {};
+
+    for (const [key, val] of Object.entries(incoming)) {
+        const existVal = existing[key];
+
+        // 1. Date fields
+        if (key === "quote_date" || key === "valid_until" || key === "target_date") {
+            const dateA = val ? parseDateOnly(val) : null;
+            const dateB = existVal ? parseDateOnly(existVal) : null;
+            if (dateA !== dateB) {
+                delta[key] = dateA;
+            }
+            continue;
+        }
+
+        // 2. Boolean / tinyint fields
+        if (
+            key === "prices_include_vat" ||
+            key === "paid_by_lc" ||
+            key === "take_early_pay_discount" ||
+            key === "count_vat_as_cost" ||
+            key === "calc_customs_auto"
+        ) {
+            const boolA = val === 1 || val === true;
+            const boolB = existVal === 1 || existVal === true;
+            if (boolA !== boolB) {
+                delta[key] = boolA ? 1 : 0;
+            }
+            continue;
+        }
+
+        // 3. Numeric fields
+        if (
+            typeof val === "number" ||
+            (existVal !== null && existVal !== undefined && typeof existVal === "number")
+        ) {
+            const numA = val == null ? 0 : Number(val);
+            const numB = existVal == null ? 0 : Number(existVal);
+            if (isNaN(numA) && isNaN(numB)) continue;
+            if (Math.abs(numA - numB) > 0.0001) {
+                delta[key] = val;
+            }
+            continue;
+        }
+
+        // 4. Nullable fields
+        if (val === null && (existVal === null || existVal === undefined)) {
+            continue;
+        }
+
+        // 5. String fields
+        const strA = val == null ? "" : String(val).trim();
+        const strB = existVal == null ? "" : String(existVal).trim();
+        if (strA !== strB) {
+            delta[key] = val;
+        }
+    }
+
+    return delta;
+}
+
+/**
+ * Format raw Directus / SQL errors into clear human-readable messages
+ */
+function cleanUserReadableErrorMessage(err: unknown, section?: string): string {
+    const raw = (err as Error)?.message || String(err || "");
+    if (raw.includes("Incorrect date value")) {
+        if (raw.includes("valid_until")) {
+            return `Invalid date in bid validity date ("Valid Until"). Please enter a valid 4-digit year (YYYY-MM-DD).`;
+        }
+        if (raw.includes("quote_date")) {
+            return `Invalid quotation date. Please enter a valid 4-digit year (YYYY-MM-DD).`;
+        }
+        if (raw.includes("target_date")) {
+            return `Invalid target delivery date. Please enter a valid 4-digit year (YYYY-MM-DD).`;
+        }
+        return `Incorrect date value detected. Please enter a valid 4-digit year (YYYY-MM-DD).`;
+    }
+    if (raw.includes('Invalid Date format in field "valid_until"')) {
+        return `Invalid date in bid validity date ("Valid Until"). Please enter a valid date (YYYY-MM-DD).`;
+    }
+    if (raw.includes('Invalid Date format in field "quote_date"')) {
+        return `Invalid quotation date format. Please enter a valid date (YYYY-MM-DD).`;
+    }
+    if (raw.includes('Invalid Date format in field "target_date"')) {
+        return `Invalid target delivery date format. Please enter a valid date (YYYY-MM-DD).`;
+    }
+    if (raw.includes("uq_rfq_currency")) {
+        return `Duplicate currency code detected in exchange rates. Each currency code can only be added once.`;
+    }
+    if (raw.includes("uq_bid_item")) {
+        return `Duplicate item quotation detected for this supplier.`;
+    }
+    if (raw.includes("chk_bid_score_range")) {
+        return `Quality score must be between 1 and 5.`;
+    }
+    if (raw.includes('Value in collection "mm_rfq" has to be unique') || raw.includes("uq_rfq_reference_round")) {
+        return `The Reference Number entered already exists in the system. Please update the "Reference no." field in Project Details.`;
+    }
+    if (raw.includes("Directus PATCH") || raw.includes("Directus POST")) {
+        const cleaned = raw.replace(/^Directus (PATCH|POST) [a-zA-Z0-9_/-]+ failed:\s*/i, "");
+        if (cleaned.includes(" - Incorrect date value:")) {
+            const sqlPart = cleaned.split(" - ")[1];
+            return cleanUserReadableErrorMessage(sqlPart, section);
+        }
+        if (cleaned.includes("Invalid payload. Invalid Date format")) {
+            return `Invalid date format encountered while saving ${section || "data"}. Please check dates (YYYY-MM-DD).`;
+        }
+        return section ? `Failed to save ${section}: ${cleaned}` : cleaned;
+    }
+    return raw;
 }
 
 /**
@@ -270,6 +449,7 @@ export async function GET(request: NextRequest) {
                         documentType: String(att.document_type || "Quotation"),
                         uploadedBy: att.uploaded_by ? Number(att.uploaded_by) : undefined,
                         uploadedAt: att.uploaded_at ? String(att.uploaded_at) : undefined,
+                        fileUrl: `/api/manufacturing/procurement-and-inbound/supplier-bid-comparison/attachments?fileId=${att.directus_file_id}&fileName=${encodeURIComponent(String(att.file_name))}`,
                     }));
 
                     return {
@@ -343,7 +523,7 @@ export async function GET(request: NextRequest) {
                 fromStatus: ah.from_status as ProjectStatus,
                 toStatus: ah.to_status as ProjectStatus,
                 actorId: ah.actor_id ? Number(ah.actor_id) : null,
-                actorName: String(ah.actor_name || ""),
+                actorName: String(ah.actor_name || "-"),
                 comment: String(ah.comment || ""),
                 createdAt: String(ah.created_at || ""),
             }));
@@ -435,11 +615,34 @@ export async function POST(request: NextRequest) {
         const body: RfqProject = await request.json();
         const headers = getHeaders();
 
+        let candidateRef = (body.rfqReference || `RFQ-${Date.now().toString().slice(-6)}`).trim();
+        const roundNo = body.roundNo || 1;
+        const baseRef = candidateRef;
+        let attempt = 1;
+
+        // Auto-disambiguate collided references on creation to avoid "Value in collection mm_rfq has to be unique"
+        while (attempt <= 10) {
+            try {
+                const existingRef = await fetchCollection<{ id: number }>(
+                    "mm_rfq",
+                    `filter[rfq_reference][_eq]=${encodeURIComponent(candidateRef)}&filter[round_no][_eq]=${roundNo}&filter[deleted_at][_null]=true&limit=1`
+                );
+                if (existingRef.length === 0) {
+                    break;
+                }
+                attempt++;
+                candidateRef = `${baseRef}-COPY${attempt > 2 ? `-${attempt}` : ""}`;
+            } catch {
+                break;
+            }
+        }
+        body.rfqReference = candidateRef;
+
         const payload = {
             rfq_title: body.rfqTitle || "New RFQ Project",
-            rfq_reference: body.rfqReference || `RFQ-${Date.now().toString().slice(-6)}`,
+            rfq_reference: candidateRef,
             parent_rfq_id: body.parentRfqId || null,
-            round_no: body.roundNo || 1,
+            round_no: roundNo,
             comparison_currency: body.comparisonCurrency || "PHP",
             budget: body.budget,
             notes: body.notes || "",
@@ -463,7 +666,7 @@ export async function POST(request: NextRequest) {
             rejection_reason: body.rejectionReason || null,
             approval_remarks: body.approvalRemarks || null,
             award_strategy: body.awardStrategy || "MANUAL",
-            target_date: body.targetDate ? body.targetDate.slice(0, 10) : null,
+            target_date: parseDateOnly(body.targetDate),
             created_by: userId,
         };
 
@@ -487,9 +690,14 @@ export async function POST(request: NextRequest) {
 
         // Synchronize child entities for newly created project
         const fullProject: RfqProject = { ...body, id: String(newRfqId), dbId: newRfqId };
-        await syncChildEntities(newRfqId, fullProject, userId);
+        const syncResult = await syncChildEntities(newRfqId, fullProject, userId);
 
-        return NextResponse.json({ success: true, project: fullProject }, { status: 201 });
+        return NextResponse.json({
+            success: !syncResult.partialFailure,
+            project: fullProject,
+            resolvedIds: syncResult.resolvedIds,
+            partialFailure: syncResult.partialFailure || null,
+        }, { status: 201 });
     } catch (error) {
         return NextResponse.json(
             { success: false, error: (error as Error).message || "Failed to create project", backendUnavailable: true },
@@ -534,11 +742,32 @@ export async function PUT(request: NextRequest) {
 
             // If still no ID found in DB, create initial row in mm_rfq
             if (!rfqDbId) {
+                let safeRef = (project.rfqReference || `RFQ-${Date.now().toString().slice(-6)}`).trim();
+                const roundNo = project.roundNo || 1;
+                const baseRef = safeRef;
+                let attempt = 1;
+                while (attempt <= 10) {
+                    try {
+                        const checkRef = await fetchCollection<{ id: number }>(
+                            "mm_rfq",
+                            `filter[rfq_reference][_eq]=${encodeURIComponent(safeRef)}&filter[round_no][_eq]=${roundNo}&filter[deleted_at][_null]=true&limit=1`
+                        );
+                        if (checkRef.length === 0) {
+                            break;
+                        }
+                        attempt++;
+                        safeRef = `${baseRef}-COPY${attempt > 2 ? `-${attempt}` : ""}`;
+                    } catch {
+                        break;
+                    }
+                }
+                project.rfqReference = safeRef;
+
                 const initialPayload = {
                     rfq_title: project.rfqTitle || "New RFQ Project",
-                    rfq_reference: project.rfqReference || `RFQ-${Date.now().toString().slice(-6)}`,
+                    rfq_reference: safeRef,
                     parent_rfq_id: project.parentRfqId || null,
-                    round_no: project.roundNo || 1,
+                    round_no: roundNo,
                     comparison_currency: project.comparisonCurrency || "PHP",
                     budget: project.budget,
                     notes: project.notes || "",
@@ -562,7 +791,7 @@ export async function PUT(request: NextRequest) {
                     rejection_reason: project.rejectionReason || null,
                     approval_remarks: project.approvalRemarks || null,
                     award_strategy: project.awardStrategy || "MANUAL",
-                    target_date: project.targetDate ? project.targetDate.slice(0, 10) : null,
+                    target_date: parseDateOnly(project.targetDate),
                     created_by: userId,
                 };
 
@@ -644,7 +873,7 @@ export async function PUT(request: NextRequest) {
             rejection_reason: project.rejectionReason || null,
             approval_remarks: project.approvalRemarks || null,
             award_strategy: project.awardStrategy || "MANUAL",
-            target_date: project.targetDate ? project.targetDate.slice(0, 10) : null,
+            target_date: parseDateOnly(project.targetDate),
             updated_by: userId,
         };
 
@@ -656,10 +885,11 @@ export async function PUT(request: NextRequest) {
 
         if (!res.ok) {
             const errData = await res.json().catch(() => null);
+            const rawMsg = errData?.errors?.[0]?.message || `Failed to update RFQ: ${res.status}`;
             return NextResponse.json(
                 {
                     success: false,
-                    error: errData?.errors?.[0]?.message || `Failed to update RFQ: ${res.status}`,
+                    error: cleanUserReadableErrorMessage(rawMsg, "RFQ details"),
                     backendUnavailable: res.status === 404 || res.status >= 500,
                 },
                 { status: 200 }
@@ -682,19 +912,26 @@ export async function PUT(request: NextRequest) {
                     ? (project.rejectionReason || project.justification || "Award rejected")
                     : (project.approvalRemarks || project.justification || "");
 
+            const latestHistoryEntry = Array.isArray(project.approvalHistory) && project.approvalHistory.length > 0
+                ? project.approvalHistory[project.approvalHistory.length - 1]
+                : null;
+            const actorName = (latestHistoryEntry?.actorName && latestHistoryEntry.actorName !== "-" && latestHistoryEntry.actorName !== "Juan Dela Cruz" && latestHistoryEntry.actorName !== "Authorized User" && latestHistoryEntry.actorName !== "System User")
+                ? latestHistoryEntry.actorName
+                : getUserNameFromReq(request);
+
             await postItem("mm_rfq_approval_history", {
                 rfq_id: rfqDbId,
                 action,
                 from_status: existingStatus,
                 to_status: project.status,
                 actor_id: userId,
-                actor_name: project.reviewedBy || project.preparedBy || "System User",
+                actor_name: actorName || "-",
                 comment,
             }).catch(() => null);
         }
 
         // 4. Diff-Upsert Child Entities
-        await syncChildEntities(rfqDbId, project, userId);
+        const syncResult = await syncChildEntities(rfqDbId, project, userId);
 
         const updatedProject: RfqProject = {
             ...project,
@@ -702,7 +939,12 @@ export async function PUT(request: NextRequest) {
             dbId: rfqDbId,
         };
 
-        return NextResponse.json({ success: true, project: updatedProject });
+        return NextResponse.json({
+            success: !syncResult.partialFailure,
+            project: updatedProject,
+            resolvedIds: syncResult.resolvedIds,
+            partialFailure: syncResult.partialFailure || null,
+        });
     } catch (error) {
         return NextResponse.json(
             {
@@ -715,10 +957,19 @@ export async function PUT(request: NextRequest) {
     }
 }
 
+interface SyncResult {
+    resolvedIds: {
+        items: Record<string, number>;
+        criteria: Record<string, number>;
+        bids: Record<string, number>;
+    };
+    partialFailure?: { section: string; error: string };
+}
+
 /**
  * Child Entity Relational Diff-Upsert Orchestrator
  */
-async function syncChildEntities(rfqId: number, project: RfqProject, userId: number | null) {
+async function syncChildEntities(rfqId: number, project: RfqProject, userId: number | null): Promise<SyncResult> {
     const nowIso = new Date().toISOString();
 
     // Map client IDs to DB IDs
@@ -730,6 +981,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
     // -------------------------------------------------------------
     // A. Sync mm_rfq_items
     // -------------------------------------------------------------
+    try {
     if (project.items && Array.isArray(project.items)) {
         const existingItems = await fetchCollection<Record<string, unknown>>(
             "mm_rfq_items",
@@ -761,7 +1013,13 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
             };
 
             if (dbId && existingMap.has(dbId)) {
-                await patchItem("mm_rfq_items", dbId, payload);
+                const existing = existingMap.get(dbId);
+                if (existing) {
+                    const delta = computeDelta(payload, existing);
+                    if (Object.keys(delta).length > 0) {
+                        await patchItem("mm_rfq_items", dbId, delta);
+                    }
+                }
                 itemIdMap.set(item.id, dbId);
                 activeDbIds.add(dbId);
             } else {
@@ -772,16 +1030,23 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
         }
 
         // Soft-delete removed items
-        Array.from(existingMap.keys()).forEach(async (eId) => {
+        for (const eId of Array.from(existingMap.keys())) {
             if (!activeDbIds.has(eId)) {
                 await patchItem("mm_rfq_items", eId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
             }
-        });
+        }
+    }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "items", error: cleanUserReadableErrorMessage(err, "requested items") },
+        };
     }
 
     // -------------------------------------------------------------
     // B. Sync mm_rfq_quality_criteria
     // -------------------------------------------------------------
+    try {
     if (project.qualityCriteria && Array.isArray(project.qualityCriteria)) {
         const existingCriteria = await fetchCollection<Record<string, unknown>>(
             "mm_rfq_quality_criteria",
@@ -804,7 +1069,13 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
             };
 
             if (dbId && existingMap.has(dbId)) {
-                await patchItem("mm_rfq_quality_criteria", dbId, payload);
+                const existing = existingMap.get(dbId);
+                if (existing) {
+                    const delta = computeDelta(payload, existing);
+                    if (Object.keys(delta).length > 0) {
+                        await patchItem("mm_rfq_quality_criteria", dbId, delta);
+                    }
+                }
                 critIdMap.set(crit.id, dbId);
                 activeDbIds.add(dbId);
             } else {
@@ -814,435 +1085,562 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
             }
         }
 
-        Array.from(existingMap.keys()).forEach(async (eId) => {
+        for (const eId of Array.from(existingMap.keys())) {
             if (!activeDbIds.has(eId)) {
                 await patchItem("mm_rfq_quality_criteria", eId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
             }
-        });
+        }
+    }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "quality criteria", error: cleanUserReadableErrorMessage(err, "quality criteria") },
+        };
     }
 
     // -------------------------------------------------------------
     // C. Sync mm_rfq_exchange_rates
     // -------------------------------------------------------------
+    try {
     if (project.exchangeRates && Array.isArray(project.exchangeRates)) {
+        // Query ALL rows for this RFQ (including soft-deleted) to avoid MySQL uq_rfq_currency duplicates
         const existingRates = await fetchCollection<Record<string, unknown>>(
             "mm_rfq_exchange_rates",
-            `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true`
+            `filter[rfq_id][_eq]=${rfqId}`
         );
-        const rateCodeMap = new Map<string, number>();
-        existingRates.forEach((r) => rateCodeMap.set(String(r.currency_code), Number(r.id)));
+        const rateCodeMap = new Map<string, { id: number; isDeleted: boolean }>();
+        existingRates.forEach((r) => {
+            rateCodeMap.set(String(r.currency_code).toUpperCase(), {
+                id: Number(r.id),
+                isDeleted: r.deleted_at !== null && r.deleted_at !== undefined,
+            });
+        });
 
         const activeCodes = new Set<string>();
 
         for (const er of project.exchangeRates) {
-            activeCodes.add(er.currencyCode);
+            const upperCode = er.currencyCode.toUpperCase();
+            activeCodes.add(upperCode);
             const payload = {
                 rfq_id: rfqId,
-                currency_code: er.currencyCode,
+                currency_code: upperCode,
                 rate_to_comparison: er.rateToComparison ?? 1.0,
+                deleted_at: null,
+                deleted_by: null,
             };
 
-            const existingId = rateCodeMap.get(er.currencyCode);
-            if (existingId) {
-                await patchItem("mm_rfq_exchange_rates", existingId, payload);
+            const existing = rateCodeMap.get(upperCode);
+            if (existing) {
+                await patchItem("mm_rfq_exchange_rates", existing.id, payload);
             } else {
                 await postItem("mm_rfq_exchange_rates", payload);
             }
         }
 
-        Array.from(rateCodeMap.entries()).forEach(async ([code, rId]) => {
-            if (!activeCodes.has(code)) {
-                await patchItem("mm_rfq_exchange_rates", rId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+        for (const [code, entry] of Array.from(rateCodeMap.entries())) {
+            if (!activeCodes.has(code) && !entry.isDeleted) {
+                await patchItem("mm_rfq_exchange_rates", entry.id, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
             }
-        });
+        }
+    }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "exchange rates", error: cleanUserReadableErrorMessage(err, "exchange rates") },
+        };
     }
 
     // -------------------------------------------------------------
     // D. Sync mm_rfq_customs_rates
     // -------------------------------------------------------------
-    if (project.customsRates) {
-        const cr = project.customsRates;
-        const existingCustoms = await fetchCollection<Record<string, unknown>>(
-            "mm_rfq_customs_rates",
-            `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true&limit=1`
-        );
+    try {
+        if (project.customsRates) {
+            const cr = project.customsRates;
+            const existingCustoms = await fetchCollection<Record<string, unknown>>(
+                "mm_rfq_customs_rates",
+                `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true&limit=1`
+            );
 
-        const customsPayload = {
-            rfq_id: rfqId,
-            cds_comp_curr: cr.cdsCompCurr ?? 100,
-            bir_dst_comp_curr: cr.birDstCompCurr ?? 30,
-            container_security_usd: cr.containerSecurityUsd ?? 5,
-            arrastre_20ft_comp_curr: cr.arrastre20ftCompCurr ?? 4738,
-            arrastre_40ft_comp_curr: cr.arrastre40ftCompCurr ?? 10869,
-            wharfage_20ft_comp_curr: cr.wharfage20ftCompCurr ?? 519.35,
-            wharfage_40ft_comp_curr: cr.wharfage40ftCompCurr ?? 779.05,
-            lcl_arrastre_per_rt_comp_curr: cr.lclArrastrePerRtCompCurr ?? 149,
-            lcl_wharfage_per_rt_comp_curr: cr.lclWharfagePerRtCompCurr ?? 30.55,
-            lc_bank_charge_pct: cr.lcBankChargePct ?? 0.1250,
-        };
+            const customsPayload = {
+                rfq_id: rfqId,
+                cds_comp_curr: cr.cdsCompCurr ?? 100,
+                bir_dst_comp_curr: cr.birDstCompCurr ?? 30,
+                container_security_usd: cr.containerSecurityUsd ?? 5,
+                arrastre_20ft_comp_curr: cr.arrastre20ftCompCurr ?? 4738,
+                arrastre_40ft_comp_curr: cr.arrastre40ftCompCurr ?? 10869,
+                wharfage_20ft_comp_curr: cr.wharfage20ftCompCurr ?? 519.35,
+                wharfage_40ft_comp_curr: cr.wharfage40ftCompCurr ?? 779.05,
+                lcl_arrastre_per_rt_comp_curr: cr.lclArrastrePerRtCompCurr ?? 149,
+                lcl_wharfage_per_rt_comp_curr: cr.lclWharfagePerRtCompCurr ?? 30.55,
+                lc_bank_charge_pct: cr.lcBankChargePct ?? 0.1250,
+            };
 
-        if (existingCustoms.length > 0) {
-            await patchItem("mm_rfq_customs_rates", Number(existingCustoms[0].id), customsPayload);
-        } else {
-            await postItem("mm_rfq_customs_rates", customsPayload);
+            if (existingCustoms.length > 0) {
+                const delta = computeDelta(customsPayload, existingCustoms[0]);
+                if (Object.keys(delta).length > 0) {
+                    await patchItem("mm_rfq_customs_rates", Number(existingCustoms[0].id), delta);
+                }
+            } else {
+                await postItem("mm_rfq_customs_rates", customsPayload);
+            }
         }
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "customs rates", error: cleanUserReadableErrorMessage(err, "customs rates") },
+        };
     }
 
     // -------------------------------------------------------------
     // E. Sync mm_rfq_ipc_brackets
     // -------------------------------------------------------------
-    if (project.ipcBrackets && Array.isArray(project.ipcBrackets)) {
-        const existingIpc = await fetchCollection<Record<string, unknown>>(
-            "mm_rfq_ipc_brackets",
-            `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true`
-        );
-        const ipcOrderMap = new Map<number, number>();
-        existingIpc.forEach((b) => ipcOrderMap.set(Number(b.bracket_order), Number(b.id)));
+    try {
+        if (project.ipcBrackets && Array.isArray(project.ipcBrackets)) {
+            const existingIpc = await fetchCollection<Record<string, unknown>>(
+                "mm_rfq_ipc_brackets",
+                `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true`
+            );
+            const ipcOrderMap = new Map<number, number>();
+            existingIpc.forEach((b) => ipcOrderMap.set(Number(b.bracket_order), Number(b.id)));
 
-        const activeOrders = new Set<number>();
+            const activeOrders = new Set<number>();
 
-        for (const b of project.ipcBrackets) {
-            activeOrders.add(b.bracketOrder);
-            const payload = {
-                rfq_id: rfqId,
-                bracket_order: b.bracketOrder,
-                max_dutiable_value_comp_curr: b.maxDutiableValueCompCurr ?? null,
-                charge_comp_curr: b.chargeCompCurr,
-            };
+            for (const b of project.ipcBrackets) {
+                activeOrders.add(b.bracketOrder);
+                const payload = {
+                    rfq_id: rfqId,
+                    bracket_order: b.bracketOrder,
+                    max_dutiable_value_comp_curr: b.maxDutiableValueCompCurr ?? null,
+                    charge_comp_curr: b.chargeCompCurr,
+                };
 
-            const existingId = ipcOrderMap.get(b.bracketOrder);
-            if (existingId) {
-                await patchItem("mm_rfq_ipc_brackets", existingId, payload);
-            } else {
-                await postItem("mm_rfq_ipc_brackets", payload);
+                const existingId = ipcOrderMap.get(b.bracketOrder);
+                if (existingId) {
+                    await patchItem("mm_rfq_ipc_brackets", existingId, payload);
+                } else {
+                    await postItem("mm_rfq_ipc_brackets", payload);
+                }
+            }
+
+            for (const [order, bId] of Array.from(ipcOrderMap.entries())) {
+                if (!activeOrders.has(order)) {
+                    await patchItem("mm_rfq_ipc_brackets", bId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+                }
             }
         }
-
-        Array.from(ipcOrderMap.entries()).forEach(async ([order, bId]) => {
-            if (!activeOrders.has(order)) {
-                await patchItem("mm_rfq_ipc_brackets", bId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
-            }
-        });
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "IPC brackets", error: cleanUserReadableErrorMessage(err, "IPC brackets") },
+        };
     }
 
     // -------------------------------------------------------------
     // F. Sync mm_rfq_bids & child entities (bid_items, price_breaks, scores, attachments)
     // -------------------------------------------------------------
-    if (project.bids && Array.isArray(project.bids)) {
-        const existingBids = await fetchCollection<Record<string, unknown>>(
-            "mm_rfq_bids",
-            `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true`
-        );
-        const existingBidMap = new Map<number, Record<string, unknown>>();
-        existingBids.forEach((b) => existingBidMap.set(Number(b.id), b));
+    try {
+        if (project.bids && Array.isArray(project.bids)) {
+            const existingBids = await fetchCollection<Record<string, unknown>>(
+                "mm_rfq_bids",
+                `filter[rfq_id][_eq]=${rfqId}&filter[deleted_at][_null]=true`
+            );
+            const existingBidMap = new Map<number, Record<string, unknown>>();
+            existingBids.forEach((b) => existingBidMap.set(Number(b.id), b));
 
-        const activeBidDbIds = new Set<number>();
+            const activeBidDbIds = new Set<number>();
 
-        for (const bid of project.bids) {
-            const bidDbId = parseDbId(bid.dbId) || parseDbId(bid.id);
-            const bidPayload = {
-                rfq_id: rfqId,
-                supplier_id: bid.supplierId || null,
-                supplier_name: bid.supplierName,
-                supplier_type: bid.supplierType || "LOCAL",
-                country: bid.country || "Philippines",
-                contact_person: bid.contactPerson || "",
-                contact_email: bid.contactEmail || "",
-                contact_phone: bid.contactPhone || "",
-                quote_currency: bid.quoteCurrency || "PHP",
-                quotation_ref: bid.quotationRef || "",
-                quote_date: bid.quoteDate ? bid.quoteDate.slice(0, 10) : null,
-                valid_until: bid.validUntil ? bid.validUntil.slice(0, 10) : null,
-                lead_time_days: bid.leadTimeDays ?? 0,
-                notes: bid.notes || "",
-                incoterm: bid.incoterm || "DELIVERED",
-                vat_pct: bid.vatPct ?? 12.0,
-                prices_include_vat: bid.pricesIncludeVat ? 1 : 0,
-                inland_trucking_comp_curr: bid.inlandTruckingCompCurr ?? 0,
-                freight_basis: bid.freightBasis || "LUMP_SUM",
-                freight_rate: bid.freightRate ?? 0,
-                freight_minimum: bid.freightMinimum ?? 0,
-                freight_currency: bid.freightCurrency || "PHP",
-                insurance_basis: bid.insuranceBasis || "PCT_GOODS_AND_FREIGHT",
-                insurance_rate_or_amount: bid.insuranceRateOrAmount ?? 0,
-                insurance_currency: bid.insuranceCurrency || "PHP",
-                duty_mode: bid.dutyMode || "PER_ITEM",
-                fta_agreement_name: bid.ftaAgreementName || null,
-                fta_duty_pct: bid.ftaDutyPct ?? 0,
-                single_duty_pct: bid.singleDutyPct ?? 0,
-                brokerage_comp_curr: bid.brokerageCompCurr ?? 0,
-                other_port_charges_comp_curr: bid.otherPortChargesCompCurr ?? 0,
-                shipment_type: bid.shipmentType || "AUTO",
-                containers_20ft: bid.containers20ft ?? 0,
-                containers_40ft: bid.containers40ft ?? 0,
-                declarations_count: bid.declarationsCount ?? 1,
-                paid_by_lc: bid.paidByLc ? 1 : 0,
-                down_payment_pct: bid.downPaymentPct ?? 0,
-                balance_due_days: bid.balanceDueDays ?? 0,
-                early_pay_discount_pct: bid.earlyPayDiscountPct ?? 0,
-                early_pay_discount_days: bid.earlyPayDiscountDays ?? 0,
-                take_early_pay_discount: bid.takeEarlyPayDiscount ? 1 : 0,
-                bank_fee_per_payment_comp_curr: bid.bankFeePerPaymentCompCurr ?? 0,
-            };
+            for (const bid of project.bids) {
+                const bidDbId = parseDbId(bid.dbId) || parseDbId(bid.id);
+                const bidPayload = {
+                    rfq_id: rfqId,
+                    supplier_id: bid.supplierId || null,
+                    supplier_name: bid.supplierName,
+                    supplier_type: bid.supplierType || "LOCAL",
+                    country: bid.country || "Philippines",
+                    contact_person: bid.contactPerson || "",
+                    contact_email: bid.contactEmail || "",
+                    contact_phone: bid.contactPhone || "",
+                    quote_currency: bid.quoteCurrency || "PHP",
+                    quotation_ref: bid.quotationRef || "",
+                    quote_date: parseDateOnly(bid.quoteDate),
+                    valid_until: parseDateOnly(bid.validUntil),
+                    lead_time_days: bid.leadTimeDays ?? 0,
+                    notes: bid.notes || "",
+                    incoterm: bid.incoterm || "DELIVERED",
+                    vat_pct: bid.vatPct ?? 12.0,
+                    prices_include_vat: bid.pricesIncludeVat ? 1 : 0,
+                    inland_trucking_comp_curr: bid.inlandTruckingCompCurr ?? 0,
+                    freight_basis: bid.freightBasis || "LUMP_SUM",
+                    freight_rate: bid.freightRate ?? 0,
+                    freight_minimum: bid.freightMinimum ?? 0,
+                    freight_currency: bid.freightCurrency || "PHP",
+                    insurance_basis: bid.insuranceBasis || "PCT_GOODS_AND_FREIGHT",
+                    insurance_rate_or_amount: bid.insuranceRateOrAmount ?? 0,
+                    insurance_currency: bid.insuranceCurrency || "PHP",
+                    duty_mode: bid.dutyMode || "PER_ITEM",
+                    fta_agreement_name: bid.ftaAgreementName || null,
+                    fta_duty_pct: bid.ftaDutyPct ?? 0,
+                    single_duty_pct: bid.singleDutyPct ?? 0,
+                    brokerage_comp_curr: bid.brokerageCompCurr ?? 0,
+                    other_port_charges_comp_curr: bid.otherPortChargesCompCurr ?? 0,
+                    shipment_type: bid.shipmentType || "AUTO",
+                    containers_20ft: bid.containers20ft ?? 0,
+                    containers_40ft: bid.containers40ft ?? 0,
+                    declarations_count: bid.declarationsCount ?? 1,
+                    paid_by_lc: bid.paidByLc ? 1 : 0,
+                    down_payment_pct: bid.downPaymentPct ?? 0,
+                    balance_due_days: bid.balanceDueDays ?? 0,
+                    early_pay_discount_pct: bid.earlyPayDiscountPct ?? 0,
+                    early_pay_discount_days: bid.earlyPayDiscountDays ?? 0,
+                    take_early_pay_discount: bid.takeEarlyPayDiscount ? 1 : 0,
+                    bank_fee_per_payment_comp_curr: bid.bankFeePerPaymentCompCurr ?? 0,
+                };
 
-            let resolvedBidId: number;
-            if (bidDbId && existingBidMap.has(bidDbId)) {
-                await patchItem("mm_rfq_bids", bidDbId, bidPayload);
-                resolvedBidId = bidDbId;
-            } else {
-                const created = await postItem<{ id: number }>("mm_rfq_bids", bidPayload);
-                resolvedBidId = Number(created.id);
-            }
-
-            bidIdMap.set(bid.id, resolvedBidId);
-            activeBidDbIds.add(resolvedBidId);
-
-            // ---------------------------------------------------------
-            // F1. Sync mm_rfq_bid_items & mm_rfq_bid_price_breaks
-            // ---------------------------------------------------------
-            if (bid.quotations && typeof bid.quotations === "object") {
-                const existingBidItems = await fetchCollection<Record<string, unknown>>(
-                    "mm_rfq_bid_items",
-                    `filter[rfq_bid_id][_eq]=${resolvedBidId}&filter[deleted_at][_null]=true`
-                );
-                const existingBiMap = new Map<number, number>(); // rfq_item_id -> bid_item_id
-                existingBidItems.forEach((bi) => existingBiMap.set(Number(bi.rfq_item_id), Number(bi.id)));
-
-                const activeBiIds = new Set<number>();
-
-                const quotationEntries = Object.entries(bid.quotations) as [string, ItemQuotation][];
-                for (const [rfqItemId, quotation] of quotationEntries) {
-                    const resolvedItemId = itemIdMap.get(rfqItemId) || parseDbId(rfqItemId);
-                    if (!resolvedItemId) continue;
-
-                    const biPayload = {
-                        rfq_bid_id: resolvedBidId,
-                        rfq_item_id: resolvedItemId,
-                        discount_pct: quotation.discountPct ?? 0,
-                    };
-
-                    let resolvedBiId: number;
-                    const existingBiId = existingBiMap.get(resolvedItemId);
-                    if (existingBiId) {
-                        await patchItem("mm_rfq_bid_items", existingBiId, biPayload);
-                        resolvedBiId = existingBiId;
-                    } else {
-                        const created = await postItem<{ id: number }>("mm_rfq_bid_items", biPayload);
-                        resolvedBiId = Number(created.id);
+                let resolvedBidId: number;
+                if (bidDbId && existingBidMap.has(bidDbId)) {
+                    const existing = existingBidMap.get(bidDbId);
+                    if (existing) {
+                        const delta = computeDelta(bidPayload, existing);
+                        if (Object.keys(delta).length > 0) {
+                            await patchItem("mm_rfq_bids", bidDbId, delta);
+                        }
                     }
+                    resolvedBidId = bidDbId;
+                } else {
+                    const created = await postItem<{ id: number }>("mm_rfq_bids", bidPayload);
+                    resolvedBidId = Number(created.id);
+                }
 
-                    bidItemIdMap.set(`${bid.id}_${rfqItemId}`, resolvedBiId);
-                    activeBiIds.add(resolvedBiId);
+                bidIdMap.set(bid.id, resolvedBidId);
+                activeBidDbIds.add(resolvedBidId);
 
-                    // Price Breaks for this bid item
-                    if (quotation.priceBreaks && Array.isArray(quotation.priceBreaks)) {
-                        const existingPbs = await fetchCollection<Record<string, unknown>>(
-                            "mm_rfq_bid_price_breaks",
-                            `filter[rfq_bid_item_id][_eq]=${resolvedBiId}&filter[deleted_at][_null]=true`
-                        );
-                        const existingPbQtyMap = new Map<number, number>(); // min_quantity -> id
-                        existingPbs.forEach((pb) => existingPbQtyMap.set(Number(pb.min_quantity), Number(pb.id)));
+                // ---------------------------------------------------------
+                // F1. Sync mm_rfq_bid_items & mm_rfq_bid_price_breaks
+                // ---------------------------------------------------------
+                if (bid.quotations && typeof bid.quotations === "object") {
+                    // Fetch ALL bid items for this bid (including soft-deleted) to prevent uq_bid_item constraint violation
+                    const existingBidItems = await fetchCollection<Record<string, unknown>>(
+                        "mm_rfq_bid_items",
+                        `filter[rfq_bid_id][_eq]=${resolvedBidId}`
+                    );
+                    const existingBiMap = new Map<number, { id: number; isDeleted: boolean }>(); // rfq_item_id -> { id, isDeleted }
+                    existingBidItems.forEach((bi) =>
+                        existingBiMap.set(Number(bi.rfq_item_id), {
+                            id: Number(bi.id),
+                            isDeleted: bi.deleted_at !== null && bi.deleted_at !== undefined,
+                        })
+                    );
 
-                        const activePbIds = new Set<number>();
+                    const activeBiIds = new Set<number>();
 
-                        for (const pb of quotation.priceBreaks) {
-                            const pbPayload = {
-                                rfq_bid_item_id: resolvedBiId,
-                                min_quantity: pb.minQuantity ?? 1,
-                                unit_price: pb.unitPrice,
-                            };
+                    const quotationEntries = Object.entries(bid.quotations) as [string, ItemQuotation][];
+                    for (const [rfqItemId, quotation] of quotationEntries) {
+                        const resolvedItemId = itemIdMap.get(rfqItemId) || parseDbId(rfqItemId);
+                        if (!resolvedItemId) continue;
 
-                            const existingPbId = existingPbQtyMap.get(Number(pb.minQuantity));
-                            if (existingPbId) {
-                                await patchItem("mm_rfq_bid_price_breaks", existingPbId, pbPayload);
-                                activePbIds.add(existingPbId);
-                            } else {
-                                const createdPb = await postItem<{ id: number }>("mm_rfq_bid_price_breaks", pbPayload);
-                                activePbIds.add(Number(createdPb.id));
+                        const biPayload = {
+                            rfq_bid_id: resolvedBidId,
+                            rfq_item_id: resolvedItemId,
+                            discount_pct: quotation.discountPct ?? 0,
+                            deleted_at: null,
+                            deleted_by: null,
+                        };
+
+                        let resolvedBiId: number;
+                        const existingBi = existingBiMap.get(resolvedItemId);
+                        if (existingBi) {
+                            await patchItem("mm_rfq_bid_items", existingBi.id, biPayload);
+                            resolvedBiId = existingBi.id;
+                        } else {
+                            const created = await postItem<{ id: number }>("mm_rfq_bid_items", biPayload);
+                            resolvedBiId = Number(created.id);
+                        }
+
+                        bidItemIdMap.set(`${bid.id}_${rfqItemId}`, resolvedBiId);
+                        bidItemIdMap.set(`${resolvedBidId}_${resolvedItemId}`, resolvedBiId);
+                        bidItemIdMap.set(`${bid.id}_${resolvedItemId}`, resolvedBiId);
+                        bidItemIdMap.set(`${resolvedBidId}_${rfqItemId}`, resolvedBiId);
+                        activeBiIds.add(resolvedBiId);
+
+                        // Price Breaks for this bid item
+                        if (quotation.priceBreaks && Array.isArray(quotation.priceBreaks)) {
+                            const existingPbs = await fetchCollection<Record<string, unknown>>(
+                                "mm_rfq_bid_price_breaks",
+                                `filter[rfq_bid_item_id][_eq]=${resolvedBiId}`
+                            );
+                            const existingPbQtyMap = new Map<number, { id: number; isDeleted: boolean }>(); // min_quantity -> { id, isDeleted }
+                            existingPbs.forEach((pb) =>
+                                existingPbQtyMap.set(Number(pb.min_quantity), {
+                                    id: Number(pb.id),
+                                    isDeleted: pb.deleted_at !== null && pb.deleted_at !== undefined,
+                                })
+                            );
+
+                            const activePbIds = new Set<number>();
+
+                            for (const pb of quotation.priceBreaks) {
+                                const minQty = pb.minQuantity ?? 1;
+                                const pbPayload = {
+                                    rfq_bid_item_id: resolvedBiId,
+                                    min_quantity: minQty,
+                                    unit_price: pb.unitPrice,
+                                    deleted_at: null,
+                                    deleted_by: null,
+                                };
+
+                                const existingPb = existingPbQtyMap.get(Number(minQty));
+                                if (existingPb) {
+                                    await patchItem("mm_rfq_bid_price_breaks", existingPb.id, pbPayload);
+                                    activePbIds.add(existingPb.id);
+                                } else {
+                                    const createdPb = await postItem<{ id: number }>("mm_rfq_bid_price_breaks", pbPayload);
+                                    activePbIds.add(Number(createdPb.id));
+                                }
+                            }
+
+                            for (const [, pbEntry] of Array.from(existingPbQtyMap.entries())) {
+                                if (!activePbIds.has(pbEntry.id) && !pbEntry.isDeleted) {
+                                    await patchItem("mm_rfq_bid_price_breaks", pbEntry.id, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+                                }
                             }
                         }
+                    }
 
-                        for (const pb of existingPbs) {
-                            const pbId = Number(pb.id);
-                            if (!activePbIds.has(pbId)) {
-                                await patchItem("mm_rfq_bid_price_breaks", pbId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+                    // Soft-delete removed bid items
+                    for (const [, biEntry] of Array.from(existingBiMap.entries())) {
+                        if (!activeBiIds.has(biEntry.id) && !biEntry.isDeleted) {
+                            await patchItem("mm_rfq_bid_items", biEntry.id, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+                        }
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // F2. Sync mm_rfq_bid_scores
+                // ---------------------------------------------------------
+                if (bid.scores && typeof bid.scores === "object") {
+                    // Fetch ALL bid scores for this bid (including soft-deleted) to prevent uq_bid_score_criterion constraint violation
+                    const existingScores = await fetchCollection<Record<string, unknown>>(
+                        "mm_rfq_bid_scores",
+                        `filter[rfq_bid_id][_eq]=${resolvedBidId}`
+                    );
+                    const scoreCritMap = new Map<number, { id: number; isDeleted: boolean }>(); // criterion_id -> { id, isDeleted }
+                    existingScores.forEach((sc) =>
+                        scoreCritMap.set(Number(sc.criterion_id), {
+                            id: Number(sc.id),
+                            isDeleted: sc.deleted_at !== null && sc.deleted_at !== undefined,
+                        })
+                    );
+
+                    const activeCritIds = new Set<number>();
+
+                    const scoreEntries = Object.entries(bid.scores) as [
+                        string,
+                        { passFailResult?: "PASS" | "FAIL" | "NOT_CHECKED"; score?: number | null; evidenceRemarks?: string }
+                    ][];
+                    for (const [critId, scoreObj] of scoreEntries) {
+                        const resolvedCritId = critIdMap.get(critId) || parseDbId(critId);
+                        if (!resolvedCritId) continue;
+
+                        // Ensure score is 1-5 or null per MySQL chk_bid_score_range
+                        let sanitizedScore: number | null = null;
+                        if (typeof scoreObj.score === "number" && scoreObj.score >= 1 && scoreObj.score <= 5) {
+                            sanitizedScore = Math.round(scoreObj.score);
+                        }
+
+                        const scorePayload = {
+                            rfq_bid_id: resolvedBidId,
+                            criterion_id: resolvedCritId,
+                            pass_fail_result: scoreObj.passFailResult || "NOT_CHECKED",
+                            score: sanitizedScore,
+                            evidence_remarks: scoreObj.evidenceRemarks || "",
+                            deleted_at: null,
+                            deleted_by: null,
+                        };
+
+                        activeCritIds.add(resolvedCritId);
+                        const existingScore = scoreCritMap.get(resolvedCritId);
+                        if (existingScore) {
+                            await patchItem("mm_rfq_bid_scores", existingScore.id, scorePayload);
+                        } else {
+                            await postItem("mm_rfq_bid_scores", scorePayload);
+                        }
+                    }
+
+                    for (const [cId, entry] of Array.from(scoreCritMap.entries())) {
+                        if (!activeCritIds.has(cId) && !entry.isDeleted) {
+                            await patchItem("mm_rfq_bid_scores", entry.id, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
+                        }
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // F3. Sync mm_rfq_bid_attachments
+                // ---------------------------------------------------------
+                if (bid.attachments && Array.isArray(bid.attachments)) {
+                    const existingAttachments = await fetchCollection<Record<string, unknown>>(
+                        "mm_rfq_bid_attachments",
+                        `filter[rfq_bid_id][_eq]=${resolvedBidId}&filter[deleted_at][_null]=true`
+                    );
+                    const existingAttMap = new Map<number, number>(); // att.id -> id
+                    existingAttachments.forEach((att) => existingAttMap.set(Number(att.id), Number(att.id)));
+
+                    const activeAttIds = new Set<number>();
+
+                    for (const att of bid.attachments) {
+                        const existingAttId = att.dbId || (typeof att.id === "number" ? att.id : parseDbId(att.id));
+
+                        // Directus file ID must be a valid 36-char string per schema
+                        const validDirectusId = (att.directusFileId && att.directusFileId.length === 36)
+                            ? att.directusFileId
+                            : crypto.randomUUID();
+
+                        const attPayload = {
+                            rfq_bid_id: resolvedBidId,
+                            directus_file_id: validDirectusId,
+                            file_name: att.fileName || "unnamed_document",
+                            mime_type: att.mimeType || "application/octet-stream",
+                            file_size: att.fileSize || 0,
+                            document_type: att.documentType || "Quotation",
+                        };
+
+                        if (existingAttId && existingAttMap.has(existingAttId)) {
+                            await patchItem("mm_rfq_bid_attachments", existingAttId, attPayload).catch(() => null);
+                            activeAttIds.add(existingAttId);
+                        } else {
+                            const createdAtt = await postItem<{ id: number }>("mm_rfq_bid_attachments", attPayload).catch(() => null);
+                            if (createdAtt?.id) {
+                                activeAttIds.add(Number(createdAtt.id));
                             }
                         }
                     }
-                }
 
-                // Soft-delete removed bid items
-                for (const bi of existingBidItems) {
-                    const biId = Number(bi.id);
-                    if (!activeBiIds.has(biId)) {
-                        await patchItem("mm_rfq_bid_items", biId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
-                    }
-                }
-            }
-
-            // ---------------------------------------------------------
-            // F2. Sync mm_rfq_bid_scores
-            // ---------------------------------------------------------
-            if (bid.scores && typeof bid.scores === "object") {
-                const existingScores = await fetchCollection<Record<string, unknown>>(
-                    "mm_rfq_bid_scores",
-                    `filter[rfq_bid_id][_eq]=${resolvedBidId}&filter[deleted_at][_null]=true`
-                );
-                const scoreCritMap = new Map<number, number>(); // criterion_id -> score_id
-                existingScores.forEach((sc) => scoreCritMap.set(Number(sc.criterion_id), Number(sc.id)));
-
-                const activeCritIds = new Set<number>();
-
-                const scoreEntries = Object.entries(bid.scores) as [
-                    string,
-                    { passFailResult?: "PASS" | "FAIL" | "NOT_CHECKED"; score?: number | null; evidenceRemarks?: string }
-                ][];
-                for (const [critId, scoreObj] of scoreEntries) {
-                    const resolvedCritId = critIdMap.get(critId) || parseDbId(critId);
-                    if (!resolvedCritId) continue;
-
-                    // Ensure score is 1-5 or null per MySQL chk_bid_score_range
-                    let sanitizedScore: number | null = null;
-                    if (typeof scoreObj.score === "number" && scoreObj.score >= 1 && scoreObj.score <= 5) {
-                        sanitizedScore = Math.round(scoreObj.score);
-                    }
-
-                    const scorePayload = {
-                        rfq_bid_id: resolvedBidId,
-                        criterion_id: resolvedCritId,
-                        pass_fail_result: scoreObj.passFailResult || "NOT_CHECKED",
-                        score: sanitizedScore,
-                        evidence_remarks: scoreObj.evidenceRemarks || "",
-                    };
-
-                    activeCritIds.add(resolvedCritId);
-                    const existingScoreId = scoreCritMap.get(resolvedCritId);
-                    if (existingScoreId) {
-                        await patchItem("mm_rfq_bid_scores", existingScoreId, scorePayload);
-                    } else {
-                        await postItem("mm_rfq_bid_scores", scorePayload);
-                    }
-                }
-
-                Array.from(scoreCritMap.entries()).forEach(async ([cId, sId]) => {
-                    if (!activeCritIds.has(cId)) {
-                        await patchItem("mm_rfq_bid_scores", sId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
-                    }
-                });
-            }
-
-            // ---------------------------------------------------------
-            // F3. Sync mm_rfq_bid_attachments
-            // ---------------------------------------------------------
-            if (bid.attachments && Array.isArray(bid.attachments)) {
-                const existingAttachments = await fetchCollection<Record<string, unknown>>(
-                    "mm_rfq_bid_attachments",
-                    `filter[rfq_bid_id][_eq]=${resolvedBidId}&filter[deleted_at][_null]=true`
-                );
-                const existingAttMap = new Map<number, number>(); // att.id -> id
-                existingAttachments.forEach((att) => existingAttMap.set(Number(att.id), Number(att.id)));
-
-                const activeAttIds = new Set<number>();
-
-                for (const att of bid.attachments) {
-                    const existingAttId = att.dbId || (typeof att.id === "number" ? att.id : parseDbId(att.id));
-
-                    // Directus file ID must be a valid 36-char string per schema
-                    const validDirectusId = (att.directusFileId && att.directusFileId.length === 36)
-                        ? att.directusFileId
-                        : crypto.randomUUID();
-
-                    const attPayload = {
-                        rfq_bid_id: resolvedBidId,
-                        directus_file_id: validDirectusId,
-                        file_name: att.fileName || "unnamed_document",
-                        mime_type: att.mimeType || "application/octet-stream",
-                        file_size: att.fileSize || 0,
-                        document_type: att.documentType || "Quotation",
-                    };
-
-                    if (existingAttId && existingAttMap.has(existingAttId)) {
-                        await patchItem("mm_rfq_bid_attachments", existingAttId, attPayload).catch(() => null);
-                        activeAttIds.add(existingAttId);
-                    } else {
-                        const createdAtt = await postItem<{ id: number }>("mm_rfq_bid_attachments", attPayload).catch(() => null);
-                        if (createdAtt?.id) {
-                            activeAttIds.add(Number(createdAtt.id));
+                    for (const att of existingAttachments) {
+                        const attId = Number(att.id);
+                        if (!activeAttIds.has(attId)) {
+                            await patchItem("mm_rfq_bid_attachments", attId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
                         }
                     }
                 }
+            }
 
-                for (const att of existingAttachments) {
-                    const attId = Number(att.id);
-                    if (!activeAttIds.has(attId)) {
-                        await patchItem("mm_rfq_bid_attachments", attId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
-                    }
+            // Soft-delete removed bids
+            for (const eBidId of Array.from(existingBidMap.keys())) {
+                if (!activeBidDbIds.has(eBidId)) {
+                    await patchItem("mm_rfq_bids", eBidId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
                 }
             }
         }
-
-        // Soft-delete removed bids
-        Array.from(existingBidMap.keys()).forEach(async (eBidId) => {
-            if (!activeBidDbIds.has(eBidId)) {
-                await patchItem("mm_rfq_bids", eBidId, { deleted_at: nowIso, deleted_by: userId }).catch(() => null);
-            }
-        });
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "bids and quotations", error: cleanUserReadableErrorMessage(err, "bids and quotations") },
+        };
     }
 
     // -------------------------------------------------------------
     // G. Sync mm_rfq_awards
     // -------------------------------------------------------------
-    if (project.awards && Array.isArray(project.awards)) {
-        const existingAwards = await fetchCollection<Record<string, unknown>>(
-            "mm_rfq_awards",
-            `filter[rfq_id][_eq]=${rfqId}&filter[status][_eq]=ACTIVE`
-        );
-        const existingAwardItemMap = new Map<number, number>(); // rfq_item_id -> award_id
-        existingAwards.forEach((aw) => existingAwardItemMap.set(Number(aw.rfq_item_id), Number(aw.id)));
+    try {
+        if (project.awards && Array.isArray(project.awards)) {
+            const existingAwards = await fetchCollection<Record<string, unknown>>(
+                "mm_rfq_awards",
+                `filter[rfq_id][_eq]=${rfqId}`
+            );
+            const existingAwardItemMap = new Map<number, { id: number; status: string }>(); // rfq_item_id -> { id, status }
+            existingAwards.forEach((aw) =>
+                existingAwardItemMap.set(Number(aw.rfq_item_id), {
+                    id: Number(aw.id),
+                    status: String(aw.status),
+                })
+            );
 
-        const activeAwardItemIds = new Set<number>();
+            const activeAwardItemIds = new Set<number>();
 
-        for (const aw of project.awards) {
-            const resolvedItemId = itemIdMap.get(aw.rfqItemId) || parseDbId(aw.rfqItemId);
-            const resolvedBidId = bidIdMap.get(aw.rfqBidId) || parseDbId(aw.rfqBidId);
-            const resolvedBidItemId = bidItemIdMap.get(`${aw.rfqBidId}_${aw.rfqItemId}`) || parseDbId(aw.id);
+            for (const aw of project.awards) {
+                const resolvedItemId = itemIdMap.get(aw.rfqItemId) || parseDbId(aw.rfqItemId);
+                const resolvedBidId = bidIdMap.get(aw.rfqBidId) || parseDbId(aw.rfqBidId);
+                let resolvedBidItemId =
+                    bidItemIdMap.get(`${aw.rfqBidId}_${aw.rfqItemId}`) ||
+                    bidItemIdMap.get(`${resolvedBidId}_${resolvedItemId}`) ||
+                    bidItemIdMap.get(`${aw.rfqBidId}_${resolvedItemId}`) ||
+                    bidItemIdMap.get(`${resolvedBidId}_${aw.rfqItemId}`) ||
+                    parseDbId(aw.id);
 
-            if (!resolvedItemId || !resolvedBidId || !resolvedBidItemId) continue;
+                if (!resolvedItemId || !resolvedBidId) continue;
 
-            activeAwardItemIds.add(resolvedItemId);
+                // If resolvedBidItemId wasn't in memory map, look it up or create it in mm_rfq_bid_items
+                if (!resolvedBidItemId) {
+                    const foundBi = await fetchCollection<Record<string, unknown>>(
+                        "mm_rfq_bid_items",
+                        `filter[rfq_bid_id][_eq]=${resolvedBidId}&filter[rfq_item_id][_eq]=${resolvedItemId}&limit=1`
+                    );
+                    if (foundBi.length > 0) {
+                        resolvedBidItemId = Number(foundBi[0].id);
+                    } else {
+                        const createdBi = await postItem<{ id: number }>("mm_rfq_bid_items", {
+                            rfq_bid_id: resolvedBidId,
+                            rfq_item_id: resolvedItemId,
+                            discount_pct: 0,
+                        }).catch(() => null);
+                        if (createdBi?.id) {
+                            resolvedBidItemId = Number(createdBi.id);
+                        }
+                    }
+                }
 
-            const awardPayload = {
-                rfq_id: rfqId,
-                rfq_item_id: resolvedItemId,
-                rfq_bid_id: resolvedBidId,
-                awarded_bid_item_id: resolvedBidItemId,
-                awarded_supplier_id: aw.awardedSupplierId || null,
-                awarded_landed_unit_cost: aw.awardedLandedUnitCost,
-                awarded_landed_total: aw.awardedLandedTotal,
-                purchase_order_id: aw.purchaseOrderId || null,
-                status: "ACTIVE",
-            };
+                if (!resolvedBidItemId) continue;
 
-            const existingAwardId = existingAwardItemMap.get(resolvedItemId);
-            if (existingAwardId) {
-                await patchItem("mm_rfq_awards", existingAwardId, awardPayload);
-            } else {
-                await postItem("mm_rfq_awards", awardPayload);
+                activeAwardItemIds.add(resolvedItemId);
+
+                const awardPayload = {
+                    rfq_id: rfqId,
+                    rfq_item_id: resolvedItemId,
+                    rfq_bid_id: resolvedBidId,
+                    awarded_bid_item_id: resolvedBidItemId,
+                    awarded_supplier_id: aw.awardedSupplierId || null,
+                    awarded_landed_unit_cost: aw.awardedLandedUnitCost,
+                    awarded_landed_total: aw.awardedLandedTotal,
+                    purchase_order_id: aw.purchaseOrderId || null,
+                    status: "ACTIVE",
+                    revoked_at: null,
+                    revoked_by: null,
+                    revocation_reason: null,
+                };
+
+                const existingAward = existingAwardItemMap.get(resolvedItemId);
+                if (existingAward) {
+                    await patchItem("mm_rfq_awards", existingAward.id, awardPayload);
+                } else {
+                    await postItem("mm_rfq_awards", awardPayload);
+                }
+            }
+
+            // Revoke active awards that are no longer selected
+            for (const [itemDbId, entry] of Array.from(existingAwardItemMap.entries())) {
+                if (!activeAwardItemIds.has(itemDbId) && entry.status === "ACTIVE") {
+                    await patchItem("mm_rfq_awards", entry.id, {
+                        status: "REVOKED",
+                        revoked_at: nowIso,
+                        revoked_by: userId,
+                        revocation_reason: "Award updated in Supplier Comparison module",
+                    }).catch(() => null);
+                }
             }
         }
-
-        // Revoke active awards that are no longer selected
-        Array.from(existingAwardItemMap.entries()).forEach(async ([itemDbId, awId]) => {
-            if (!activeAwardItemIds.has(itemDbId)) {
-                await patchItem("mm_rfq_awards", awId, {
-                    status: "REVOKED",
-                    revoked_at: nowIso,
-                    revoked_by: userId,
-                    revocation_reason: "Award updated in Supplier Bid Comparison module",
-                }).catch(() => null);
-            }
-        });
+    } catch (err) {
+        return {
+            resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
+            partialFailure: { section: "awards", error: cleanUserReadableErrorMessage(err, "awards") },
+        };
     }
+
+    return {
+        resolvedIds: {
+            items: Object.fromEntries(itemIdMap),
+            criteria: Object.fromEntries(critIdMap),
+            bids: Object.fromEntries(bidIdMap),
+        },
+    };
 }
 
 /**
