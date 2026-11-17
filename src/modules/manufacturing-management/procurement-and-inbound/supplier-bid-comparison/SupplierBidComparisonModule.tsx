@@ -2,11 +2,14 @@
 
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useBidComparisonStore } from "./hooks/useBidComparisonState";
+import { Loader2 } from "lucide-react";
+import { ACTIVE_PROJECT_ID_KEY, useBidComparisonStore } from "./hooks/useBidComparisonState";
 import { TopBar } from "./components/layout/TopBar";
 import { StepNavigation } from "./components/layout/StepNavigation";
 import { ImportExportModal } from "./components/shared/ImportExportModal";
 import { ExportModal } from "./components/shared/ExportModal";
+import { SelectProjectModal } from "./components/shared/SelectProjectModal";
+import { ExecutiveRfqDirectory } from "./components/directory/ExecutiveRfqDirectory";
 
 // Step 1: Setup Components
 import { ProjectDetailsCard } from "./components/setup/ProjectDetailsCard";
@@ -52,7 +55,23 @@ import { toast } from "sonner";
 import { Plus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export const SupplierBidComparisonModule: React.FC = () => {
+interface SupplierBidComparisonModuleProps {
+  currentUser?: {
+    name?: string;
+    email?: string;
+    avatar?: string;
+  };
+}
+
+export const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = ({ currentUser }) => {
+  const setCurrentUser = useBidComparisonStore((s) => s.setCurrentUser);
+
+  useEffect(() => {
+    if (currentUser) {
+      setCurrentUser(currentUser);
+    }
+  }, [currentUser, setCurrentUser]);
+
   const {
     currentStep,
     setCurrentStep,
@@ -62,24 +81,44 @@ export const SupplierBidComparisonModule: React.FC = () => {
     updateProject,
     fetchLookups,
     fetchProjects,
+    isLoadingProject,
   } = useBidComparisonStore();
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isSelectProjectOpen, setIsSelectProjectOpen] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [supplierFilter, setSupplierFilter] = useState<"ALL" | "LOCAL" | "INTERNATIONAL">("ALL");
 
-  // Initial load
+  const hasInitializedRef = React.useRef(false);
+
+  // Initial load: Restore remembered project on refresh, or prompt user to select first
   useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+
     fetchLookups();
     fetchProjects().then(async () => {
       const store = useBidComparisonStore.getState();
-      if (!store.currentProject) {
-        if (store.projectsList && store.projectsList.length > 0) {
-          await store.selectProject(store.projectsList[0].id);
-        } else {
-          store.createNewProject();
+      const rememberedId = typeof window !== "undefined"
+        ? localStorage.getItem(ACTIVE_PROJECT_ID_KEY)
+        : null;
+
+      if (rememberedId) {
+        const foundInList = store.projectsList.some((p) => p.id === rememberedId);
+        const hasLocalCache = typeof window !== "undefined" && !!localStorage.getItem(`mm_rfq_project_${rememberedId}`);
+
+        if (foundInList || hasLocalCache) {
+          if (typeof window !== "undefined" && localStorage.getItem(ACTIVE_PROJECT_ID_KEY) === rememberedId) {
+            await store.selectProject(rememberedId);
+          }
+          setIsInitialLoading(false);
+          return;
         }
       }
+
+      // No remembered project: Land directly on Executive RFQ Directory
+      setIsInitialLoading(false);
     });
   }, [fetchLookups, fetchProjects]);
 
@@ -245,11 +284,38 @@ export const SupplierBidComparisonModule: React.FC = () => {
     toast.success("Supplier quotation removed");
   };
 
-  if (!currentProject) {
+  if (isInitialLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] text-muted-foreground gap-3">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        <p className="text-sm">Loading Supplier Bid Comparison workspace...</p>
+        <p className="text-sm">Loading Supplier Comparison workspace...</p>
+      </div>
+    );
+  }
+
+  if (!currentProject) {
+    const store = useBidComparisonStore.getState();
+    return (
+      <div className="flex flex-col w-full min-h-screen bg-background text-foreground print:hidden">
+        <main className="flex-1 w-full p-2 sm:p-4 md:p-6 overflow-y-auto">
+          <ExecutiveRfqDirectory
+            projects={store.projectsList}
+            onSelectProject={(id) => {
+              store.selectProject(id);
+            }}
+            onOpenNewProjectDialog={() => {
+              store.createNewProject();
+            }}
+            onOpenImportModal={() => setIsImportModalOpen(true)}
+          />
+        </main>
+
+        {isImportModalOpen && (
+          <ImportExportModal
+            isOpen={isImportModalOpen}
+            onClose={() => setIsImportModalOpen(false)}
+          />
+        )}
       </div>
     );
   }
@@ -271,6 +337,14 @@ export const SupplierBidComparisonModule: React.FC = () => {
 
       {/* 5-Step Navigation Header */}
       <StepNavigation />
+
+      {/* Switching Project Subtle Indicator */}
+      {isLoadingProject && (
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-full border bg-background/95 px-3.5 py-2 shadow-lg backdrop-blur-xs text-xs font-medium text-foreground transition-all">
+          <Loader2 className="h-4 w-4 text-primary animate-spin shrink-0" />
+          <span>Switching RFQ project...</span>
+        </div>
+      )}
 
       {/* Main Tab Content with Full-Width Layout */}
       <main className="flex-1 p-3 sm:p-5 md:p-6 w-full max-w-none print:p-0 print:m-0 print:bg-white print:overflow-visible print:h-auto print:block">
@@ -477,6 +551,23 @@ export const SupplierBidComparisonModule: React.FC = () => {
           onClose={() => setIsExportModalOpen(false)}
           project={currentProject}
           onTriggerPrint={handlePrint}
+        />
+      )}
+
+      {/* Select Project Modal */}
+      {isSelectProjectOpen && (
+        <SelectProjectModal
+          isOpen={isSelectProjectOpen}
+          onClose={() => setIsSelectProjectOpen(false)}
+          projects={useBidComparisonStore.getState().projectsList}
+          currentProjectId={currentProject?.id}
+          onSelectProject={(id) => {
+            useBidComparisonStore.getState().selectProject(id);
+          }}
+          onOpenNewProjectDialog={() => {
+            useBidComparisonStore.getState().createNewProject();
+          }}
+          allowDismiss={true}
         />
       )}
     </div>

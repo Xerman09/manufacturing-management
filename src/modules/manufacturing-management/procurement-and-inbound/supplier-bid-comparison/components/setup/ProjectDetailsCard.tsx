@@ -14,14 +14,33 @@ import {
 } from "@/components/ui/select";
 import { NumericInputField } from "../shared/NumericInputField";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { AlertCircle } from "lucide-react";
 
 const CURRENCIES = ["PHP", "USD", "CNY", "EUR", "JPY", "SGD", "GBP", "AUD"];
 
 export const ProjectDetailsCard: React.FC = () => {
-    const { currentProject, updateProject } = useBidComparisonStore();
+    const { currentProject, updateProject, projectsList, saveError } = useBidComparisonStore();
     if (!currentProject) return null;
 
     const compCurr = currentProject.comparisonCurrency || "PHP";
+
+    const isReferenceDuplicate = React.useMemo(() => {
+        if (!currentProject?.rfqReference?.trim()) return false;
+        const ref = currentProject.rfqReference.trim().toLowerCase();
+        const round = currentProject.roundNo || 1;
+        return projectsList.some(
+            (p) =>
+                p.id !== currentProject.id &&
+                p.rfqReference?.trim().toLowerCase() === ref &&
+                (p.roundNo || 1) === round
+        );
+    }, [currentProject?.rfqReference, currentProject?.roundNo, currentProject?.id, projectsList]);
+
+    const isSaveErrorConflict = Boolean(
+        saveError && (saveError.toLowerCase().includes("reference") || saveError.toLowerCase().includes("unique"))
+    );
+
+    const hasRefError = isReferenceDuplicate || isSaveErrorConflict;
 
     return (
         <Card className="shadow-xs border-border/80 h-full flex flex-col bg-card">
@@ -46,19 +65,38 @@ export const ProjectDetailsCard: React.FC = () => {
                 {/* Row 2: Reference no., Target date, Compare in, Budget */}
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground font-medium">Reference no.</Label>
+                        <div className="flex items-center justify-between">
+                            <Label className={`text-xs font-medium ${hasRefError ? "text-destructive" : "text-muted-foreground"}`}>
+                                Reference no.
+                            </Label>
+                            {hasRefError && (
+                                <span className="text-[10px] text-destructive font-semibold">Already taken</span>
+                            )}
+                        </div>
                         <Input
                             value={currentProject.rfqReference}
                             onChange={(e) => updateProject((prev) => ({ ...prev, rfqReference: e.target.value }))}
                             placeholder="RFQ-2026-118"
-                            className="h-8 text-xs font-mono bg-background"
+                            className={`h-8 text-xs font-mono bg-background transition-colors ${
+                                hasRefError
+                                    ? "border-destructive text-destructive focus-visible:ring-destructive bg-destructive/5"
+                                    : ""
+                            }`}
                         />
+                        {hasRefError && (
+                            <p className="text-[11px] text-destructive font-medium flex items-center gap-1.5 pt-0.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>Reference is already in use by another RFQ project round.</span>
+                            </p>
+                        )}
                     </div>
 
                     <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground font-medium">Target date</Label>
                         <Input
                             type="date"
+                            min="2000-01-01"
+                            max="2099-12-31"
                             value={currentProject.targetDate ? currentProject.targetDate.slice(0, 10) : ""}
                             onChange={(e) => updateProject((prev) => ({ ...prev, targetDate: e.target.value }))}
                             className="h-8 text-xs font-mono bg-background"

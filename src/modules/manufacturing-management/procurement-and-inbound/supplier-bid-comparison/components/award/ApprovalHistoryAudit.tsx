@@ -7,10 +7,13 @@ import { Badge } from "@/components/ui/badge";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 
 export const ApprovalHistoryAudit: React.FC = () => {
-    const { currentProject } = useBidComparisonStore();
+    const { currentProject, currentUser } = useBidComparisonStore();
     if (!currentProject) return null;
 
     const history = currentProject.approvalHistory || [];
+    const currentFallbackName = (currentUser?.name && currentUser.name !== "-") 
+        ? currentUser.name 
+        : (currentUser?.email || "-");
 
     const getActionBadge = (action: string) => {
         switch (action) {
@@ -50,7 +53,7 @@ export const ApprovalHistoryAudit: React.FC = () => {
     };
 
     return (
-        <Card className="shadow-xs border-border/80">
+        <Card className="shadow-xs border-border/80  max-h-[80vh]">
             <CardHeader className="py-3 px-4 border-b bg-muted/20">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                     <History className="h-4 w-4 text-primary" />
@@ -60,40 +63,51 @@ export const ApprovalHistoryAudit: React.FC = () => {
                     Immutable chronological record of submissions, approvals, rejections, and reopenings.
                 </CardDescription>
             </CardHeader>
-            <CardContent className="p-4">
+            <CardContent className="p-4 overflow-y-auto max-h-[80vh]">
                 {history.length === 0 ? (
                     <div className="py-6 text-center text-xs text-muted-foreground">
                         No approval actions logged yet. Actions taken on this award will appear here.
                     </div>
                 ) : (
                     <div className="space-y-3">
-                        {[...history].reverse().map((entry, idx) => (
-                            <div
-                                key={entry.id || idx}
-                                className="p-3 rounded-lg border bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
-                            >
-                                <div className="space-y-1">
-                                    <div className="flex items-center gap-2">
-                                        {getActionBadge(entry.action)}
-                                        <span className="font-semibold text-foreground">
-                                            {entry.actorName || "Authorized User"}
-                                        </span>
-                                        <span className="text-[10px] text-muted-foreground">
-                                            ({entry.fromStatus} &rarr; {entry.toStatus})
-                                        </span>
-                                    </div>
-                                    {entry.comment && (
-                                        <p className="text-xs text-muted-foreground pl-0.5">
-                                            &ldquo;{entry.comment}&rdquo;
-                                        </p>
-                                    )}
-                                </div>
+                        {[...history].reverse().map((entry, idx) => {
+                            const isLegacyPlaceholder =
+                                entry.actorName === "Juan Dela Cruz" ||
+                                entry.actorName === "Authorized User" ||
+                                entry.actorName === "System User";
+                            const displayActor =
+                                !entry.actorName || isLegacyPlaceholder
+                                    ? currentFallbackName
+                                    : entry.actorName;
 
-                                <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                                    {new Date(entry.createdAt).toLocaleString()}
-                                </span>
-                            </div>
-                        ))}
+                            return (
+                                <div
+                                    key={entry.id || idx}
+                                    className="p-3 rounded-lg border bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                                >
+                                    <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                            {getActionBadge(entry.action)}
+                                            <span className="font-semibold text-foreground">
+                                                {displayActor || "-"}
+                                            </span>
+                                            <span className="text-[10px] text-muted-foreground">
+                                                ({entry.fromStatus} &rarr; {entry.toStatus})
+                                            </span>
+                                        </div>
+                                        {entry.comment && (
+                                            <p className="text-xs text-muted-foreground pl-0.5">
+                                                &ldquo;{entry.comment}&rdquo;
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                                        {new Date(entry.createdAt).toLocaleString()}
+                                    </span>
+                                </div>
+                            );
+                        })}
                     </div>
                 )}
             </CardContent>

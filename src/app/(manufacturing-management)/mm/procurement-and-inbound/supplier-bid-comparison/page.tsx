@@ -61,7 +61,7 @@ function buildHeaderUserFromToken(token: string | null | undefined) {
   ]);
   const email = pickString(payload, ["email", "Email"]);
 
-  const name = [first, last].filter(Boolean).join(" ") || email || "User";
+  const name = [first, last].filter(Boolean).join(" ") || email || "-";
 
   return {
     name,
@@ -107,7 +107,7 @@ export default async function SupplierBidComparisonPage() {
                 <BreadcrumbSeparator className="hidden md:block shrink-0" />
                 <BreadcrumbItem className="min-w-0 overflow-hidden">
                   <BreadcrumbPage className="truncate max-w-[56vw] sm:max-w-[60vw] md:max-w-none font-medium">
-                    Supplier Bid Comparison
+                    Supplier Comparison
                   </BreadcrumbPage>
                 </BreadcrumbItem>
               </BreadcrumbList>
@@ -122,7 +122,7 @@ export default async function SupplierBidComparisonPage() {
 
       {/* Main Content Viewport */}
       <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden bg-background print:overflow-visible print:h-auto print:block">
-        <SupplierBidComparisonModule />
+        <SupplierBidComparisonModule currentUser={headerUser} />
       </main>
     </div>
   );

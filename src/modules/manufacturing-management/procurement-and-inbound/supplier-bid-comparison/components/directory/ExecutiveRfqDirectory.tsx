@@ -1,23 +1,25 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState, useSyncExternalStore } from "react";
 import { motion } from "framer-motion";
 import {
     Search,
     Plus,
+    Upload,
     ChevronRight,
     FolderKanban,
     X,
     LayoutGrid,
     List as ListIcon,
     ArrowUpRight,
-    BellRing,
     Inbox,
+    Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProjectStatus } from "../../types";
+import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 
 interface ProjectItem {
     id: string;
@@ -32,6 +34,7 @@ interface ExecutiveRfqDirectoryProps {
     projects: ProjectItem[];
     onSelectProject: (projectId: string) => void;
     onOpenNewProjectDialog: () => void;
+    onOpenImportModal?: () => void;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -94,6 +97,39 @@ const getStage = (status: ProjectStatus): StageConfig => STAGE_CONFIG[status] ||
 const normalizeStatus = (status: ProjectStatus): ProjectStatus => (STAGE_CONFIG[status] ? status : "Draft");
 
 const VIEW_KEY = "mm_rfq_directory_view";
+
+const viewListeners = new Set<() => void>();
+function notifyViewChange() {
+    viewListeners.forEach((listener) => listener());
+}
+
+function subscribeView(callback: () => void) {
+    viewListeners.add(callback);
+    if (typeof window !== "undefined") {
+        window.addEventListener("storage", callback);
+    }
+    return () => {
+        viewListeners.delete(callback);
+        if (typeof window !== "undefined") {
+            window.removeEventListener("storage", callback);
+        }
+    };
+}
+
+function getViewSnapshot(): "board" | "list" {
+    if (typeof window === "undefined") return "board";
+    try {
+        const saved = localStorage.getItem(VIEW_KEY);
+        if (saved === "board" || saved === "list") return saved;
+    } catch {
+        // ignore
+    }
+    return "board";
+}
+
+function getViewServerSnapshot(): "board" | "list" {
+    return "board";
+}
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -200,53 +236,74 @@ const Connector: React.FC<{ active: boolean }> = ({ active }) => (
 /* Board tile                                                                 */
 /* -------------------------------------------------------------------------- */
 
-const RfqTile: React.FC<{ project: ProjectItem; index: number; onOpen: (id: string) => void }> = ({
+const RfqTile: React.FC<{
+    project: ProjectItem;
+    index: number;
+    onOpen: (id: string) => void;
+    isOpening?: boolean;
+    disabled?: boolean;
+}> = ({
     project: p,
     index,
     onOpen,
+    isOpening = false,
+    disabled = false,
 }) => {
-    const updated = formatUpdated(p.updatedAt);
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.18, delay: Math.min(index * 0.03, 0.18) }}
-        >
-            <button
-                type="button"
-                onClick={() => onOpen(p.id)}
-                className={cn(
-                    "group w-full rounded-xl border bg-card p-4 text-left shadow-xs outline-none transition-all",
-                    "hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md",
-                    "focus-visible:ring-2 focus-visible:ring-ring"
-                )}
+        const updated = formatUpdated(p.updatedAt);
+        return (
+            <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.18, delay: Math.min(index * 0.03, 0.18) }}
             >
-                <div className="flex items-center justify-between gap-2">
-                    <span className="truncate font-mono text-[11px] font-semibold text-primary">{p.rfqReference}</span>
-                    <span className="shrink-0 rounded bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground">
-                        R{p.roundNo || 1}
-                    </span>
-                </div>
+                <button
+                    type="button"
+                    disabled={disabled || isOpening}
+                    onClick={() => onOpen(p.id)}
+                    className={cn(
+                        "group w-full rounded-xl border bg-card p-4 text-left shadow-xs outline-none transition-all",
+                        isOpening
+                            ? "border-primary ring-2 ring-primary/20 bg-primary/5 cursor-wait"
+                            : "hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md cursor-pointer",
+                        disabled && !isOpening && "opacity-60 pointer-events-none",
+                        "focus-visible:ring-2 focus-visible:ring-ring"
+                    )}
+                >
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-mono text-[11px] font-semibold text-primary">{p.rfqReference}</span>
+                        <span className="shrink-0 rounded bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground">
+                            R{p.roundNo || 1}
+                        </span>
+                    </div>
 
-                <p className="mt-2 line-clamp-2 text-sm font-medium leading-snug text-foreground transition-colors group-hover:text-primary">
-                    {p.rfqTitle}
-                </p>
+                    <p className="mt-2 line-clamp-2 text-sm font-medium leading-snug text-foreground transition-colors group-hover:text-primary">
+                        {p.rfqTitle}
+                    </p>
 
-                <div className="mt-4 flex items-center justify-between gap-2">
-                    <StageTrack status={p.status} />
-                    <span className="text-[11px] text-muted-foreground" title={updated.full}>
-                        {updated.short}
-                    </span>
-                </div>
+                    <div className="mt-4 flex items-center justify-between gap-2">
+                        <StageTrack status={p.status} />
+                        <span className="text-[11px] text-muted-foreground" title={updated.full}>
+                            {updated.short}
+                        </span>
+                    </div>
 
-                <div className="mt-3 flex items-center justify-between border-t pt-3 text-[11px] font-medium text-muted-foreground transition-colors group-hover:text-primary">
-                    <span>Open review</span>
-                    <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                </div>
-            </button>
-        </motion.div>
-    );
-};
+                    <div className="mt-3 flex items-center justify-between border-t pt-3 text-[11px] font-medium transition-colors">
+                        {isOpening ? (
+                            <span className="flex items-center gap-1.5 text-primary font-semibold">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Opening RFQ...
+                            </span>
+                        ) : (
+                            <>
+                                <span className="text-muted-foreground group-hover:text-primary">Open review</span>
+                                <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                            </>
+                        )}
+                    </div>
+                </button>
+            </motion.div>
+        );
+    };
 
 /* -------------------------------------------------------------------------- */
 /* Main component                                                             */
@@ -259,27 +316,21 @@ export const ExecutiveRfqDirectory: React.FC<ExecutiveRfqDirectoryProps> = ({
     projects,
     onSelectProject,
     onOpenNewProjectDialog,
+    onOpenImportModal,
 }) => {
+    const switchingToProjectId = useBidComparisonStore((s) => s.switchingToProjectId);
+    const isLoadingProject = useBidComparisonStore((s) => s.isLoadingProject);
     const [searchQuery, setSearchQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState<"ALL" | ProjectStatus>("ALL");
-    const [view, setView] = useState<"board" | "list">("board");
-
-    useEffect(() => {
-        try {
-            const saved = localStorage.getItem(VIEW_KEY);
-            if (saved === "board" || saved === "list") setView(saved);
-        } catch {
-            // ignore
-        }
-    }, []);
+    const view = useSyncExternalStore(subscribeView, getViewSnapshot, getViewServerSnapshot);
 
     const changeView = (v: "board" | "list") => {
-        setView(v);
         try {
             localStorage.setItem(VIEW_KEY, v);
         } catch {
             // ignore
         }
+        notifyViewChange();
     };
 
     const counts = useMemo(() => {
@@ -291,13 +342,6 @@ export const ExecutiveRfqDirectory: React.FC<ExecutiveRfqDirectoryProps> = ({
     }, [projects]);
 
     const total = projects.length;
-
-    const lastActivity = useMemo(() => {
-        const times = projects
-            .map((p) => (p.updatedAt ? new Date(p.updatedAt).getTime() : NaN))
-            .filter((t) => !isNaN(t));
-        return times.length ? formatUpdated(new Date(Math.max(...times)).toISOString()).short : null;
-    }, [projects]);
 
     const filteredProjects = useMemo(() => {
         const query = searchQuery.trim().toLowerCase();
@@ -368,22 +412,15 @@ export const ExecutiveRfqDirectory: React.FC<ExecutiveRfqDirectoryProps> = ({
                                 Create New RFQ
                             </Button>
 
-                            {counts.Submitted > 0 ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setStatusFilter("Submitted")}
-                                    className="inline-flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-800 transition-colors hover:bg-amber-500/20 dark:text-amber-300"
+                            {onOpenImportModal && (
+                                <Button
+                                    variant="outline"
+                                    onClick={onOpenImportModal}
+                                    className="h-10 gap-2 px-4 text-xs font-semibold shadow-sm"
                                 >
-                                    <BellRing className="h-3.5 w-3.5" />
-                                    {counts.Submitted} awaiting your review
-                                    <ChevronRight className="h-3.5 w-3.5" />
-                                </button>
-                            ) : (
-                                lastActivity && (
-                                    <span className="text-xs text-muted-foreground">
-                                        {total} {total === 1 ? "RFQ" : "RFQs"} &middot; last activity {lastActivity.toLowerCase()}
-                                    </span>
-                                )
+                                    <Upload className="h-4 w-4" />
+                                    Import Project
+                                </Button>
                             )}
                         </div>
                     </div>
@@ -525,7 +562,14 @@ export const ExecutiveRfqDirectory: React.FC<ExecutiveRfqDirectoryProps> = ({
                                 ) : (
                                     <div className={cn(singleColumn ? "grid gap-3 sm:grid-cols-2 xl:grid-cols-4" : "space-y-2.5")}>
                                         {items.map((p, i) => (
-                                            <RfqTile key={p.id} project={p} index={i} onOpen={onSelectProject} />
+                                            <RfqTile
+                                                key={p.id}
+                                                project={p}
+                                                index={i}
+                                                onOpen={onSelectProject}
+                                                isOpening={switchingToProjectId === p.id}
+                                                disabled={isLoadingProject}
+                                            />
                                         ))}
                                     </div>
                                 )}
@@ -557,21 +601,28 @@ export const ExecutiveRfqDirectory: React.FC<ExecutiveRfqDirectoryProps> = ({
                             {filteredProjects.map((p) => {
                                 const cfg = getStage(p.status);
                                 const updated = formatUpdated(p.updatedAt);
+                                const isOpening = switchingToProjectId === p.id;
                                 return (
                                     <li key={p.id}>
                                         <div
                                             role="button"
-                                            tabIndex={0}
-                                            onClick={() => onSelectProject(p.id)}
+                                            tabIndex={isLoadingProject ? -1 : 0}
+                                            onClick={() => {
+                                                if (!isLoadingProject) onSelectProject(p.id);
+                                            }}
                                             onKeyDown={(e) => {
-                                                if (e.key === "Enter" || e.key === " ") {
+                                                if ((e.key === "Enter" || e.key === " ") && !isLoadingProject) {
                                                     e.preventDefault();
                                                     onSelectProject(p.id);
                                                 }
                                             }}
                                             className={cn(
                                                 LIST_GRID,
-                                                "group relative cursor-pointer py-4 outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/50"
+                                                "group relative py-4 outline-none transition-colors",
+                                                isOpening
+                                                    ? "bg-primary/5 ring-1 ring-primary/20 cursor-wait"
+                                                    : "hover:bg-muted/40 focus-visible:bg-muted/50 cursor-pointer",
+                                                isLoadingProject && !isOpening && "opacity-50 pointer-events-none"
                                             )}
                                         >
                                             <span
@@ -601,7 +652,14 @@ export const ExecutiveRfqDirectory: React.FC<ExecutiveRfqDirectoryProps> = ({
                                             <span className="hidden truncate text-xs text-muted-foreground md:block" title={updated.full}>
                                                 {updated.short}
                                             </span>
-                                            <ChevronRight className="hidden h-4 w-4 text-muted-foreground/40 transition-all group-hover:translate-x-0.5 group-hover:text-primary md:block" />
+                                            {isOpening ? (
+                                                <span className="flex items-center gap-1.5 text-xs text-primary font-semibold shrink-0">
+                                                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                                                    <span className="hidden sm:inline">Opening...</span>
+                                                </span>
+                                            ) : (
+                                                <ChevronRight className="hidden h-4 w-4 text-muted-foreground/40 transition-all group-hover:translate-x-0.5 group-hover:text-primary md:block" />
+                                            )}
                                         </div>
                                     </li>
                                 );

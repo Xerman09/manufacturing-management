@@ -1,5 +1,5 @@
 import { saveAs } from "file-saver";
-import { RfqProject } from "../types";
+import { RfqProject, SupplierBid } from "../types";
 import { evaluateAndCompareSuppliers } from "./scoring-engine";
 
 export interface DynamicExportOptions {
@@ -43,7 +43,7 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
     const ExcelJS = (await import("exceljs")).default;
     const summary = evaluateAndCompareSuppliers(filteredProject);
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "VOS ERP - Supplier Bid Comparison";
+    workbook.creator = "VOS ERP - Supplier Comparison";
     workbook.created = new Date();
 
     const targetBids = filteredProject.bids;
@@ -89,6 +89,29 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
         ["Approved By Title", filteredProject.approvedByTitle || "Operations Director", "Position title"],
         ["Justification", filteredProject.justification || "", "Executive justification for award"],
     ];
+
+    if (filteredProject.customsRates) {
+        setupParams.push(
+            ["Customs CDS Fee", filteredProject.customsRates.cdsCompCurr ?? 100, "Customs Entry Processing Fee"],
+            ["Customs BIR DST", filteredProject.customsRates.birDstCompCurr ?? 30, "Documentary Stamp Tax"],
+            ["Container Security (USD)", filteredProject.customsRates.containerSecurityUsd ?? 5, "Container security charge in USD"],
+            ["Arrastre 20ft", filteredProject.customsRates.arrastre20ftCompCurr ?? 4738, "20ft container arrastre charge"],
+            ["Arrastre 40ft", filteredProject.customsRates.arrastre40ftCompCurr ?? 10869, "40ft container arrastre charge"],
+            ["Wharfage 20ft", filteredProject.customsRates.wharfage20ftCompCurr ?? 519.35, "20ft container wharfage charge"],
+            ["Wharfage 40ft", filteredProject.customsRates.wharfage40ftCompCurr ?? 779.05, "40ft container wharfage charge"],
+            ["LCL Arrastre / RT", filteredProject.customsRates.lclArrastrePerRtCompCurr ?? 149, "LCL arrastre rate per revenue ton"],
+            ["LCL Wharfage / RT", filteredProject.customsRates.lclWharfagePerRtCompCurr ?? 30.55, "LCL wharfage rate per revenue ton"],
+            ["LC Bank Charge (%)", filteredProject.customsRates.lcBankChargePct ?? 0.125, "Bank charge on letter of credit"]
+        );
+    }
+
+    if (filteredProject.ipcBrackets && filteredProject.ipcBrackets.length > 0) {
+        setupParams.push([
+            "IPC Brackets",
+            JSON.stringify(filteredProject.ipcBrackets),
+            "Incremental price change brackets configuration",
+        ]);
+    }
 
     setupParams.forEach(([param, val, desc]) => {
         setupSheet.addRow([param, val, desc]);
@@ -179,6 +202,9 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
         "Duty %",
         "Weight (kg/unit)",
         "Volume (cbm/unit)",
+        "Product ID",
+        "Template ID",
+        "Variant ID",
     ]);
     itemsHeader.font = { bold: true };
     itemsHeader.fill = {
@@ -199,6 +225,9 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
             item.dutyPct || 0,
             item.weightPerUnitKg || 0,
             item.cbmPerUnit || 0,
+            item.productId ?? "",
+            item.itemTemplateId ?? "",
+            item.itemVariantId ?? "",
         ]);
     });
     itemsSheet.columns = [
@@ -212,6 +241,9 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
         { width: 10 },
         { width: 16 },
         { width: 16 },
+        { width: 14 },
+        { width: 14 },
+        { width: 14 },
     ];
 
     // -------------------------------------------------------------------------
@@ -222,7 +254,7 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
     });
 
     // Title & Header Block
-    compSheet.addRow(["SUPPLIER BID COMPARISON - ABSTRACT & EVALUATION"]).font = {
+    compSheet.addRow(["SUPPLIER COMPARISON - ABSTRACT & EVALUATION"]).font = {
         size: 14,
         bold: true,
     };
@@ -324,6 +356,34 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
                     fgColor: { argb: "FFF1F5F9" },
                 };
             }
+        }
+    }
+
+    // Commercial & Payment Terms Section (optional)
+    if (options?.includeCommercialTerms !== false) {
+        compSheet.addRow([]);
+        const commTitle = compSheet.addRow(["COMMERCIAL & PAYMENT TERMS COMPARISON"]);
+        commTitle.font = { bold: true };
+
+        const commLines: { label: string; getValue: (b: SupplierBid) => string | number }[] = [
+            { label: "Delivery Incoterm", getValue: (b) => b.incoterm || (b.supplierType === "LOCAL" ? "DELIVERED" : "FOB") },
+            { label: "Lead Time (Days)", getValue: (b) => `${b.leadTimeDays ?? 0} days` },
+            { label: "Down Payment %", getValue: (b) => `${b.downPaymentPct ?? 0}%` },
+            { label: "Balance Due (Days)", getValue: (b) => `${b.balanceDueDays ?? 0} days` },
+            {
+                label: "Early Payment Discount",
+                getValue: (b) => (b.earlyPayDiscountPct ? `${b.earlyPayDiscountPct}% within ${b.earlyPayDiscountDays ?? 0} days` : "None"),
+            },
+            { label: "Quotation Validity", getValue: (b) => b.validUntil || "-" },
+            { label: "Supplier Type & Country", getValue: (b) => `${b.supplierType === "LOCAL" ? "Local" : "International"} (${b.country || "PH"})` },
+        ];
+
+        for (const cl of commLines) {
+            const lineVals: (string | number)[] = ["", cl.label, "", "", "", ""];
+            for (const bid of targetBids) {
+                lineVals.push(cl.getValue(bid), "", "");
+            }
+            compSheet.addRow(lineVals);
         }
     }
 
@@ -610,6 +670,46 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
         col.width = Math.max(headerText.length + 4, 12);
     });
 
+    // =========================================================================
+    // SHEET: Attachments & Documentation
+    // =========================================================================
+    const attSheet = workbook.addWorksheet("Attachments", {
+        views: [{ showGridLines: true }],
+    });
+    attSheet.addRow(["SUPPLIER BID ATTACHMENTS & DOCUMENTATION"]).font = { size: 14, bold: true };
+    const attHeader = attSheet.addRow([
+        "Supplier Name",
+        "Document Type",
+        "File Name",
+        "Directus File ID",
+        "File Size (Bytes)",
+        "MIME Type",
+        "Download / Access URL",
+    ]);
+    attHeader.font = { bold: true };
+    attHeader.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" },
+    };
+
+    const directusBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+    targetBids.forEach((b) => {
+        (b.attachments || []).forEach((att) => {
+            const url = att.fileUrl || (att.directusFileId ? `${directusBase}/assets/${att.directusFileId}` : "");
+            attSheet.addRow([
+                b.supplierName,
+                att.documentType || "Quotation",
+                att.fileName || "",
+                att.directusFileId || "",
+                att.fileSize || 0,
+                att.mimeType || "",
+                url,
+            ]);
+        });
+    });
+    attSheet.columns = [{ width: 25 }, { width: 18 }, { width: 30 }, { width: 38 }, { width: 16 }, { width: 25 }, { width: 50 }];
+
     // Save and Trigger Download
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
@@ -661,10 +761,32 @@ export const BIDS_CANONICAL_COLUMNS = [
     "Valid Until",
     "Quality",
     "Notes",
+    "Supplier ID",
+    "Quotation Ref",
+    "Quote Date",
+    "Contact Person",
+    "Contact Email",
+    "Contact Phone",
+    "Insurance Currency",
+    "Duty Mode",
+    "Single Duty %",
+    "Take Early Pay",
 ] as const;
 
 /**
- * Builds the canonical 43-column tabular rows representation of bids and quotations.
+ * Escapes a cell value for standard CSV formatting (RFC 4180).
+ */
+export function escapeCsvCell(val: unknown): string {
+    if (val === null || val === undefined) return "";
+    const str = String(val);
+    if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+        return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+}
+
+/**
+ * Builds the canonical 52-column tabular rows representation of bids and quotations.
  * Fully compatible with the import parser, with optional filtering.
  */
 export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOptions): (string | number)[][] {
@@ -679,7 +801,7 @@ export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOp
                 "Local", // Type
                 "PH", // Country
                 filteredProject.comparisonCurrency || "PHP", // Currency
-                "DDP", // Incoterm
+                "DELIVERED", // Incoterm
                 item.itemName,
                 item.specifications || "",
                 item.quantity,
@@ -715,8 +837,18 @@ export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOp
                 0, // Early Pay %
                 0, // Early Pay Days
                 "", // Valid Until
-                5, // Quality
+                "", // Quality
                 "", // Notes
+                "", // Supplier ID
+                "", // Quotation Ref
+                "", // Quote Date
+                "", // Contact Person
+                "", // Contact Email
+                "", // Contact Phone
+                filteredProject.comparisonCurrency || "PHP", // Insurance Currency
+                "PER_ITEM", // Duty Mode
+                0, // Single Duty %
+                "No", // Take Early Pay
             ]);
         });
         return rows;
@@ -729,7 +861,7 @@ export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOp
             .filter((s): s is number => s !== null && s > 0);
         const avgQuality = scoredEntries.length > 0
             ? Number((scoredEntries.reduce((a, b) => a + b, 0) / scoredEntries.length).toFixed(1))
-            : 5;
+            : "";
 
         (filteredProject.items || []).forEach((item) => {
             const quote = bid.quotations?.[item.id];
@@ -743,7 +875,7 @@ export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOp
                     bid.supplierType === "LOCAL" ? "Local" : "International",
                     bid.country || (bid.supplierType === "LOCAL" ? "PH" : "CN"),
                     bid.quoteCurrency || "PHP",
-                    bid.incoterm || "DDP",
+                    bid.incoterm || (bid.supplierType === "LOCAL" ? "DELIVERED" : "FOB"),
                     item.itemName,
                     item.specifications || "",
                     item.quantity,
@@ -781,6 +913,16 @@ export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOp
                     bid.validUntil || "",
                     avgQuality,
                     bid.notes || "",
+                    bid.supplierId ?? "",
+                    bid.quotationRef || "",
+                    bid.quoteDate || "",
+                    bid.contactPerson || "",
+                    bid.contactEmail || "",
+                    bid.contactPhone || "",
+                    bid.insuranceCurrency || bid.freightCurrency || bid.quoteCurrency || "USD",
+                    bid.dutyMode || (bid.ftaAgreementName ? "FTA" : "PER_ITEM"),
+                    bid.singleDutyPct || 0,
+                    bid.takeEarlyPayDiscount ? "Yes" : "No",
                 ]);
             });
         });
@@ -794,22 +936,12 @@ export function buildBidsDataRows(project: RfqProject, options?: DynamicExportOp
  */
 export function exportRfqBidsToCsv(project: RfqProject, options?: DynamicExportOptions): void {
     const rows = buildBidsDataRows(project, options);
-    const headerLine = BIDS_CANONICAL_COLUMNS.join(",");
+    const headerLine = BIDS_CANONICAL_COLUMNS.map(escapeCsvCell).join(",");
     const csvLines = [
         headerLine,
-        ...rows.map((row) =>
-            row
-                .map((val) => {
-                    const str = String(val ?? "");
-                    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
-                        return `"${str.replace(/"/g, '""')}"`;
-                    }
-                    return str;
-                })
-                .join(",")
-        ),
+        ...rows.map((row) => row.map(escapeCsvCell).join(",")),
     ];
-    const csvContent = csvLines.join("\n");
+    const csvContent = "\uFEFF" + csvLines.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     saveAs(blob, `${project.rfqReference || "RFQ"}-Bids-Data.csv`);
 }
@@ -834,34 +966,34 @@ export function exportRfqComparisonToCsv(project: RfqProject, options?: DynamicE
         ...targetBids.map((b) => `${b.supplierName} Total Landed`),
     ];
 
-    const rows: string[][] = [headers];
+    const rows: (string | number)[][] = [headers];
 
     targetItems.forEach((item, idx) => {
-        const row = [
-            String(idx + 1),
-            `"${item.itemName.replace(/"/g, '""')}"`,
-            `"${(item.specifications || "").replace(/"/g, '""')}"`,
-            String(item.quantity),
+        const row: (string | number)[] = [
+            idx + 1,
+            item.itemName,
+            item.specifications || "",
+            item.quantity,
             item.uom,
-            String(item.targetUnitPrice),
+            item.targetUnitPrice,
         ];
 
         for (const bid of targetBids) {
             const res = summary.results[bid.id];
             const breakdown = res?.items[item.id];
-            row.push(breakdown && breakdown.hasQuote ? String(breakdown.landedUnitCostCompCurr) : "-");
+            row.push(breakdown && breakdown.hasQuote ? breakdown.landedUnitCostCompCurr : "-");
         }
 
         for (const bid of targetBids) {
             const res = summary.results[bid.id];
             const breakdown = res?.items[item.id];
-            row.push(breakdown && breakdown.hasQuote ? String(breakdown.totalLandedCompCurr) : "-");
+            row.push(breakdown && breakdown.hasQuote ? breakdown.totalLandedCompCurr : "-");
         }
 
         rows.push(row);
     });
 
-    const csvContent = rows.map((r) => r.join(",")).join("\n");
+    const csvContent = "\uFEFF" + rows.map((r) => r.map(escapeCsvCell).join(",")).join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     saveAs(blob, `${filteredProject.rfqReference || "RFQ"}-Supplier-Bid-Comparison.csv`);
 }
@@ -876,34 +1008,34 @@ export function exportRfqQualityToCsv(project: RfqProject, options?: DynamicExpo
     const passFailCriteria = (filteredProject.qualityCriteria || []).filter((c) => c.criterionType === "PASS_FAIL");
     const scoredCriteria = (filteredProject.qualityCriteria || []).filter((c) => c.criterionType === "SCORED");
 
-    const rows: string[][] = [];
+    const rows: (string | number)[][] = [];
 
-    rows.push([`"TECHNICAL QUALITY & COMPLIANCE EVALUATION MATRIX"`]);
-    rows.push([`"Project / RFQ"`, `"${filteredProject.rfqTitle || "Untitled"}"`]);
-    rows.push([`"Reference No"`, `"${filteredProject.rfqReference || "-"}"`, `"Status"`, `"${filteredProject.status}"`]);
+    rows.push(["TECHNICAL QUALITY & COMPLIANCE EVALUATION MATRIX"]);
+    rows.push(["Project / RFQ", filteredProject.rfqTitle || "Untitled"]);
+    rows.push(["Reference No", filteredProject.rfqReference || "-", "Status", filteredProject.status]);
     rows.push([]);
 
     // 1. Mandatory Compliance Section
     if (passFailCriteria.length > 0) {
-        rows.push([`"1. MANDATORY COMPLIANCE REQUIREMENTS (PASS/FAIL)"`]);
+        rows.push(["1. MANDATORY COMPLIANCE REQUIREMENTS (PASS/FAIL)"]);
         const pfHeaders = [
-            `"#"`,
-            `"Criterion Name"`,
-            `"Type"`,
-            ...targetBids.flatMap((b) => [`"${b.supplierName} Result"`, `"${b.supplierName} Audit Remarks"`]),
+            "#",
+            "Criterion Name",
+            "Type",
+            ...targetBids.flatMap((b) => [`${b.supplierName} Result`, `${b.supplierName} Audit Remarks`]),
         ];
         rows.push(pfHeaders);
 
         passFailCriteria.forEach((c, idx) => {
-            const row = [
-                String(idx + 1),
-                `"${c.criterionName.replace(/"/g, '""')}"`,
-                `"Pass/Fail"`,
+            const row: (string | number)[] = [
+                idx + 1,
+                c.criterionName,
+                "Pass/Fail",
             ];
             for (const bid of targetBids) {
                 const s = bid.scores?.[c.id];
-                row.push(`"${s?.passFailResult || "NOT_CHECKED"}"`);
-                row.push(`"${(s?.evidenceRemarks || "").replace(/"/g, '""')}"`);
+                row.push(s?.passFailResult || "NOT_CHECKED");
+                row.push(s?.evidenceRemarks || "");
             }
             rows.push(row);
         });
@@ -912,32 +1044,32 @@ export function exportRfqQualityToCsv(project: RfqProject, options?: DynamicExpo
 
     // 2. Scored Criteria Section
     if (scoredCriteria.length > 0) {
-        rows.push([`"2. TECHNICAL SCORED CRITERIA (1-5 SCALE)"`]);
+        rows.push(["2. TECHNICAL SCORED CRITERIA (1-5 SCALE)"]);
         const scHeaders = [
-            `"#"`,
-            `"Evaluation Parameter"`,
-            `"Weight %"`,
+            "#",
+            "Evaluation Parameter",
+            "Weight %",
             ...targetBids.flatMap((b) => [
-                `"${b.supplierName} Score (1-5)"`,
-                `"${b.supplierName} Weighted Score"`,
-                `"${b.supplierName} Audit Remarks"`,
+                `${b.supplierName} Score (1-5)`,
+                `${b.supplierName} Weighted Score`,
+                `${b.supplierName} Audit Remarks`,
             ]),
         ];
         rows.push(scHeaders);
 
         scoredCriteria.forEach((c, idx) => {
-            const row = [
-                String(idx + 1),
-                `"${c.criterionName.replace(/"/g, '""')}"`,
-                `"${c.weightPct}%"`,
+            const row: (string | number)[] = [
+                idx + 1,
+                c.criterionName,
+                `${c.weightPct}%`,
             ];
             for (const bid of targetBids) {
                 const s = bid.scores?.[c.id];
                 const score = s?.score && s.score >= 1 ? s.score : "-";
-                const weighted = typeof score === "number" ? ((score / 5) * c.weightPct).toFixed(2) : "-";
-                row.push(String(score));
-                row.push(String(weighted));
-                row.push(`"${(s?.evidenceRemarks || "").replace(/"/g, '""')}"`);
+                const weighted = typeof score === "number" ? Number(((score / 5) * c.weightPct).toFixed(2)) : "-";
+                row.push(score);
+                row.push(weighted);
+                row.push(s?.evidenceRemarks || "");
             }
             rows.push(row);
         });
@@ -945,15 +1077,15 @@ export function exportRfqQualityToCsv(project: RfqProject, options?: DynamicExpo
     }
 
     // 3. Evaluation Summary Verdict
-    rows.push([`"3. TECHNICAL EVALUATION SUMMARY & VERDICT"`]);
+    rows.push(["3. TECHNICAL EVALUATION SUMMARY & VERDICT"]);
     rows.push([
-        `"#"`,
-        `"Supplier Name"`,
-        `"Supplier Type"`,
-        `"Country"`,
-        `"Mandatory Compliance"`,
-        `"Total Quality Score (0-100)"`,
-        `"Quality Rank"`,
+        "#",
+        "Supplier Name",
+        "Supplier Type",
+        "Country",
+        "Mandatory Compliance",
+        "Total Quality Score (0-100)",
+        "Quality Rank",
     ]);
 
     targetBids.forEach((bid, idx) => {
@@ -963,17 +1095,17 @@ export function exportRfqQualityToCsv(project: RfqProject, options?: DynamicExpo
         const qRank = res ? res.ranking : "-";
 
         rows.push([
-            String(idx + 1),
-            `"${bid.supplierName.replace(/"/g, '""')}"`,
+            idx + 1,
+            bid.supplierName,
             bid.supplierType,
-            `"${bid.country || "-"}"`,
-            isCompliant ? `"COMPLIANT"` : `"DISQUALIFIED"`,
-            String(qScore),
-            String(qRank),
+            bid.country || "-",
+            isCompliant ? "COMPLIANT" : "DISQUALIFIED",
+            qScore,
+            qRank,
         ]);
     });
 
-    const csvContent = rows.map((r) => r.join(",")).join("\n");
+    const csvContent = "\uFEFF" + rows.map((r) => r.map(escapeCsvCell).join(",")).join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     saveAs(blob, `${filteredProject.rfqReference || "RFQ"}-Quality-Evaluation.csv`);
 }
@@ -996,7 +1128,10 @@ export function exportRfqToJson(project: RfqProject, options?: DynamicExportOpti
         exportedBy: "VOS Manufacturing Management",
     };
 
-    const jsonString = JSON.stringify(exportPayload, null, 2);
+    const jsonString = JSON.stringify(exportPayload, (key, value) => {
+        // Explicitly preserve null values so full exports include all unconfigured / null fields
+        return value === undefined ? null : value;
+    }, 2);
     const blob = new Blob([jsonString], { type: "application/json;charset=utf-8;" });
     saveAs(blob, `${project.rfqReference || "RFQ"}-Export.json`);
 }

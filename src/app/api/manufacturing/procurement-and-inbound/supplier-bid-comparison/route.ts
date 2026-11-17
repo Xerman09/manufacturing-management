@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getJwtSubFromReq } from "@/lib/directus";
+import { decodeJwtPayload } from "@/lib/auth-utils";
 import {
     RfqProject,
     RequestedItem,
@@ -38,6 +39,21 @@ function getHeaders(): Record<string, string> {
 }
 
 /**
+ * Extract authenticated user's display name from request session token
+ */
+function getUserNameFromReq(req: NextRequest): string {
+    const token = req.cookies.get("vos_access_token")?.value;
+    if (!token) return "-";
+    const payload = decodeJwtPayload(token);
+    if (!payload) return "-";
+    const first = String(payload.FirstName ?? payload.Firstname ?? payload.firstName ?? "").trim();
+    const last = String(payload.LastName ?? payload.Lastname ?? payload.lastName ?? "").trim();
+    const email = String(payload.email ?? payload.Email ?? "").trim();
+    const fullName = [first, last].filter(Boolean).join(" ");
+    return fullName || email || "-";
+}
+
+/**
  * Safely parse numeric DB ID or null
  */
 function parseDbId(val: unknown): number | null {
@@ -49,6 +65,169 @@ function parseDbId(val: unknown): number | null {
         }
     }
     return null;
+}
+
+/**
+ * Safely parse a date input to 'YYYY-MM-DD' or null for Directus/MySQL DATE fields
+ * Strictly enforces 4-digit years between 1900 and 2100 to prevent MySQL 22007 out-of-range errors.
+ */
+function parseDateOnly(val: unknown): string | null {
+    if (!val || typeof val !== "string") return null;
+    const trimmed = val.trim();
+    if (!trimmed || trimmed === "null" || trimmed === "undefined" || trimmed === "—" || trimmed === "-") {
+        return null;
+    }
+
+    // Match YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+        const year = parseInt(isoMatch[1], 10);
+        const month = parseInt(isoMatch[2], 10);
+        const day = parseInt(isoMatch[3], 10);
+        if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+        }
+        return null; // Reject runaway years like 111111 or invalid day/month
+    }
+
+    // Match MM/DD/YYYY
+    const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slashMatch) {
+        const month = parseInt(slashMatch[1], 10);
+        const day = parseInt(slashMatch[2], 10);
+        const year = parseInt(slashMatch[3], 10);
+        if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        }
+        return null;
+    }
+
+    const d = new Date(trimmed);
+    if (isNaN(d.getTime())) return null;
+    const fullYear = d.getFullYear();
+    if (fullYear < 1900 || fullYear > 2100) return null;
+    return `${fullYear}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Field-level delta diffing: compares incoming record against existing database record.
+ * Returns only the properties that actually changed so PATCH touches only user-edited columns.
+ */
+function computeDelta(
+    incoming: Record<string, unknown>,
+    existing: Record<string, unknown>
+): Record<string, unknown> {
+    const delta: Record<string, unknown> = {};
+
+    for (const [key, val] of Object.entries(incoming)) {
+        const existVal = existing[key];
+
+        // 1. Date fields
+        if (key === "quote_date" || key === "valid_until" || key === "target_date") {
+            const dateA = val ? parseDateOnly(val) : null;
+            const dateB = existVal ? parseDateOnly(existVal) : null;
+            if (dateA !== dateB) {
+                delta[key] = dateA;
+            }
+            continue;
+        }
+
+        // 2. Boolean / tinyint fields
+        if (
+            key === "prices_include_vat" ||
+            key === "paid_by_lc" ||
+            key === "take_early_pay_discount" ||
+            key === "count_vat_as_cost" ||
+            key === "calc_customs_auto"
+        ) {
+            const boolA = val === 1 || val === true;
+            const boolB = existVal === 1 || existVal === true;
+            if (boolA !== boolB) {
+                delta[key] = boolA ? 1 : 0;
+            }
+            continue;
+        }
+
+        // 3. Numeric fields
+        if (
+            typeof val === "number" ||
+            (existVal !== null && existVal !== undefined && typeof existVal === "number")
+        ) {
+            const numA = val == null ? 0 : Number(val);
+            const numB = existVal == null ? 0 : Number(existVal);
+            if (isNaN(numA) && isNaN(numB)) continue;
+            if (Math.abs(numA - numB) > 0.0001) {
+                delta[key] = val;
+            }
+            continue;
+        }
+
+        // 4. Nullable fields
+        if (val === null && (existVal === null || existVal === undefined)) {
+            continue;
+        }
+
+        // 5. String fields
+        const strA = val == null ? "" : String(val).trim();
+        const strB = existVal == null ? "" : String(existVal).trim();
+        if (strA !== strB) {
+            delta[key] = val;
+        }
+    }
+
+    return delta;
+}
+
+/**
+ * Format raw Directus / SQL errors into clear human-readable messages
+ */
+function cleanUserReadableErrorMessage(err: unknown, section?: string): string {
+    const raw = (err as Error)?.message || String(err || "");
+    if (raw.includes("Incorrect date value")) {
+        if (raw.includes("valid_until")) {
+            return `Invalid date in bid validity date ("Valid Until"). Please enter a valid 4-digit year (YYYY-MM-DD).`;
+        }
+        if (raw.includes("quote_date")) {
+            return `Invalid quotation date. Please enter a valid 4-digit year (YYYY-MM-DD).`;
+        }
+        if (raw.includes("target_date")) {
+            return `Invalid target delivery date. Please enter a valid 4-digit year (YYYY-MM-DD).`;
+        }
+        return `Incorrect date value detected. Please enter a valid 4-digit year (YYYY-MM-DD).`;
+    }
+    if (raw.includes('Invalid Date format in field "valid_until"')) {
+        return `Invalid date in bid validity date ("Valid Until"). Please enter a valid date (YYYY-MM-DD).`;
+    }
+    if (raw.includes('Invalid Date format in field "quote_date"')) {
+        return `Invalid quotation date format. Please enter a valid date (YYYY-MM-DD).`;
+    }
+    if (raw.includes('Invalid Date format in field "target_date"')) {
+        return `Invalid target delivery date format. Please enter a valid date (YYYY-MM-DD).`;
+    }
+    if (raw.includes("uq_rfq_currency")) {
+        return `Duplicate currency code detected in exchange rates. Each currency code can only be added once.`;
+    }
+    if (raw.includes("uq_bid_item")) {
+        return `Duplicate item quotation detected for this supplier.`;
+    }
+    if (raw.includes("chk_bid_score_range")) {
+        return `Quality score must be between 1 and 5.`;
+    }
+    if (raw.includes('Value in collection "mm_rfq" has to be unique') || raw.includes("uq_rfq_reference_round")) {
+        return `The Reference Number entered already exists in the system. Please update the "Reference no." field in Project Details.`;
+    }
+    if (raw.includes("Directus PATCH") || raw.includes("Directus POST")) {
+        const cleaned = raw.replace(/^Directus (PATCH|POST) [a-zA-Z0-9_/-]+ failed:\s*/i, "");
+        if (cleaned.includes(" - Incorrect date value:")) {
+            const sqlPart = cleaned.split(" - ")[1];
+            return cleanUserReadableErrorMessage(sqlPart, section);
+        }
+        if (cleaned.includes("Invalid payload. Invalid Date format")) {
+            return `Invalid date format encountered while saving ${section || "data"}. Please check dates (YYYY-MM-DD).`;
+        }
+        return section ? `Failed to save ${section}: ${cleaned}` : cleaned;
+    }
+    return raw;
 }
 
 /**
@@ -344,7 +523,7 @@ export async function GET(request: NextRequest) {
                 fromStatus: ah.from_status as ProjectStatus,
                 toStatus: ah.to_status as ProjectStatus,
                 actorId: ah.actor_id ? Number(ah.actor_id) : null,
-                actorName: String(ah.actor_name || ""),
+                actorName: String(ah.actor_name || "-"),
                 comment: String(ah.comment || ""),
                 createdAt: String(ah.created_at || ""),
             }));
@@ -436,11 +615,34 @@ export async function POST(request: NextRequest) {
         const body: RfqProject = await request.json();
         const headers = getHeaders();
 
+        let candidateRef = (body.rfqReference || `RFQ-${Date.now().toString().slice(-6)}`).trim();
+        const roundNo = body.roundNo || 1;
+        const baseRef = candidateRef;
+        let attempt = 1;
+
+        // Auto-disambiguate collided references on creation to avoid "Value in collection mm_rfq has to be unique"
+        while (attempt <= 10) {
+            try {
+                const existingRef = await fetchCollection<{ id: number }>(
+                    "mm_rfq",
+                    `filter[rfq_reference][_eq]=${encodeURIComponent(candidateRef)}&filter[round_no][_eq]=${roundNo}&filter[deleted_at][_null]=true&limit=1`
+                );
+                if (existingRef.length === 0) {
+                    break;
+                }
+                attempt++;
+                candidateRef = `${baseRef}-COPY${attempt > 2 ? `-${attempt}` : ""}`;
+            } catch {
+                break;
+            }
+        }
+        body.rfqReference = candidateRef;
+
         const payload = {
             rfq_title: body.rfqTitle || "New RFQ Project",
-            rfq_reference: body.rfqReference || `RFQ-${Date.now().toString().slice(-6)}`,
+            rfq_reference: candidateRef,
             parent_rfq_id: body.parentRfqId || null,
-            round_no: body.roundNo || 1,
+            round_no: roundNo,
             comparison_currency: body.comparisonCurrency || "PHP",
             budget: body.budget,
             notes: body.notes || "",
@@ -464,7 +666,7 @@ export async function POST(request: NextRequest) {
             rejection_reason: body.rejectionReason || null,
             approval_remarks: body.approvalRemarks || null,
             award_strategy: body.awardStrategy || "MANUAL",
-            target_date: body.targetDate ? body.targetDate.slice(0, 10) : null,
+            target_date: parseDateOnly(body.targetDate),
             created_by: userId,
         };
 
@@ -540,11 +742,32 @@ export async function PUT(request: NextRequest) {
 
             // If still no ID found in DB, create initial row in mm_rfq
             if (!rfqDbId) {
+                let safeRef = (project.rfqReference || `RFQ-${Date.now().toString().slice(-6)}`).trim();
+                const roundNo = project.roundNo || 1;
+                const baseRef = safeRef;
+                let attempt = 1;
+                while (attempt <= 10) {
+                    try {
+                        const checkRef = await fetchCollection<{ id: number }>(
+                            "mm_rfq",
+                            `filter[rfq_reference][_eq]=${encodeURIComponent(safeRef)}&filter[round_no][_eq]=${roundNo}&filter[deleted_at][_null]=true&limit=1`
+                        );
+                        if (checkRef.length === 0) {
+                            break;
+                        }
+                        attempt++;
+                        safeRef = `${baseRef}-COPY${attempt > 2 ? `-${attempt}` : ""}`;
+                    } catch {
+                        break;
+                    }
+                }
+                project.rfqReference = safeRef;
+
                 const initialPayload = {
                     rfq_title: project.rfqTitle || "New RFQ Project",
-                    rfq_reference: project.rfqReference || `RFQ-${Date.now().toString().slice(-6)}`,
+                    rfq_reference: safeRef,
                     parent_rfq_id: project.parentRfqId || null,
-                    round_no: project.roundNo || 1,
+                    round_no: roundNo,
                     comparison_currency: project.comparisonCurrency || "PHP",
                     budget: project.budget,
                     notes: project.notes || "",
@@ -568,7 +791,7 @@ export async function PUT(request: NextRequest) {
                     rejection_reason: project.rejectionReason || null,
                     approval_remarks: project.approvalRemarks || null,
                     award_strategy: project.awardStrategy || "MANUAL",
-                    target_date: project.targetDate ? project.targetDate.slice(0, 10) : null,
+                    target_date: parseDateOnly(project.targetDate),
                     created_by: userId,
                 };
 
@@ -650,7 +873,7 @@ export async function PUT(request: NextRequest) {
             rejection_reason: project.rejectionReason || null,
             approval_remarks: project.approvalRemarks || null,
             award_strategy: project.awardStrategy || "MANUAL",
-            target_date: project.targetDate ? project.targetDate.slice(0, 10) : null,
+            target_date: parseDateOnly(project.targetDate),
             updated_by: userId,
         };
 
@@ -662,10 +885,11 @@ export async function PUT(request: NextRequest) {
 
         if (!res.ok) {
             const errData = await res.json().catch(() => null);
+            const rawMsg = errData?.errors?.[0]?.message || `Failed to update RFQ: ${res.status}`;
             return NextResponse.json(
                 {
                     success: false,
-                    error: errData?.errors?.[0]?.message || `Failed to update RFQ: ${res.status}`,
+                    error: cleanUserReadableErrorMessage(rawMsg, "RFQ details"),
                     backendUnavailable: res.status === 404 || res.status >= 500,
                 },
                 { status: 200 }
@@ -688,13 +912,20 @@ export async function PUT(request: NextRequest) {
                     ? (project.rejectionReason || project.justification || "Award rejected")
                     : (project.approvalRemarks || project.justification || "");
 
+            const latestHistoryEntry = Array.isArray(project.approvalHistory) && project.approvalHistory.length > 0
+                ? project.approvalHistory[project.approvalHistory.length - 1]
+                : null;
+            const actorName = (latestHistoryEntry?.actorName && latestHistoryEntry.actorName !== "-" && latestHistoryEntry.actorName !== "Juan Dela Cruz" && latestHistoryEntry.actorName !== "Authorized User" && latestHistoryEntry.actorName !== "System User")
+                ? latestHistoryEntry.actorName
+                : getUserNameFromReq(request);
+
             await postItem("mm_rfq_approval_history", {
                 rfq_id: rfqDbId,
                 action,
                 from_status: existingStatus,
                 to_status: project.status,
                 actor_id: userId,
-                actor_name: project.reviewedBy || project.preparedBy || "System User",
+                actor_name: actorName || "-",
                 comment,
             }).catch(() => null);
         }
@@ -782,7 +1013,13 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
             };
 
             if (dbId && existingMap.has(dbId)) {
-                await patchItem("mm_rfq_items", dbId, payload);
+                const existing = existingMap.get(dbId);
+                if (existing) {
+                    const delta = computeDelta(payload, existing);
+                    if (Object.keys(delta).length > 0) {
+                        await patchItem("mm_rfq_items", dbId, delta);
+                    }
+                }
                 itemIdMap.set(item.id, dbId);
                 activeDbIds.add(dbId);
             } else {
@@ -802,7 +1039,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
     } catch (err) {
         return {
             resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
-            partialFailure: { section: "items", error: (err as Error).message },
+            partialFailure: { section: "items", error: cleanUserReadableErrorMessage(err, "requested items") },
         };
     }
 
@@ -832,7 +1069,13 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
             };
 
             if (dbId && existingMap.has(dbId)) {
-                await patchItem("mm_rfq_quality_criteria", dbId, payload);
+                const existing = existingMap.get(dbId);
+                if (existing) {
+                    const delta = computeDelta(payload, existing);
+                    if (Object.keys(delta).length > 0) {
+                        await patchItem("mm_rfq_quality_criteria", dbId, delta);
+                    }
+                }
                 critIdMap.set(crit.id, dbId);
                 activeDbIds.add(dbId);
             } else {
@@ -851,7 +1094,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
     } catch (err) {
         return {
             resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
-            partialFailure: { section: "quality criteria", error: (err as Error).message },
+            partialFailure: { section: "quality criteria", error: cleanUserReadableErrorMessage(err, "quality criteria") },
         };
     }
 
@@ -903,7 +1146,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
     } catch (err) {
         return {
             resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
-            partialFailure: { section: "exchange rates", error: (err as Error).message },
+            partialFailure: { section: "exchange rates", error: cleanUserReadableErrorMessage(err, "exchange rates") },
         };
     }
 
@@ -933,7 +1176,10 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
             };
 
             if (existingCustoms.length > 0) {
-                await patchItem("mm_rfq_customs_rates", Number(existingCustoms[0].id), customsPayload);
+                const delta = computeDelta(customsPayload, existingCustoms[0]);
+                if (Object.keys(delta).length > 0) {
+                    await patchItem("mm_rfq_customs_rates", Number(existingCustoms[0].id), delta);
+                }
             } else {
                 await postItem("mm_rfq_customs_rates", customsPayload);
             }
@@ -941,7 +1187,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
     } catch (err) {
         return {
             resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
-            partialFailure: { section: "customs rates", error: (err as Error).message },
+            partialFailure: { section: "customs rates", error: cleanUserReadableErrorMessage(err, "customs rates") },
         };
     }
 
@@ -985,7 +1231,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
     } catch (err) {
         return {
             resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
-            partialFailure: { section: "IPC brackets", error: (err as Error).message },
+            partialFailure: { section: "IPC brackets", error: cleanUserReadableErrorMessage(err, "IPC brackets") },
         };
     }
 
@@ -1016,8 +1262,8 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
                     contact_phone: bid.contactPhone || "",
                     quote_currency: bid.quoteCurrency || "PHP",
                     quotation_ref: bid.quotationRef || "",
-                    quote_date: bid.quoteDate ? bid.quoteDate.slice(0, 10) : null,
-                    valid_until: bid.validUntil ? bid.validUntil.slice(0, 10) : null,
+                    quote_date: parseDateOnly(bid.quoteDate),
+                    valid_until: parseDateOnly(bid.validUntil),
                     lead_time_days: bid.leadTimeDays ?? 0,
                     notes: bid.notes || "",
                     incoterm: bid.incoterm || "DELIVERED",
@@ -1052,7 +1298,13 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
 
                 let resolvedBidId: number;
                 if (bidDbId && existingBidMap.has(bidDbId)) {
-                    await patchItem("mm_rfq_bids", bidDbId, bidPayload);
+                    const existing = existingBidMap.get(bidDbId);
+                    if (existing) {
+                        const delta = computeDelta(bidPayload, existing);
+                        if (Object.keys(delta).length > 0) {
+                            await patchItem("mm_rfq_bids", bidDbId, delta);
+                        }
+                    }
                     resolvedBidId = bidDbId;
                 } else {
                     const created = await postItem<{ id: number }>("mm_rfq_bids", bidPayload);
@@ -1281,7 +1533,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
     } catch (err) {
         return {
             resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
-            partialFailure: { section: "bids and quotations", error: (err as Error).message },
+            partialFailure: { section: "bids and quotations", error: cleanUserReadableErrorMessage(err, "bids and quotations") },
         };
     }
 
@@ -1370,7 +1622,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
                         status: "REVOKED",
                         revoked_at: nowIso,
                         revoked_by: userId,
-                        revocation_reason: "Award updated in Supplier Bid Comparison module",
+                        revocation_reason: "Award updated in Supplier Comparison module",
                     }).catch(() => null);
                 }
             }
@@ -1378,7 +1630,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
     } catch (err) {
         return {
             resolvedIds: { items: Object.fromEntries(itemIdMap), criteria: Object.fromEntries(critIdMap), bids: Object.fromEntries(bidIdMap) },
-            partialFailure: { section: "awards", error: (err as Error).message },
+            partialFailure: { section: "awards", error: cleanUserReadableErrorMessage(err, "awards") },
         };
     }
 

@@ -102,13 +102,18 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                         onValueChange={(val: Incoterm) => handleUpdate({ incoterm: val })}
                     >
                         <SelectTrigger className="h-8 text-xs font-medium w-full max-w-sm">
-                            <SelectValue />
+                            <SelectValue placeholder="Select Incoterm..." />
                         </SelectTrigger>
                         <SelectContent>
                             {isLocal ? (
                                 <>
                                     <SelectItem value="DELIVERED" className="text-xs">DELIVERED – Delivered to Warehouse</SelectItem>
                                     <SelectItem value="PICK_UP" className="text-xs">PICK_UP – Buyer Pick-up at Facility</SelectItem>
+                                    {incoterm !== "DELIVERED" && incoterm !== "PICK_UP" && (
+                                        <SelectItem value={incoterm} className="text-xs">
+                                            {incoterm} – {INCOTERMS_CONFIG[incoterm]?.label || incoterm}
+                                        </SelectItem>
+                                    )}
                                 </>
                             ) : (
                                 <>
@@ -122,6 +127,11 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                     <SelectItem value="DAP" className="text-xs">DAP – Delivered at Place</SelectItem>
                                     <SelectItem value="DPU" className="text-xs">DPU – Delivered at Place Unloaded</SelectItem>
                                     <SelectItem value="DDP" className="text-xs">DDP – Delivered Duty Paid (Supplier covers all)</SelectItem>
+                                    {(incoterm === "DELIVERED" || incoterm === "PICK_UP") && (
+                                        <SelectItem value={incoterm} className="text-xs">
+                                            {incoterm} – {INCOTERMS_CONFIG[incoterm]?.label || incoterm}
+                                        </SelectItem>
+                                    )}
                                 </>
                             )}
                         </SelectContent>
