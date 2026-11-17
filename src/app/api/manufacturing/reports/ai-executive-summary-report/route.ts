@@ -691,17 +691,18 @@ export async function GET(request: Request) {
             }
         };
 
+        const roundedPlannedTargetUnits = Math.round(plannedTargetUnits);
         const detailedRows: DetailedKPIRow[] = [
             {
                 key: "good_output",
                 category: "Production Output",
                 kpi: "Good QA-Passed Output",
-                actual: `${goodProducedUnits.toLocaleString()} units`,
-                target: `${plannedTargetUnits.toLocaleString()} units`,
+                actual: `${Math.round(goodProducedUnits).toLocaleString()} units`,
+                target: `${roundedPlannedTargetUnits.toLocaleString()} units`,
                 targetBasis: "Sum of Approved Job Order Targets",
                 variance: outputVarianceUnits < 0
-                    ? `▼ ${Math.abs(outputVarianceUnits).toLocaleString()} units below target (${outputVariancePct}%)`
-                    : `▲ +${outputVarianceUnits.toLocaleString()} units above target (${outputVariancePct}%)`,
+                    ? `- ${Math.abs(Math.round(outputVarianceUnits)).toLocaleString()} units below target (${outputVariancePct}%)`
+                    : `+ ${Math.round(outputVarianceUnits).toLocaleString()} units above target (${outputVariancePct}%)`,
                 varianceType: outputVarianceUnits >= 0 ? "favorable" : "unfavorable",
                 status: kpiCards.output.status,
                 operationalScope: `${jobOrders.length} Active Job Orders`,
@@ -710,7 +711,7 @@ export async function GET(request: Request) {
                     numeratorLabel: "QA-Passed Units",
                     numeratorValue: goodProducedUnits,
                     denominatorLabel: "Target Planned Units",
-                    denominatorValue: plannedTargetUnits,
+                    denominatorValue: roundedPlannedTargetUnits,
                     sourceRecordsCount: jobOrders.length,
                     notes: "Only committed batches with passed QA status are included."
                 },
@@ -725,13 +726,13 @@ export async function GET(request: Request) {
                 target: "85.0%",
                 targetBasis: "World-Class Mfg Benchmark (85.0%)",
                 variance: plantOeePct !== null
-                    ? (plantOeePct < 85 ? `▼ ${(85.0 - plantOeePct).toFixed(1)}% below benchmark` : `▲ +${(plantOeePct - 85.0).toFixed(1)}% above benchmark`)
+                    ? (plantOeePct < 85 ? `- ${(85.0 - plantOeePct).toFixed(1)}% below benchmark` : `+ ${(plantOeePct - 85.0).toFixed(1)}% above benchmark`)
                     : "N/A",
                 varianceType: plantOeePct !== null && plantOeePct >= 85 ? "favorable" : "unfavorable",
                 status: kpiCards.plantOee.status,
-                operationalScope: `${(availability * 100).toFixed(0)}% Avail × ${(performance * 100).toFixed(0)}% Perf × ${(quality * 100).toFixed(0)}% Qual`,
+                operationalScope: `${(availability * 100).toFixed(0)}% Avail x ${(performance * 100).toFixed(0)}% Perf x ${(quality * 100).toFixed(0)}% Qual`,
                 calculationDetails: {
-                    formula: `Availability (${(availability * 100).toFixed(1)}%) × Performance (${(performance * 100).toFixed(1)}%) × Quality (${(quality * 100).toFixed(1)}%)`,
+                    formula: `Availability (${(availability * 100).toFixed(1)}%) x Performance (${(performance * 100).toFixed(1)}%) x Quality (${(quality * 100).toFixed(1)}%)`,
                     numeratorLabel: "Effective Operating Hours",
                     numeratorValue: Number((totalPlannedHours - downtimeHours).toFixed(1)),
                     denominatorLabel: "Planned Operating Hours",
@@ -747,11 +748,11 @@ export async function GET(request: Request) {
                 category: "Quality Intelligence",
                 kpi: "Scrap & Defect Rate",
                 actual: `${scrapRatePct}%`,
-                target: "≤ 2.0%",
+                target: "<= 2.0%",
                 targetBasis: "Engineering Defect Ceiling (2.0%)",
                 variance: scrapRatePct > 2.0
-                    ? `▲ +${(scrapRatePct - 2.0).toFixed(2)}% above tolerance ceiling`
-                    : `▼ ${(2.0 - scrapRatePct).toFixed(2)}% below defect ceiling`,
+                    ? `+ ${(scrapRatePct - 2.0).toFixed(2)}% above tolerance ceiling`
+                    : `- ${(2.0 - scrapRatePct).toFixed(2)}% below defect ceiling`,
                 varianceType: scrapRatePct <= 2.0 ? "favorable" : "unfavorable",
                 status: kpiCards.scrapRate.status,
                 operationalScope: `${totalOutputBatch.toLocaleString()} Total Units Processed`,
@@ -772,11 +773,11 @@ export async function GET(request: Request) {
                 category: "Maintenance Operations",
                 kpi: "Machine Downtime Duration",
                 actual: `${Math.round(totalDowntimeMinutes)} mins`,
-                target: "≤ 120 mins",
+                target: "<= 120 mins",
                 targetBasis: "Monthly Maintenance SLA Budget",
                 variance: totalDowntimeMinutes <= 120
-                    ? `▲ ${Math.round(120 - totalDowntimeMinutes)} mins under downtime budget`
-                    : `▼ +${Math.round(totalDowntimeMinutes - 120)} mins over downtime budget`,
+                    ? `- ${Math.round(120 - totalDowntimeMinutes)} mins under downtime budget`
+                    : `+ ${Math.round(totalDowntimeMinutes - 120)} mins over downtime budget`,
                 varianceType: totalDowntimeMinutes <= 120 ? "favorable" : "unfavorable",
                 status: kpiCards.downtimeMinutes.status,
                 operationalScope: maintenanceRows.length > 0
@@ -804,7 +805,7 @@ export async function GET(request: Request) {
                 target: "95.0%",
                 targetBasis: "Commercial Service SLA Commitment",
                 variance: otifPct !== null
-                    ? (otifPct < 95.0 ? `▼ ${(95.0 - otifPct).toFixed(1)}% below commitment` : `▲ +${(otifPct - 95.0).toFixed(1)}% above commitment`)
+                    ? (otifPct < 95.0 ? `- ${(95.0 - otifPct).toFixed(1)}% below commitment` : `+ ${(otifPct - 95.0).toFixed(1)}% above commitment`)
                     : "N/A",
                 varianceType: otifPct !== null && otifPct >= 95 ? "favorable" : "unfavorable",
                 status: kpiCards.otif.status,
@@ -829,8 +830,8 @@ export async function GET(request: Request) {
                 target: "0.0%",
                 targetBasis: "Approved Recipe BOM Standard",
                 variance: costVariancePct <= 0
-                    ? `▲ ${Math.abs(costVariancePct)}% favorable material savings`
-                    : `▼ +${costVariancePct}% excess material consumption`,
+                    ? `+ ${Math.abs(costVariancePct)}% favorable material savings`
+                    : `- ${costVariancePct}% excess material consumption`,
                 varianceType: costVariancePct <= 0 ? "favorable" : "unfavorable",
                 status: kpiCards.costVariance.status,
                 operationalScope: `${jomRows.length} Raw Material Staging Lines`,

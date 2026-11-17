@@ -2,6 +2,25 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { AIExecutiveReportPayload, AIInsightsPayload } from "../types";
 
+/**
+ * Strips non-ASCII characters and maps symbols into safe ASCII equivalents
+ * to prevent jsPDF Helvetica font encoding corruption (e.g. '%%', '"d', '%*').
+ */
+function cleanPdfText(text: string | null | undefined): string {
+    if (!text) return "";
+    return String(text)
+        .replace(/▼/g, "-")
+        .replace(/▲/g, "+")
+        .replace(/≤/g, "<=")
+        .replace(/≥/g, ">=")
+        .replace(/×/g, "x")
+        .replace(/–|—/g, "-")
+        .replace(/“|”/g, '"')
+        .replace(/‘|’/g, "'")
+        .replace(/[^\x00-\x7F]/g, "") // Strip any remaining non-ASCII characters
+        .trim();
+}
+
 export function generateExecutiveReportPdf(
     payload: AIExecutiveReportPayload,
     insights?: AIInsightsPayload | null
@@ -310,11 +329,11 @@ export function generateExecutiveReportPdf(
         currentY += 4;
 
         const detailRows = payload.detailedRows.map((r) => [
-            r.kpi,
-            r.actual,
-            r.target,
-            r.variance,
-            r.operationalScope
+            cleanPdfText(r.kpi),
+            cleanPdfText(r.actual),
+            cleanPdfText(r.target),
+            cleanPdfText(r.variance),
+            cleanPdfText(r.operationalScope)
         ]);
 
         autoTable(doc, {
@@ -322,9 +341,16 @@ export function generateExecutiveReportPdf(
             head: [["KPI", "Actual", "Target", "Variance", "Operational Scope"]],
             body: detailRows,
             theme: "grid",
-            headStyles: { fillColor: [51, 65, 85], fontSize: 8 },
+            headStyles: { fillColor: [51, 65, 85], fontSize: 8, fontStyle: "bold" },
             bodyStyles: { fontSize: 7.5 },
-            styles: { cellPadding: 2 }
+            columnStyles: {
+                0: { cellWidth: 36, fontStyle: "bold" },
+                1: { cellWidth: 20 },
+                2: { cellWidth: 22 },
+                3: { cellWidth: 50 },
+                4: { cellWidth: 54 }
+            },
+            styles: { cellPadding: 2.5 }
         });
     }
 

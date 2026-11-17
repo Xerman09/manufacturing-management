@@ -20,7 +20,6 @@ interface Props {
     onResetDefaults: () => void;
     onToggleAICopilot: () => void;
     onExportPdf: () => void;
-    onPrint: () => void;
 }
 
 export const ReportFilters: React.FC<Props> = ({
@@ -35,8 +34,7 @@ export const ReportFilters: React.FC<Props> = ({
     onApplyFilters,
     onResetDefaults,
     onToggleAICopilot,
-    onExportPdf,
-    onPrint
+    onExportPdf
 }) => {
     // Format searchable plant options
     const branchOptions = [
@@ -155,7 +153,7 @@ export const ReportFilters: React.FC<Props> = ({
                 )}
             </div>
 
-            {/* Actions: AI Copilot, Print, Export */}
+            {/* Actions: AI Copilot, Export PDF */}
             <div className="flex items-center gap-2">
                 <Button
                     variant="outline"
@@ -180,16 +178,6 @@ export const ReportFilters: React.FC<Props> = ({
                             Locked
                         </span>
                     )}
-                </Button>
-
-                <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 px-2.5 text-xs gap-1.5"
-                    onClick={onPrint}
-                >
-                    <Printer className="h-3 w-3" />
-                    Print
                 </Button>
 
                 <Button

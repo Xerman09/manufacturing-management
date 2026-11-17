@@ -187,12 +187,8 @@ export default function AIExecutiveSummaryReportModule() {
             window.URL.revokeObjectURL(url);
         } catch (err) {
             console.error("Export error", err);
-            alert("Could not generate PDF. Please try again or use the print option.");
+            alert("Could not generate PDF. Please try again.");
         }
-    };
-
-    const handlePrint = () => {
-        window.print();
     };
 
     return (
@@ -230,7 +226,6 @@ export default function AIExecutiveSummaryReportModule() {
                     onResetDefaults={handleResetDefaults}
                     onToggleAICopilot={handleToggleAICopilot}
                     onExportPdf={handleExportPdf}
-                    onPrint={handlePrint}
                 />
             )}
 
