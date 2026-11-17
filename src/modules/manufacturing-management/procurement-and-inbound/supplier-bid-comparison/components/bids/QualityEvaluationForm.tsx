@@ -28,11 +28,12 @@ export const QualityEvaluationForm: React.FC<QualityEvaluationFormProps> = ({ bi
     const landedResult = calculateSupplierLandedCost(currentProject, items, bid);
 
     const handleUpdatePassFail = (criterionId: string, result: PassFailResult) => {
+        const critObj = criteria.find((c) => c.id === criterionId || (c.dbId && String(c.dbId) === criterionId));
         updateProject((prev) => ({
             ...prev,
             bids: prev.bids.map((b) => {
                 if (b.id !== bid.id) return b;
-                const existing = b.scores[criterionId] || { passFailResult: "NOT_CHECKED", score: null, evidenceRemarks: "" };
+                const existing = b.scores[criterionId] || (critObj?.dbId ? b.scores[String(critObj.dbId)] : undefined) || { passFailResult: "NOT_CHECKED", score: null, evidenceRemarks: "" };
                 return {
                     ...b,
                     scores: {
@@ -45,11 +46,12 @@ export const QualityEvaluationForm: React.FC<QualityEvaluationFormProps> = ({ bi
     };
 
     const handleUpdateScore = (criterionId: string, score: number | null) => {
+        const critObj = criteria.find((c) => c.id === criterionId || (c.dbId && String(c.dbId) === criterionId));
         updateProject((prev) => ({
             ...prev,
             bids: prev.bids.map((b) => {
                 if (b.id !== bid.id) return b;
-                const existing = b.scores[criterionId] || { passFailResult: "NOT_CHECKED", score: null, evidenceRemarks: "" };
+                const existing = b.scores[criterionId] || (critObj?.dbId ? b.scores[String(critObj.dbId)] : undefined) || { passFailResult: "NOT_CHECKED", score: null, evidenceRemarks: "" };
                 return {
                     ...b,
                     scores: {
@@ -62,11 +64,12 @@ export const QualityEvaluationForm: React.FC<QualityEvaluationFormProps> = ({ bi
     };
 
     const handleUpdateRemarks = (criterionId: string, remarks: string) => {
+        const critObj = criteria.find((c) => c.id === criterionId || (c.dbId && String(c.dbId) === criterionId));
         updateProject((prev) => ({
             ...prev,
             bids: prev.bids.map((b) => {
                 if (b.id !== bid.id) return b;
-                const existing = b.scores[criterionId] || { passFailResult: "NOT_CHECKED", score: null, evidenceRemarks: "" };
+                const existing = b.scores[criterionId] || (critObj?.dbId ? b.scores[String(critObj.dbId)] : undefined) || { passFailResult: "NOT_CHECKED", score: null, evidenceRemarks: "" };
                 return {
                     ...b,
                     scores: {
@@ -115,7 +118,7 @@ export const QualityEvaluationForm: React.FC<QualityEvaluationFormProps> = ({ bi
                                 </thead>
                                 <tbody className="divide-y divide-border/60">
                                     {passFailCriteria.map((c) => {
-                                        const scoreObj = bid.scores[c.id] || { passFailResult: "NOT_CHECKED", evidenceRemarks: "" };
+                                        const scoreObj = bid.scores[c.id] || (c.dbId ? bid.scores[String(c.dbId)] : undefined) || { passFailResult: "NOT_CHECKED", evidenceRemarks: "" };
                                         const status = scoreObj.passFailResult;
 
                                         return (
@@ -183,7 +186,7 @@ export const QualityEvaluationForm: React.FC<QualityEvaluationFormProps> = ({ bi
                             </thead>
                             <tbody className="divide-y divide-border/60">
                                 {scoredCriteria.map((c) => {
-                                    const scoreObj = bid.scores[c.id] || { score: null, evidenceRemarks: "" };
+                                    const scoreObj = bid.scores[c.id] || (c.dbId ? bid.scores[String(c.dbId)] : undefined) || { score: null, evidenceRemarks: "" };
                                     const currentScore = scoreObj.score;
 
                                     return (

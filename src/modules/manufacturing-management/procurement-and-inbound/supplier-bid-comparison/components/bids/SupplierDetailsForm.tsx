@@ -166,6 +166,8 @@ export const SupplierDetailsForm: React.FC<SupplierDetailsFormProps> = ({
                     <Label className="text-[11px]">Quote Date</Label>
                     <Input
                         type="date"
+                        min="2000-01-01"
+                        max="2099-12-31"
                         value={bid.quoteDate}
                         onChange={(e) => handleUpdate({ quoteDate: e.target.value })}
                         className="h-7 text-xs font-mono"
@@ -176,6 +178,8 @@ export const SupplierDetailsForm: React.FC<SupplierDetailsFormProps> = ({
                     <Label className="text-[11px]">Valid Until</Label>
                     <Input
                         type="date"
+                        min="2000-01-01"
+                        max="2099-12-31"
                         value={bid.validUntil}
                         onChange={(e) => handleUpdate({ validUntil: e.target.value })}
                         className="h-7 text-xs font-mono"

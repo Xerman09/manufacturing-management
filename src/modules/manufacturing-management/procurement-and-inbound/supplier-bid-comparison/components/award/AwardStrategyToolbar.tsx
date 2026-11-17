@@ -1,13 +1,13 @@
 "use client";
 
 import React from "react";
-import { Award, Sparkles, DollarSign, RotateCcw } from "lucide-react";
+import { DollarSign, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
 import { optimizeSplitAward } from "../../engine/split-award-optimizer";
 import { ItemAward } from "../../types";
- 
+
 import { toast } from "sonner";
 
 export const AwardStrategyToolbar: React.FC = () => {
@@ -153,7 +153,6 @@ export const AwardStrategyToolbar: React.FC = () => {
                     disabled={isLocked || !summary.recommendedBidId}
                     className="h-8 text-xs gap-1.5 font-medium"
                 >
-                    <Award className="h-3.5 w-3.5 text-primary" />
                     Award All to Recommended{recSupplierSuffix}
                 </Button>
 
@@ -164,7 +163,7 @@ export const AwardStrategyToolbar: React.FC = () => {
                     disabled={isLocked || validBids.length === 0}
                     className="h-8 text-xs gap-1.5"
                 >
-                    <Sparkles className="h-3.5 w-3.5 text-blue-600" />
+
                     Lowest Total (Optimized Split)
                 </Button>
 

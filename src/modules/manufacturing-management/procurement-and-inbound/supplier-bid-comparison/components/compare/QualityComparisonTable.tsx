@@ -92,7 +92,7 @@ export const QualityComparisonTable: React.FC<QualityComparisonTableProps> = ({ 
                                                 Pass/Fail
                                             </td>
                                             {bids.map((bid) => {
-                                                const s = bid.scores[c.id];
+                                                const s = bid.scores[c.id] || (c.dbId ? bid.scores[String(c.dbId)] : undefined);
                                                 const result = s?.passFailResult || "NOT_CHECKED";
                                                 const hasEvidence = Boolean(s?.evidenceRemarks?.trim());
 
@@ -152,7 +152,7 @@ export const QualityComparisonTable: React.FC<QualityComparisonTableProps> = ({ 
                                         {c.weightPct}%
                                     </td>
                                     {bids.map((bid) => {
-                                        const s = bid.scores[c.id];
+                                        const s = bid.scores[c.id] || (c.dbId ? bid.scores[String(c.dbId)] : undefined);
                                         const score = s?.score;
                                         const hasEvidence = Boolean(s?.evidenceRemarks?.trim());
 

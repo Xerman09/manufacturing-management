@@ -32,25 +32,27 @@ export const ItemAwardSelectionTable: React.FC = () => {
     const awardedItemsCount = awards.filter((a) => a.rfqBidId && a.rfqBidId !== "UNAWARDED").length;
 
     const handleSelectWinningBid = (itemId: string, chosenBidId: string) => {
-        const item = items.find((i) => i.id === itemId);
+        const item = items.find((i) => i.id === itemId || (i.dbId && String(i.dbId) === itemId));
         if (!item) return;
 
         if (chosenBidId === "UNAWARDED") {
             updateProject((prev) => ({
                 ...prev,
-                awards: prev.awards.filter((a) => a.rfqItemId !== itemId),
+                awards: prev.awards.filter(
+                    (a) => a.rfqItemId !== item.id && (!item.dbId || String(a.rfqItemId) !== String(item.dbId))
+                ),
             }));
             return;
         }
 
-        const bid = currentProject.bids.find((b) => b.id === chosenBidId);
-        const res = summary.results[chosenBidId];
-        const breakdown = res?.items[itemId];
+        const bid = currentProject.bids.find((b) => b.id === chosenBidId || (b.dbId && String(b.dbId) === chosenBidId));
+        const res = summary.results[chosenBidId] || (bid ? summary.results[bid.id] : undefined);
+        const breakdown = res?.items[item.id] || (item.dbId ? res?.items[String(item.dbId)] : undefined);
 
         const newAward: ItemAward = {
-            id: "award-" + itemId,
-            rfqItemId: itemId,
-            rfqBidId: chosenBidId,
+            id: "award-" + item.id,
+            rfqItemId: item.id,
+            rfqBidId: bid ? bid.id : chosenBidId,
             awardedSupplierId: bid?.supplierId || null,
             awardedLandedUnitCost: breakdown?.landedUnitCostCompCurr || 0,
             awardedLandedTotal: breakdown?.totalLandedCompCurr || 0,
@@ -58,7 +60,12 @@ export const ItemAwardSelectionTable: React.FC = () => {
 
         updateProject((prev) => ({
             ...prev,
-            awards: [...prev.awards.filter((a) => a.rfqItemId !== itemId), newAward],
+            awards: [
+                ...prev.awards.filter(
+                    (a) => a.rfqItemId !== item.id && (!item.dbId || String(a.rfqItemId) !== String(item.dbId))
+                ),
+                newAward,
+            ],
         }));
     };
 
@@ -96,18 +103,35 @@ export const ItemAwardSelectionTable: React.FC = () => {
                             </tr>
                         ) : (
                             items.map((item, idx) => {
-                                const currentAward = currentProject.awards?.find((a) => a.rfqItemId === item.id);
-                                const currentBidId = currentAward?.rfqBidId || "UNAWARDED";
+                                const currentAward = currentProject.awards?.find(
+                                    (a) =>
+                                        a.rfqItemId === item.id ||
+                                        (item.dbId && String(a.rfqItemId) === String(item.dbId)) ||
+                                        (item.id && a.rfqItemId && String(a.rfqItemId) === String(item.id))
+                                );
+
+                                // Resolve matching bid in currentProject.bids
+                                const matchingBid = currentProject.bids?.find(
+                                    (b) =>
+                                        b.id === currentAward?.rfqBidId ||
+                                        (b.dbId && String(b.dbId) === String(currentAward?.rfqBidId)) ||
+                                        (currentAward?.rfqBidId && String(b.id) === String(currentAward.rfqBidId))
+                                );
+                                const currentBidId = matchingBid ? matchingBid.id : (currentAward?.rfqBidId || "UNAWARDED");
 
                                 // Find all suppliers who quoted this item, sorted by landed unit cost
                                 const biddersForThisItem = currentProject.bids
                                     .filter((b) => {
                                         const res = summary.results[b.id];
-                                        return res?.items[item.id]?.hasQuote;
+                                        return res?.items[item.id]?.hasQuote || (item.dbId && res?.items[String(item.dbId)]?.hasQuote);
                                     })
                                     .sort((a, b) => {
-                                        const costA = summary.results[a.id]?.items[item.id]?.landedUnitCostCompCurr || Infinity;
-                                        const costB = summary.results[b.id]?.items[item.id]?.landedUnitCostCompCurr || Infinity;
+                                        const costA = summary.results[a.id]?.items[item.id]?.landedUnitCostCompCurr
+                                            ?? (item.dbId ? summary.results[a.id]?.items[String(item.dbId)]?.landedUnitCostCompCurr : Infinity)
+                                            ?? Infinity;
+                                        const costB = summary.results[b.id]?.items[item.id]?.landedUnitCostCompCurr
+                                            ?? (item.dbId ? summary.results[b.id]?.items[String(item.dbId)]?.landedUnitCostCompCurr : Infinity)
+                                            ?? Infinity;
                                         return costA - costB;
                                     });
 
@@ -152,7 +176,7 @@ export const ItemAwardSelectionTable: React.FC = () => {
                                                     </SelectItem>
                                                     {biddersForThisItem.map((bid) => {
                                                         const res = summary.results[bid.id];
-                                                        const breakdown = res?.items[item.id];
+                                                        const breakdown = res?.items[item.id] || (item.dbId ? res?.items[String(item.dbId)] : undefined);
                                                         const cost = breakdown?.landedUnitCostCompCurr || 0;
                                                         const isDq = res?.isDisqualified;
                                                         const isExp = res?.isExpired;
