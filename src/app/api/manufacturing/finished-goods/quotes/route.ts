@@ -101,20 +101,6 @@ export async function PATCH(request: Request) {
             }
         }
 
-        // Also update the parent project status if projectId is provided and status is "Rejected"
-        if (projectId && status === "Rejected") {
-            const projectRes = await fetch(`${DIRECTUS_URL}/items/projects/${projectId}`, {
-                method: "PATCH",
-                headers: reqHeaders,
-                body: JSON.stringify({ status, modified_by: userId, modified_at: serverTime })
-            });
-
-            if (!projectRes.ok) {
-                const errText = await projectRes.text();
-                throw new Error(`Failed to update parent project status: ${projectRes.status} - ${errText}`);
-            }
-        }
-
         return NextResponse.json({ success: true });
     } catch (e) {
         console.error("API Error updating quotation status:", e);

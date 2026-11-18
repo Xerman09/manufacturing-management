@@ -37,14 +37,14 @@ export function useQuotation() {
     const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
     const [remarks, setRemarks] = useState<string>("");
     const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
-    
+
     // Master data lookups
     const [priceTypes, setPriceTypes] = useState<{ price_type_id: number; price_type_name: string }[]>([]);
     const [selectedPriceTypeId, setSelectedPriceTypeId] = useState<string>("");
     const [pendingPriceTypeId, setPendingPriceTypeId] = useState<string>("");
     const [isPriceTypeWarningOpen, setIsPriceTypeWarningOpen] = useState(false);
     const [showValidationErrors, setShowValidationErrors] = useState(false);
-    
+
     // Project portfolio database registry
     const [localProjects, setLocalProjects] = useState<{ id: number; project_name: string; customer_id: number; customer_name: string; customer_code: string; status?: string }[]>([]);
     const customerLookupRequestId = useRef(0);
@@ -85,7 +85,7 @@ export function useQuotation() {
     // Initialize module metadata
     useEffect(() => {
         loadQuotes();
-        
+
         // Fetch a bounded customer lookup and independently load projects. The
         // project endpoint includes customer details so this no longer depends
         // on a full customer-directory response.
@@ -139,10 +139,10 @@ export function useQuotation() {
                 return requiresBom ? p.has_versions === true : true;
             });
             setCatalogProducts(fgOnly as unknown as CatalogProduct[]);
-            
+
             if (lookupsData.products) setAllProducts(lookupsData.products as unknown as CatalogProduct[]);
             if (lookupsData.productTypes) setProductTypes(lookupsData.productTypes as Record<string, unknown>[]);
-            
+
             setLoadingProducts(false);
         }).catch(e => {
             console.error("Error fetching catalog:", e);
@@ -229,7 +229,7 @@ export function useQuotation() {
         setCustomerSearchText("");
         setSelectedPriceTypeId("");
         setShowValidationErrors(false);
-        
+
         // Generate QT-YYYYMMDD-HHMMSS
         const now = new Date();
         const year = now.getFullYear();
@@ -306,7 +306,7 @@ export function useQuotation() {
             }
 
             const newProj = await res.json();
-            
+
             // Re-fetch projects to update state
             const projRes = await fetch("/api/manufacturing/finished-goods/projects");
             if (projRes.ok) {
@@ -350,7 +350,7 @@ export function useQuotation() {
             const res = await fetch(`/api/manufacturing/finished-goods/quotes/snapshots?quoteId=${quote.id}`);
             if (!res.ok) throw new Error("Failed to load snapshot details for revision");
             const snapshotItems: QuotationSnapshotNode[] = await res.json();
-            
+
             // Map snapshots to SelectedQuoteProduct format
             const mappedProducts: SelectedQuoteProduct[] = snapshotItems.map(item => {
                 const prodMatch = allProducts.find(p => String(p.product_id) === String(item.product_id)) || catalogProducts.find(p => String(p.product_id) === String(item.product_id));
@@ -392,7 +392,7 @@ export function useQuotation() {
             });
 
             setSelectedProductsList(mappedProducts);
-            
+
             // Generate revised quote number e.g. QT-XXXXXXXXX-REV1
             const baseNum = quote.quote_number;
             let newQuoteNum = baseNum;
@@ -403,14 +403,14 @@ export function useQuotation() {
             } else {
                 newQuoteNum = `${baseNum}-REV1`;
             }
-            
+
             setQuoteNumber(newQuoteNum);
-            
+
             const custIdStr = typeof quote.customer_id === "object" && quote.customer_id !== null
                 ? String((quote.customer_id as Customer).id)
                 : String(quote.customer_id);
             setSelectedCustomerId(custIdStr);
-            
+
             const custNameStr = typeof quote.customer_id === "object" && quote.customer_id !== null
                 ? `${(quote.customer_id as Customer).customer_name} (${(quote.customer_id as Customer).customer_code})`
                 : `Cust ID: ${quote.customer_id}`;
@@ -429,7 +429,7 @@ export function useQuotation() {
             }
 
             setRemarks(quote.remarks || "");
-            
+
             const quoteProj = quote.project_id && typeof quote.project_id === "object" ? quote.project_id as Project : null;
             setProjectName(quoteProj ? quoteProj.project_name : "");
             setSelectedProjectId(quoteProj ? quoteProj.id : null);
@@ -442,7 +442,7 @@ export function useQuotation() {
             setLoadingSnapshots(false);
         }
     };
-    
+
     // Catalog and selected products
     const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
     const [allProducts, setAllProducts] = useState<CatalogProduct[]>([]);
@@ -456,7 +456,7 @@ export function useQuotation() {
     const [searchQuery, setSearchQuery] = useState("");
     const [debouncedSearchQuery] = useDebounce(searchQuery, 300);
     const itemsPerPage = 10;
-    
+
     // Helper to add an empty row to the grid
     const addEmptyRow = () => {
         setSelectedProductsList(prev => [...prev, {
@@ -510,8 +510,8 @@ export function useQuotation() {
     };
 
     const removeProductFromQuote = (lineIdOrProductId: number) => {
-        setSelectedProductsList(prev => prev.filter(item => 
-            item.line_id !== lineIdOrProductId && 
+        setSelectedProductsList(prev => prev.filter(item =>
+            item.line_id !== lineIdOrProductId &&
             item.product?.product_id !== lineIdOrProductId
         ));
     };
@@ -573,11 +573,85 @@ export function useQuotation() {
         setSelectedCustomerId(id);
         setCustomerSearchText(nameCode);
 
+        // If an existing project was previously selected that doesn't match this customer, clear it
+        if (selectedProjectId) {
+            const currentProj = localProjects.find(p => p.id === selectedProjectId);
+            const customerObj = customers.find(c => String(c.id) === id);
+            if (currentProj && customerObj) {
+                const belongsToCustomer = currentProj.customer_id === Number(id) ||
+                    (currentProj.customer_code && currentProj.customer_code === customerObj.customer_code);
+                if (!belongsToCustomer) {
+                    setSelectedProjectId(null);
+                    setProjectName("");
+                }
+            } else if (!id) {
+                setSelectedProjectId(null);
+                setProjectName("");
+            }
+        }
+
         // Customer-Driven Price Type Auto-Fill
         const customer = customers.find(c => c.id.toString() === id);
         const autoPriceTypeId = customer?.price_type_id || customer?.default_price_type_id;
         if (autoPriceTypeId) {
             handlePriceTypeChange(String(autoPriceTypeId));
+        }
+    };
+
+    const handleSelectExistingProject = async (proj: { id: number; project_name: string; customer_id?: number; customer_code?: string; customer_name?: string } | null) => {
+        if (!proj) {
+            setSelectedProjectId(null);
+            setProjectName("");
+            return;
+        }
+        setSelectedProjectId(proj.id);
+        setProjectName(proj.project_name);
+
+        // Auto-select and resolve customer if not already matching
+        if (proj.customer_id || proj.customer_code) {
+            let matchedCust = customers.find(c =>
+                (proj.customer_id && Number(c.id) === Number(proj.customer_id)) ||
+                (proj.customer_code && c.customer_code === proj.customer_code)
+            );
+
+            if (!matchedCust && proj.customer_id) {
+                try {
+                    matchedCust = await loadCustomerById(proj.customer_id) || undefined;
+                } catch (e) {
+                    console.error("Failed loading customer for project:", e);
+                }
+            }
+
+            if (matchedCust) {
+                setSelectedCustomerId(String(matchedCust.id));
+                setCustomerSearchText(`${matchedCust.customer_name} (${matchedCust.customer_code})`);
+
+                // Auto-fill price type template from customer
+                const autoPriceTypeId = matchedCust.price_type_id || matchedCust.default_price_type_id;
+                if (autoPriceTypeId) {
+                    handlePriceTypeChange(String(autoPriceTypeId));
+                }
+            } else if (proj.customer_code) {
+                // If customer not loaded, query by customer_code
+                try {
+                    const res = await fetch(`/api/manufacturing/finished-goods/customers/lookup?search=${encodeURIComponent(proj.customer_code)}&limit=1`);
+                    if (res.ok) {
+                        const custData = parseCustomerLookupResponse(await res.json());
+                        if (custData.length > 0) {
+                            const foundCust = custData[0];
+                            mergeCustomer(foundCust);
+                            setSelectedCustomerId(String(foundCust.id));
+                            setCustomerSearchText(`${foundCust.customer_name} (${foundCust.customer_code})`);
+                            const autoPriceTypeId = foundCust.price_type_id || foundCust.default_price_type_id;
+                            if (autoPriceTypeId) {
+                                handlePriceTypeChange(String(autoPriceTypeId));
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed querying customer by code:", e);
+                }
+            }
         }
     };
 
@@ -694,7 +768,7 @@ export function useQuotation() {
             const snapshots = validProducts.map(item => {
                 let pName = null;
                 let pType = null;
-                
+
                 if (item.parent_product_id) {
                     const pMatch = allProducts.find(p => p.product_id === item.parent_product_id) || catalogProducts.find(p => p.product_id === item.parent_product_id);
                     if (pMatch) pName = pMatch.product_name;
@@ -748,7 +822,7 @@ export function useQuotation() {
 
     const handlePrintQuotation = () => {
         if (!selectedQuote) return;
-        
+
         let customerName = "Unknown Customer";
         if (selectedQuote.customer_id) {
             customerName = typeof selectedQuote.customer_id === "object" && 'customer_name' in selectedQuote.customer_id
@@ -780,7 +854,7 @@ export function useQuotation() {
         // Map snapshots to include accurate type and version strings from catalog and pricing details
         const resolvedSnapshots = snapshots.map(snap => {
             const prodMatch = allProducts.find(p => String(p.product_id) === String(snap.product_id)) || catalogProducts.find(p => String(p.product_id) === String(snap.product_id));
-            
+
             let typeName = snap.product_type_name || "Finished Goods";
             if (!snap.product_type_name && prodMatch) {
                 let pTypeId = prodMatch.product_type ? Number(prodMatch.product_type) : undefined;
@@ -823,7 +897,7 @@ export function useQuotation() {
             priceTypeName,
             createdByName: createdByStr
         });
-        
+
         toast.success("Simulation Report PDF generated!");
     };
 
@@ -834,7 +908,7 @@ export function useQuotation() {
 
     // Filtered products list for selector searchbox using debounced search and grouped/sorted by Parent Product Family
     const filteredCatalog = useMemo(() => {
-        const filtered = catalogProducts.filter(p => 
+        const filtered = catalogProducts.filter(p =>
             p.product_name.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
             (p.product_code || "").toLowerCase().includes(debouncedSearchQuery.toLowerCase())
         );
@@ -850,7 +924,7 @@ export function useQuotation() {
     }, [catalogProducts, debouncedSearchQuery]);
 
     const totalPages = Math.ceil(filteredCatalog.length / itemsPerPage);
-    
+
     const paginatedCatalog = useMemo(() => {
         const startIndex = (currentPage - 1) * itemsPerPage;
         return filteredCatalog.slice(startIndex, startIndex + itemsPerPage);
@@ -859,18 +933,18 @@ export function useQuotation() {
     // Virtual Project Portfolio List: maps each project ID to a single portfolio
     const allProjects = useMemo(() => {
         const projectMap = new Map<string, { projectId: number; projectName: string; customerId: number; customerName: string; customerCode: string; projectStatus: string; quoteCount: number; latest: QuotationHeader; history: QuotationHeader[] }>();
-        
+
         quotes.forEach(q => {
             const projObj = q.project_id && typeof q.project_id === "object" ? q.project_id as Project : null;
             const projId = projObj ? Number(projObj.id) : (typeof q.project_id === "number" ? q.project_id : null);
             const key = projId !== null && !isNaN(projId) && projId > 0 ? `proj_${projId}` : `quote_${q.id}`;
             const projName = projObj?.project_name || `Project #${projId || q.id}`;
-            
+
             const cust = q.customer_id && typeof q.customer_id === "object" ? q.customer_id as Customer : null;
             const custId = cust ? Number(cust.id) : Number(q.customer_id || 0);
             const custName = cust ? cust.customer_name : `Customer ID: ${q.customer_id}`;
             const custCode = cust ? cust.customer_code : "";
-            
+
             if (!projectMap.has(key)) {
                 projectMap.set(key, {
                     projectId: projId || 0,
@@ -887,7 +961,7 @@ export function useQuotation() {
                 const group = projectMap.get(key)!;
                 group.quoteCount += 1;
                 group.history.push(q);
-                
+
                 const currLatest = group.latest;
                 const currIsVoid = currLatest.status === "Void";
                 const qIsVoid = q.status === "Void";
@@ -904,7 +978,7 @@ export function useQuotation() {
                 }
             }
         });
-        
+
         // Also add database projects that don't have quotes yet!
         localProjects.forEach(lp => {
             const key = `proj_${lp.id}`;
@@ -935,9 +1009,22 @@ export function useQuotation() {
                 });
             }
         });
-        
+
         return Array.from(projectMap.values());
     }, [quotes, localProjects]);
+
+    // Filter projects relevant to the selected customer, or all projects if no customer selected
+    const customerProjects = useMemo(() => {
+        if (!selectedCustomerId) {
+            return localProjects;
+        }
+        const customer = customers.find(c => String(c.id) === String(selectedCustomerId));
+        return localProjects.filter(p => {
+            if (p.customer_id && String(p.customer_id) === String(selectedCustomerId)) return true;
+            if (customer && customer.customer_code && p.customer_code === customer.customer_code) return true;
+            return false;
+        });
+    }, [selectedCustomerId, customers, localProjects]);
 
     return {
         view,
@@ -962,6 +1049,8 @@ export function useQuotation() {
         setProjectName,
         selectedProjectId,
         setSelectedProjectId,
+        handleSelectExistingProject,
+        customerProjects,
         priceTypes,
         selectedPriceTypeId,
         setSelectedPriceTypeId,
