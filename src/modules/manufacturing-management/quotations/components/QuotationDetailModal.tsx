@@ -61,26 +61,21 @@ export function QuotationDetailModal({
         return () => { isMounted = false; };
     }, [activeHistoryQuoteId, selectedQuote]);
 
-    const handleRejectProject = async () => {
+    const handleRejectQuote = async () => {
         if (!selectedQuote) return;
         setIsRejectConfirmOpen(true);
     };
 
-    const confirmRejectProject = async () => {
+    const confirmRejectQuote = async () => {
         if (!selectedQuote) return;
 
         setRejecting(true);
         try {
-            const projectId = selectedQuote.project_id && typeof selectedQuote.project_id === "object"
-                ? (selectedQuote.project_id as { id: number }).id
-                : selectedQuote.project_id;
-
             const res = await fetch("/api/manufacturing/finished-goods/quotes", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     quoteId: selectedQuote.id,
-                    projectId: projectId,
                     status: "Rejected"
                 })
             });
@@ -88,7 +83,7 @@ export function QuotationDetailModal({
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Failed to reject quote");
 
-            toast.success("Quote rejected successfully");
+            toast.success("Quotation rejected successfully");
             setIsRejectConfirmOpen(false);
             setIsDetailModalOpen(false);
             if (loadQuotes) loadQuotes();
@@ -204,11 +199,11 @@ export function QuotationDetailModal({
                             <>
                                 <button
                                     disabled={rejecting || routing}
-                                    onClick={handleRejectProject}
+                                    onClick={handleRejectQuote}
                                     className="bg-destructive hover:bg-destructive/90 text-white text-xs font-bold rounded-lg px-3 py-1.5 transition-colors shadow-xs flex items-center gap-1 disabled:opacity-50"
                                 >
                                     {rejecting && <Loader2 className="h-3 w-3 animate-spin" />}
-                                    Reject Project
+                                    Reject Quote
                                 </button>
                                 <button
                                     disabled={rejecting || routing || hasNoQuote}
@@ -340,7 +335,7 @@ export function QuotationDetailModal({
                         </div>
                         <div className="p-6">
                             <p className="text-sm text-foreground/80 mb-6">
-                                Are you sure you want to reject this quote? This action cannot be undone and will mark the quotation as voided.
+                                Are you sure you want to reject this quotation? This action cannot be undone and will mark this quotation sheet as Rejected.
                             </p>
                             <div className="flex justify-end gap-3">
                                 <button
@@ -351,7 +346,7 @@ export function QuotationDetailModal({
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={confirmRejectProject}
+                                    onClick={confirmRejectQuote}
                                     disabled={rejecting}
                                     className="px-4 py-2 rounded-lg text-xs font-semibold bg-destructive hover:bg-destructive/90 text-white transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50"
                                 >
