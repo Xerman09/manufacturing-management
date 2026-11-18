@@ -571,6 +571,16 @@ export default function FinishedGoodsModule() {
 
     // Keep editedDetails.cost_per_unit synchronized with the calculated Yield-Adjusted Unit Cost
     useEffect(() => {
+        const currentIsNoBom = Boolean(
+            selectedProduct && (
+                editedDetails.has_bom !== undefined
+                    ? !editedDetails.has_bom
+                    : (selectedProduct.has_bom !== undefined
+                        ? !selectedProduct.has_bom
+                        : selectedProduct.has_versions === false)
+            )
+        );
+        if (currentIsNoBom) return;
         const derivedCost = standardCostBreakdown.yieldAdjustedUnitCost;
         if (derivedCost !== undefined && !isNaN(derivedCost) && derivedCost > 0) {
             setEditedDetails(prev => {
@@ -578,7 +588,7 @@ export default function FinishedGoodsModule() {
                 return { ...prev, cost_per_unit: derivedCost };
             });
         }
-    }, [standardCostBreakdown.yieldAdjustedUnitCost, setEditedDetails]);
+    }, [standardCostBreakdown.yieldAdjustedUnitCost, setEditedDetails, selectedProduct, editedDetails.has_bom]);
 
     const simulatedCostBreakdown = useMemo(
         () => calculateCurrentCost(simulationPriceOverrides, Number(simulationYield) || 100),
