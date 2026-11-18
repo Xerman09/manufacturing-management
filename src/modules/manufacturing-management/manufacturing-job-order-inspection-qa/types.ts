@@ -167,6 +167,9 @@ export interface JobOrderDailyYieldDetails extends JobOrderDailyYieldSummary {
     completedQuantity: number;
     totalProducedQuantity: number;
     yieldEvidenceAvailable: boolean;
+    outputAllocationsAvailable: boolean;
+    allocationRejectionReasonsAvailable: boolean;
+    allocationLookupReference: string | null;
     yieldEvidenceWarning: string | null;
     routes: JobOrderDailyYieldRoute[];
     dailyYields: JobOrderDailyYieldRecord[];

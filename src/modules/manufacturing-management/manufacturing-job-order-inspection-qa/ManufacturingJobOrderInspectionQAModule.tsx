@@ -137,15 +137,17 @@ function discrepancyNote(record: JobOrderDailyYieldRecord): string | null {
     if (scannedQuantity !== null && Math.abs(record.totalQuantity - scannedQuantity) > 0.000001) {
         return `Logged total (${quantity(record.totalQuantity)}) doesn't match scanned pallet count (${quantity(scannedQuantity)})`;
     }
-    return "QA discrepancy requires resolution before this Job Order can be closed.";
+    return "QA inspection is on hold. Review the latest laboratory, sensory, weight, and disposition results before closure.";
 }
 
 function DailyYieldActionButton({
     record,
     onAction,
+    allocationUnavailable = false,
     fullWidth = false,
 }: {
     record: JobOrderDailyYieldRecord;
+    allocationUnavailable?: boolean;
     onAction: (record: JobOrderDailyYieldRecord, mode: AuditActionMode) => void;
     fullWidth?: boolean;
 }) {
@@ -159,6 +161,7 @@ function DailyYieldActionButton({
             type="button"
             size="sm"
             variant={isVerified ? "outline" : "default"}
+            disabled={allocationUnavailable && !isVerified}
             onClick={() => onAction(record, actionMode)}
             title={isVerified ? "View the completed QA audit." : isDiscrepancy ? "Resolve the QA discrepancy." : "Record the daily yield QA audit."}
             className={`min-h-10 gap-1.5 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:gap-2 [@media(pointer:coarse)]:px-4 ${fullWidth ? "w-full" : ""} ${isDiscrepancy ? "border-red-500/30 bg-red-500/5 text-red-700 hover:bg-red-500/10 dark:text-red-300" : ""}`}
@@ -257,9 +260,11 @@ function DailyYieldCard({
     record,
     shiftLabel,
     onAction,
+    allocationUnavailable = false,
 }: {
     record: JobOrderDailyYieldRecord;
     shiftLabel: string;
+    allocationUnavailable?: boolean;
     onAction: (record: JobOrderDailyYieldRecord, mode: AuditActionMode) => void;
 }) {
     const isDiscrepancy = record.qaStatus === "QA Hold";
@@ -320,7 +325,7 @@ function DailyYieldCard({
 
             {note && <p className="mt-3 rounded-md border border-red-500/20 bg-red-500/5 p-2 text-xs leading-5 text-red-700 dark:text-red-300">{note}</p>}
             <div className="mt-3 border-t pt-3">
-                <DailyYieldActionButton record={record} onAction={onAction} fullWidth />
+                <DailyYieldActionButton allocationUnavailable={allocationUnavailable} record={record} onAction={onAction} fullWidth />
             </div>
         </article>
     );
@@ -330,9 +335,11 @@ function DailyYieldRow({
     record,
     shiftLabel,
     onAction,
+    allocationUnavailable = false,
 }: {
     record: JobOrderDailyYieldRecord;
     shiftLabel: string;
+    allocationUnavailable?: boolean;
     onAction: (record: JobOrderDailyYieldRecord, mode: AuditActionMode) => void;
 }) {
     const isVerified = record.qaStatus === "Passed";
@@ -379,7 +386,7 @@ function DailyYieldRow({
             </TableCell>
             <TableCell className="sticky right-0 z-10 min-w-[170px] align-top bg-card text-right shadow-[-8px_0_12px_-12px_hsl(var(--foreground)/0.45)]">
                 <div className="flex flex-col items-end gap-2">
-                    <DailyYieldActionButton record={record} onAction={onAction} />
+                    <DailyYieldActionButton allocationUnavailable={allocationUnavailable} record={record} onAction={onAction} />
                 </div>
             </TableCell>
         </TableRow>
@@ -1005,6 +1012,19 @@ export default function ManufacturingJobOrderInspectionQAModule({ inspectorName 
                                 <div><div className="text-[10px] uppercase tracking-wide text-muted-foreground">Yield Records</div><div className="mt-1 font-semibold">{details.dailyYields.length}</div><div className="text-[10px] text-muted-foreground">{pendingYieldCount} pending · {discrepancyYieldCount} discrepancy</div></div>
                             </div>
 
+                            {(details.outputAllocationsAvailable === false || details.allocationRejectionReasonsAvailable === false) && (
+                                <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+                                    <p>{details.outputAllocationsAvailable === false
+                                        ? "Output allocations are temporarily unavailable. Retry to restore audit editing and closure."
+                                        : "Rejection reason names are temporarily unavailable. Allocation quantities are still available."}</p>
+                                    {details.allocationLookupReference && <p className="mt-1 text-xs text-muted-foreground">Reference {details.allocationLookupReference}</p>}
+                                    <Button type="button" size="sm" variant="outline" className="mt-2"
+                                        onClick={() => jobOrderState.selectedJobOrder && jobOrderState.openDetails(jobOrderState.selectedJobOrder)}>
+                                        Retry allocation lookup
+                                    </Button>
+                                </div>
+                            )}
+
                             {canClose && (
                                 <div className={`rounded-xl border p-3 text-sm ${closeReady ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"}`} role="status">
                                     <div className="flex items-start gap-2">
@@ -1059,6 +1079,7 @@ export default function ManufacturingJobOrderInspectionQAModule({ inspectorName 
                                                     key={record.ledgerId}
                                                     record={record}
                                                     shiftLabel={shiftDisplayLabels.get(record.ledgerId) || record.shiftName || "Shift not specified"}
+                                                    allocationUnavailable={details.outputAllocationsAvailable === false}
                                                     onAction={(yieldRecord) => auditState.openAudit(yieldRecord, details)}
                                                 />
                                             ))}
@@ -1105,6 +1126,7 @@ export default function ManufacturingJobOrderInspectionQAModule({ inspectorName 
                                                     key={record.ledgerId}
                                                     record={record}
                                                     shiftLabel={shiftDisplayLabels.get(record.ledgerId) || record.shiftName || "Shift not specified"}
+                                                    allocationUnavailable={details.outputAllocationsAvailable === false}
                                                     onAction={(yieldRecord) => auditState.openAudit(yieldRecord, details)}
                                                 />
                                             ))}

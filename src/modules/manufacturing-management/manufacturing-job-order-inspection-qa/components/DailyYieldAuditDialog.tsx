@@ -138,8 +138,9 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
         )
         : null);
     const hasOutput = loggedOutputQuantity > 0;
-    const requiresOutputTraceability = acceptedOutputQuantity > 0;
-    const requiresRejectedOutputTraceability = rejectedOutputQuantity > 0;
+    const allocationsUnavailable = details?.outputAllocationsAvailable === false;
+    const requiresOutputTraceability = !allocationsUnavailable && acceptedOutputQuantity > 0;
+    const requiresRejectedOutputTraceability = !allocationsUnavailable && rejectedOutputQuantity > 0;
     const hasSavedAcceptedEvidence = (yieldRecord?.evidence?.acceptedStock.length || 0) > 0;
     const hasSavedRejectedEvidence = (yieldRecord?.evidence?.rejectedStock.length || 0) > 0;
     const shelfLifeDays = Number(details?.productShelfLifeDays);
@@ -781,6 +782,11 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                     </div>
                                 )}
 
+                                {allocationsUnavailable && (
+                                    <p role="status" className="text-sm text-muted-foreground">
+                                        Saved output allocations are temporarily unavailable. Close this audit and retry the allocation lookup in Job Order details.
+                                    </p>
+                                )}
                                 {requiresOutputTraceability && controller.dailyOutputLotsError && (
                                     <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive flex items-start gap-2 text-xs" role="alert">
                                         <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -850,8 +856,8 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                                             <Input id={`accepted-allocation-quantity-${allocation.allocationKey}`} type="number" min="0" step="0.000001" value={allocation.quantity} onChange={(event) => controller.updateAcceptedAllocation(allocation.allocationKey, "quantity", event.target.value)} className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs font-mono" disabled={controller.actionLoading || isVerified} required />
                                                         </div>
                                                         <div className="space-y-1">
-                                                            <Label htmlFor={`accepted-allocation-batch-${allocation.allocationKey}`} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Tag className="h-3.5 w-3.5 text-emerald-500" /> Batch / Lot No <span className="text-destructive">*</span></Label>
-                                                            <Input id={`accepted-allocation-batch-${allocation.allocationKey}`} type="text" maxLength={100} value={allocation.batchNo} onChange={(event) => controller.updateAcceptedAllocation(allocation.allocationKey, "batchNo", event.target.value)} className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs font-bold font-mono" placeholder="e.g. JO-2026-YLD-001" disabled={controller.actionLoading || isVerified} required />
+                                                            <Label htmlFor={`accepted-allocation-batch-${allocation.allocationKey}`} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Tag className="h-3.5 w-3.5 text-emerald-500" /> Batch Number <span className="text-destructive">*</span></Label>
+                                                            <Input id={`accepted-allocation-batch-${allocation.allocationKey}`} type="text" maxLength={100} value={allocation.batchNo} onChange={(event) => controller.updateAcceptedAllocation(allocation.allocationKey, "batchNo", event.target.value)} className="h-9 rounded-lg bg-background border-border/80 text-foreground text-xs font-bold font-mono" placeholder="Enter batch number" disabled={controller.actionLoading || isVerified} required />
                                                         </div>
                                                         <div className="space-y-1">
                                                             <Label htmlFor={`accepted-allocation-lot-${allocation.allocationKey}`} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><MapPin className="h-3.5 w-3.5 text-emerald-500" /> Storage Lot <span className="text-destructive">*</span></Label>
@@ -956,9 +962,15 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                         {!isVerified && rejectedCountError && <p id="qa-rejected-count-error" role="alert" className="text-xs text-destructive">{rejectedCountError}</p>}
                                         </div>
 
+                                        {auditedOutputQuantity !== null && !hasAllocationVariance && yieldRecord
+                                            && acceptedOutputQuantity !== Number(yieldRecord.goodQuantity) && (
+                                            <div role="status" className="sm:col-span-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs">
+                                                QA has reclassified the good/rejected split. The total is conserved; passing QA checks will verify this inspected split.
+                                            </div>
+                                        )}
                                         {hasAllocationVariance && auditedOutputQuantity !== null && (
                                             <div role="status" className="sm:col-span-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-                                                Yield Variance Detected: QA Audited ({numericText(auditedOutputQuantity)} {details?.productUom || "units"}) vs. Supervisor Logged ({numericText(loggedOutputQuantity)} {details?.productUom || "units"}). Add an optional explanation in Inspector remarks / Lab Comments.
+                                                Yield Variance Detected: QA Audited ({numericText(auditedOutputQuantity)} {details?.productUom || "units"}) vs. Supervisor Logged ({numericText(loggedOutputQuantity)} {details?.productUom || "units"}). Accepted plus rejected must equal the logged shift total before authorization. Reclassifying the good/rejected split is allowed.
                                             </div>
                                         )}
 
@@ -986,8 +998,8 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                                                                 <Input id={"rejected-allocation-quantity-" + allocation.allocationKey} type="number" min="0" step="0.000001" value={allocation.quantity} onChange={(event) => controller.updateRejectedAllocation(allocation.allocationKey, "quantity", event.target.value)} className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs font-mono" disabled={controller.actionLoading || isVerified} required />
                                                             </div>
                                                             <div className="space-y-1">
-                                                                <Label htmlFor={"rejected-allocation-batch-" + allocation.allocationKey} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Tag className="h-3.5 w-3.5 text-rose-500" /> Rejected Batch / Lot No <span className="text-destructive">*</span></Label>
-                                                                <Input id={"rejected-allocation-batch-" + allocation.allocationKey} type="text" maxLength={100} value={allocation.batchNo} onChange={(event) => controller.updateRejectedAllocation(allocation.allocationKey, "batchNo", event.target.value)} className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs font-bold font-mono" placeholder="Enter rejected batch or lot number" disabled={rejectedOutputLocked || isVerified} required />
+                                                                <Label htmlFor={"rejected-allocation-batch-" + allocation.allocationKey} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><Tag className="h-3.5 w-3.5 text-rose-500" /> Rejected Batch Number <span className="text-destructive">*</span></Label>
+                                                                <Input id={"rejected-allocation-batch-" + allocation.allocationKey} type="text" maxLength={100} value={allocation.batchNo} onChange={(event) => controller.updateRejectedAllocation(allocation.allocationKey, "batchNo", event.target.value)} className="h-9 rounded-lg bg-background border-rose-500/30 text-foreground text-xs font-bold font-mono" placeholder="Enter rejected batch number" disabled={rejectedOutputLocked || isVerified} required />
                                                             </div>
                                                             <div className="space-y-1">
                                                                 <Label htmlFor={"rejected-allocation-lot-" + allocation.allocationKey} className="flex items-center gap-1.5 text-muted-foreground font-medium text-[11px]"><MapPin className="h-3.5 w-3.5 text-rose-500" /> Bad-stock Storage Lot <span className="text-destructive">*</span></Label>
@@ -1159,7 +1171,7 @@ export function DailyYieldAuditDialog({ controller, displayShiftName }: DailyYie
                     <DialogFooter className="shrink-0 pt-3 mt-1 border-t border-border gap-2 flex items-center justify-end bg-background">
                         <Button type="button" variant="outline" onClick={controller.closeAudit} disabled={controller.actionLoading} title={controller.actionLoading ? "Wait for the save to finish or time out." : undefined} className="border-border hover:bg-muted text-foreground min-h-10 text-xs font-semibold">{isVerified ? "Close" : "Cancel"}</Button>
                         {!isVerified && (
-                            <Button type="submit" disabled={controller.actionLoading || controller.referenceLoading || controller.saveOutcomeUnclear || Boolean(labDispositionError) || Boolean(acceptedCountError) || Boolean(rejectedCountError)} title={labDispositionError || (controller.referenceLoading ? "Wait for the audit reference data to finish loading." : controller.saveOutcomeUnclear ? "Close and reopen this yield to check its latest saved status before retrying." : undefined)} className="bg-primary hover:bg-primary/95 text-white font-bold min-h-10 text-xs px-4">
+                            <Button type="submit" disabled={allocationsUnavailable || controller.actionLoading || controller.referenceLoading || controller.saveOutcomeUnclear || Boolean(labDispositionError) || Boolean(acceptedCountError) || Boolean(rejectedCountError) || hasAllocationVariance} title={labDispositionError || (controller.referenceLoading ? "Wait for the audit reference data to finish loading." : controller.saveOutcomeUnclear ? "Close and reopen this yield to check its latest saved status before retrying." : undefined)} className="bg-primary hover:bg-primary/95 text-white font-bold min-h-10 text-xs px-4">
                                 {controller.actionLoading ? (
                                     <span role="status" className="inline-flex items-center gap-2">
                                         <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

@@ -1,3 +1,4 @@
+import { readYieldAllocationDependency, yieldAllocationPath } from "../_yield-allocation-lookup";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import {
@@ -371,7 +372,7 @@ function parseSummaryQuery(searchParams: URLSearchParams): JobOrderDailyYieldSum
     };
 }
 
-async function loadJobOrderDetails(id: number, canRevokeYieldAudit: boolean) {
+async function loadJobOrderDetails(id: number, canRevokeYieldAudit: boolean, requestId: string) {
     const [jobOrder, yields, inspections, routes, qaParameterRows] = await Promise.all([
         readRecord(
             `/items/manufacturing_job_orders/${encodeURIComponent(String(id))}?fields=job_order_id,job_order_no,status,product_id,branch_id,target_quantity,completed_quantity`,
@@ -490,21 +491,23 @@ async function loadJobOrderDetails(id: number, canRevokeYieldAudit: boolean) {
 
     const qaAllocationCapacities = calculateQAOutputAllocationCapacities(committedYields);
     const yieldLedgerIds = committedYields.map(ledgerId).filter(Boolean);
-    const outputAllocationRows = yieldLedgerIds.length > 0
-        ? await readRows(
-            `/items/manufacturing_job_order_yield_allocations?filter[ledger_id][_in]=${yieldLedgerIds.join(",")}&limit=-1&sort=sort_order,allocation_id&fields=allocation_id,ledger_id,allocation_type,allocation_key,quantity,mm_lot_id,batch_no,manufacturing_date,expiry_date,rejection_reason_id`,
-            "Yield output allocation lookup"
-        )
+    const readAllocationDependency = (path: string, lookup: string) =>
+        readYieldAllocationDependency(`${DIRECTUS_URL}${path}`, headers, { jobOrderId: id, requestId, lookup });
+    const allocations = yieldLedgerIds.length > 0
+        ? await readAllocationDependency(yieldAllocationPath(yieldLedgerIds), "output allocations")
         : [];
+    const outputAllocationsAvailable = allocations !== null;
+    const outputAllocationRows = allocations ?? [];
     const rejectionReasonIds = [...new Set(outputAllocationRows
         .map((row) => relationId(row.rejection_reason_id, ["id"]))
         .filter(Boolean))];
-    const rejectionReasonRows = rejectionReasonIds.length > 0
-        ? await readRows(
+    const rejectionReasons = rejectionReasonIds.length > 0
+        ? await readAllocationDependency(
             `/items/qa_rejection_reasons?filter[id][_in]=${rejectionReasonIds.join(",")}&limit=-1&fields=id,reason_name`,
-            "QA rejection reason lookup"
+            "rejection reason names"
         )
         : [];
+    const rejectionReasonRows = rejectionReasons ?? [];
     const rejectionReasonNames = new Map<number, string>(
         rejectionReasonRows.map((row) => [relationId(row.id), textValue(row.reason_name)])
     );
@@ -738,7 +741,21 @@ async function loadJobOrderDetails(id: number, canRevokeYieldAudit: boolean) {
         };
     }
 
+    if (!outputAllocationsAvailable) {
+        closeReadiness = {
+            ...closeReadiness,
+            ready: false,
+            blockers: [...closeReadiness.blockers, {
+                code: "YIELD_ALLOCATIONS_UNAVAILABLE",
+                message: "Output allocations could not be verified. Retry before closing this Job Order."
+            }]
+        };
+    }
+
     return {
+        outputAllocationsAvailable,
+        allocationRejectionReasonsAvailable: rejectionReasons !== null,
+        allocationLookupReference: !outputAllocationsAvailable || rejectionReasons === null ? requestId : null,
         jobOrderId: id,
         jobOrderNo: textValue(jobOrder.job_order_no) || `JO-${id}`,
         status: formatJobOrderStatus(jobOrder.status),
@@ -762,7 +779,7 @@ async function loadJobOrderDetails(id: number, canRevokeYieldAudit: boolean) {
         yieldEvidenceWarning,
         routes: routeModels,
         dailyYields,
-        canRevokeYieldAudit,
+        canRevokeYieldAudit: canRevokeYieldAudit && outputAllocationsAvailable,
         closeReadiness
     };
 }
@@ -779,7 +796,7 @@ export async function GET(request: Request) {
             if (!Number.isSafeInteger(joId) || joId <= 0) {
                 throw new JobOrderInspectionQAError(400, "A valid Job Order identifier is required.");
             }
-            return NextResponse.json({ data: await loadJobOrderDetails(joId, authorizedUser.canRevokeYieldAudit) });
+            return NextResponse.json({ data: await loadJobOrderDetails(joId, authorizedUser.canRevokeYieldAudit, crypto.randomUUID()) });
         }
 
         if (rawJobOrderNo) {
