@@ -68,6 +68,18 @@ function roundQuantity(value: number): number {
     return Math.round(value * QUANTITY_SCALE) / QUANTITY_SCALE;
 }
 
+/** Accept incomplete decimal text while the operator is editing a reservation. */
+export function isMaterialConsumptionEdit(value: string): boolean {
+    return /^[0-9]*(?:\.[0-9]{0,6})?$(?![\s\S])/.test(value);
+}
+
+export function canInsertMaterialConsumptionText(input: HTMLInputElement, text: string): boolean {
+    const { value, selectionStart, selectionEnd } = input;
+    return isMaterialConsumptionEdit(
+        value.slice(0, selectionStart ?? value.length) + text + value.slice(selectionEnd ?? value.length)
+    );
+}
+
 export function parseMaterialConsumptionInput(rawValue: string): number | null {
     const value = rawValue.trim();
     if (!/^(?:\d+(?:\.\d{0,6})?|\.\d{1,6})$/.test(value)) return null;

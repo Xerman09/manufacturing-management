@@ -242,7 +242,7 @@ export async function getDisposition(dispositionId: string): Promise<StoredDispo
     }
 }
 
-export async function findPendingDisposition(jobOrderId: number, taskId: number | null, signal?: AbortSignal): Promise<StoredDisposition | null> {
+export async function findPendingDisposition(jobOrderId: number, taskId: number | null, signal?: AbortSignal, sourcePrefix?: string): Promise<StoredDisposition | null> {
     if (!taskId) return null;
     const params = new URLSearchParams({
         "filter[job_order_id][_eq]": String(jobOrderId),
@@ -250,6 +250,7 @@ export async function findPendingDisposition(jobOrderId: number, taskId: number 
         "filter[disposition_status][_eq]": "Pending",
         limit: "1"
     });
+    if (sourcePrefix) params.set("filter[inspection_remarks][_starts_with]", sourcePrefix + "\n");
     const payload = await directusRequest(
         `/items/${DISPOSITIONS_COLLECTION}?${params.toString()}`,
         {},

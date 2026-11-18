@@ -19,6 +19,7 @@ import { fetchJobOrderDailyYieldDetails, revokeJobOrderYieldAudit } from "../ser
 import {
     parseQAOutputQuantity,
     initialQAInspectionCounts,
+    qaOutputAllocationMatchesLoggedTotal,
     qaOutputAllocationCapacityErrorMessage,
     qaOutputAllocationWithinCapacity,
     sumQAOutputQuantities
@@ -739,7 +740,7 @@ export function useDailyYieldAudit({ onSaved, inspectorName }: UseDailyYieldAudi
             }
             const batchNo = row.batchNo.trim();
             if (!batchNo || batchNo.length > 100) {
-                toast.error("Enter a batch / lot number of no more than 100 characters for every allocation.");
+                toast.error("Enter a batch number of no more than 100 characters for every allocation.");
                 return false;
             }
             if (!row.manufacturingDate || !row.expiryDate) {
@@ -868,6 +869,11 @@ export function useDailyYieldAudit({ onSaved, inspectorName }: UseDailyYieldAudi
         const rejectedQuantity = parseQAOutputQuantity(dailyRejectedOutputQuantity);
         if (acceptedQuantity === null || rejectedQuantity === null) {
             toast.error("Enter valid nonnegative Good and Bad quantities with no more than six decimal places.");
+            return;
+        }
+        if (!qaOutputAllocationMatchesLoggedTotal({ acceptedQuantity, rejectedQuantity }, selectedYield.goodQuantity,
+            sumQAOutputQuantities(selectedYield.rejectedQuantity, selectedYield.scrapQuantity))) {
+            toast.error("Accepted plus rejected quantity must equal the supervisor's logged shift total. QA may reclassify the good/rejected split.");
             return;
         }
         const capacityError = validateAllocationCapacity(String(acceptedQuantity), String(rejectedQuantity));
