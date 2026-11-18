@@ -1106,6 +1106,23 @@ export function useFinishedGoods(initialTab: string = "details") {
             }
         }
 
+        const currentSavedHasBom = selectedProduct?.has_bom !== undefined
+            ? Boolean(selectedProduct.has_bom)
+            : selectedProduct?.has_versions !== false;
+        const isHasBomToggled = validatedDetails.hasBom !== currentSavedHasBom;
+
+        const resolvedParentId = editedDetails.parent_id !== undefined
+            ? (editedDetails.parent_id ? Number(editedDetails.parent_id) : null)
+            : (selectedProduct?.parent_id ?? null);
+        const resolvedIdentityParent = resolvedParentId
+            ? products.find(parent => parent.id === String(resolvedParentId))
+            : null;
+        const resolvedIdentityName = resolvedIdentityParent?.title || validatedDetails.title || selectedProduct?.title || "";
+        const resolvedIdentityUom = matchedUnit?.unit_shortcut || editedDetails.baseUom || selectedProduct?.baseUom || "";
+        const resolvedIdentityKey = resolvedParentId && resolvedIdentityUom.trim()
+            ? `${resolvedIdentityName} - ${resolvedIdentityUom.trim().toUpperCase()}`
+            : resolvedIdentityName;
+
         // Check if the current version is locked
         const isCurrentVersionLocked = validatedDetails.hasBom && Boolean(
             selectedVersion &&
@@ -1114,7 +1131,7 @@ export function useFinishedGoods(initialTab: string = "details") {
         );
 
         // Validate routing operation steps only if product has an editable BOM version
-        if (validatedDetails.hasBom && !isCurrentVersionLocked) {
+        if (validatedDetails.hasBom && !isCurrentVersionLocked && !isHasBomToggled) {
             for (let i = 0; i < editedRoutes.length; i++) {
                 const r = editedRoutes[i];
                 const stepNum = r.sequence_order || i + 1;
@@ -1147,7 +1164,7 @@ export function useFinishedGoods(initialTab: string = "details") {
             }))
         }));
 
-        if (validatedDetails.hasBom && activeDraft) {
+        if (validatedDetails.hasBom && activeDraft && !isHasBomToggled) {
             setSavingBOM(true);
             setSaveStatus("Saving draft revision...");
             try {
@@ -1262,7 +1279,7 @@ export function useFinishedGoods(initialTab: string = "details") {
 
             let saveSucceeded = false;
 
-            const targetDraftId = validatedDetails.hasBom
+            const targetDraftId = validatedDetails.hasBom && !isHasBomToggled
                 ? (activeDraft?.draft_id || (selectedVersion?.is_draft ? (selectedVersion.draft_id || selectedVersion.version_id) : null))
                 : null;
             if (targetDraftId) {
@@ -1289,7 +1306,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                     density_factor: validatedDetails.densityFactor,
                     product_brand: validatedDetails.productBrand,
                     product_category: validatedDetails.productCategory,
-                    description: editedDetails.description || "",
+                    description: resolvedIdentityKey || selectedProduct?.identityKey || validatedDetails.title,
                     short_description: editedDetails.description || null,
                     cost_per_unit: editedDetails.cost_per_unit ?? 0,
                     unit_of_measurement_count: validatedDetails.unitOfMeasurementCount,
@@ -1305,7 +1322,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                     status: (editedDetails as unknown as { status?: string }).status || (selectedProduct as unknown as { status?: string })?.status || "Active"
                 });
                 saveSucceeded = true;
-            } else if (validatedDetails.hasBom && selectedVersionId !== null && selectedVersionId < 0) {
+            } else if (validatedDetails.hasBom && !isHasBomToggled && selectedVersionId !== null && selectedVersionId < 0) {
                 // Local UI draft version: submit as Draft to MySQL database
                 const draftPayload = {
                     productId: numericProductId,
@@ -1344,7 +1361,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                         ? activeBOMId
                         : (versions.find(v => v.version_id > 0)?.version_id || null));
 
-                if (!validatedDetails.hasBom || !targetVersionId || isCurrentVersionLocked) {
+                if (!validatedDetails.hasBom || isHasBomToggled || !targetVersionId || isCurrentVersionLocked) {
                     await updateProduct(numericProductId, {
                         product_name: validatedDetails.title,
                         product_code: validatedDetails.sku,
@@ -1353,7 +1370,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                         density_factor: validatedDetails.densityFactor,
                         product_brand: validatedDetails.productBrand,
                         product_category: validatedDetails.productCategory,
-                        description: editedDetails.description || "",
+                        description: resolvedIdentityKey || selectedProduct?.identityKey || validatedDetails.title,
                         short_description: editedDetails.description || null,
                         cost_per_unit: editedDetails.cost_per_unit ?? 0,
                         unit_of_measurement_count: validatedDetails.unitOfMeasurementCount,
@@ -1458,8 +1475,8 @@ export function useFinishedGoods(initialTab: string = "details") {
                             isActive: updatedStatus === "Inactive" ? 0 : 1,
                             product_code: editedDetails.sku || p.product_code,
                             product_name: editedDetails.title || p.product_name,
-                            description: editedDetails.description || p.description,
-                            short_description: editedDetails.description || p.short_description,
+                            description: resolvedIdentityKey || p.description,
+                            short_description: editedDetails.description !== undefined ? (editedDetails.description || null) : p.short_description,
                             barcode: editedDetails.barcode || p.barcode,
                             price_per_unit: editedDetails.targetSellingPrice || p.price_per_unit,
                             density_factor: editedDetails.densityFactor || p.density_factor,
@@ -1483,15 +1500,49 @@ export function useFinishedGoods(initialTab: string = "details") {
                 }));
 
                 if (validatedDetails.hasBom) {
-                    const vList = await fetchVersions(numericProductId);
-                    setVersions(vList);
-                } else {
-                    setVersions([]);
-                    setSelectedVersionId(null);
+                    const [vList, activeDrafts] = await Promise.all([
+                        fetchVersions(numericProductId),
+                        fetchActiveDraftsForProduct(numericProductId).catch(() => [])
+                    ]);
+                    const localDrafts = versions.filter(v => v.version_id < 0);
+                    const draftVersions: ProductVersion[] = (activeDrafts || []).map((d: any) => ({
+                        version_id: d.draft_id,
+                        draft_id: d.draft_id,
+                        product_id: d.product_id,
+                        version_name: `${d.version_name}`,
+                        base_quantity: Number(d.base_quantity || 1),
+                        expected_yield_percentage: Number(d.expected_yield_percentage || 100),
+                        custom_overhead: Number(d.custom_overhead || 0),
+                        status: d.status || "Draft",
+                        is_active: false,
+                        is_primary: false,
+                        is_draft: true,
+                        source_version_id: d.source_version_id || null,
+                        created_at: d.created_at,
+                        updated_at: d.updated_at
+                    }));
+                    const combinedList = [...localDrafts, ...draftVersions, ...(vList || [])];
+                    const sortedList = combinedList.sort((a: any, b: any) => {
+                        const timeA = a.updated_at ? new Date(a.updated_at).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
+                        const timeB = b.updated_at ? new Date(b.updated_at).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
+                        if (!isNaN(timeA) && !isNaN(timeB) && timeA !== timeB) return timeB - timeA;
+                        return b.version_id - a.version_id;
+                    });
+                    setVersions(sortedList);
+                    if (activeDrafts && activeDrafts.length > 0) {
+                        setActiveDraft(activeDrafts[0]);
+                        if (selectedVersionId === null || !sortedList.some(v => v.version_id === selectedVersionId)) {
+                            setSelectedVersionId(activeDrafts[0].draft_id);
+                        }
+                    } else if (selectedVersionId === null && sortedList.length > 0) {
+                        const primaryVer = sortedList.find((v: any) => !v.is_draft && v.is_primary);
+                        const activeVer = primaryVer || sortedList.find((v: any) => !v.is_draft && (v.is_active || v.status === "Active")) || sortedList[0];
+                        setSelectedVersionId(activeVer ? activeVer.version_id : sortedList[0].version_id);
+                    }
                 }
                 setHasUnsavedChanges(false);
                 setEditFieldErrors({});
-                if (isCurrentVersionLocked) {
+                if (isCurrentVersionLocked || isHasBomToggled) {
                     toast.success("Product details updated successfully!");
                 } else {
                     toast.success("Finished good configuration saved successfully!");
