@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { SupplierCurrencyOption, SupplierFormState, PSGCItem } from "../types";
 import { Building2, AlertCircle, UserSquare2, Plus, Trash2, Globe } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { fetchActiveSupplierCurrencies, fetchPHProvinces, fetchPHCities, fetchPHBarangays } from "../services/supplier.service";
+import { fetchActiveSupplierCurrencies, fetchPHProvinces, fetchPHCities, fetchPHBarangays, NCR_REGION_CODE } from "../services/supplier.service";
 import { SUPPLIER_COUNTRY_OPTIONS, isPhilippinesCountry } from "../supplier-country";
 import { CreatableSelect } from "../../finished-goods-master/components/CreatableSelect";
 import { SearchableCountrySelect } from "@/app/(manufacturing-management)/mm/suppliers/_components/SearchableCountrySelect";
@@ -28,6 +28,14 @@ const LOCAL_CURRENCY_OPTION: SupplierCurrencyOption = {
     is_active: 1
 };
 
+const METRO_MANILA = { code: NCR_REGION_CODE, name: "Metro Manila" };
+const NCR_ADDRESS_NAMES = ["metro manila", "metro manila (ncr)", "ncr", "national capital region"];
+
+interface LocationLookup {
+    parentCode: string;
+    items: PSGCItem[];
+}
+
 export default function SupplierFormModal({
     isOpen,
     onClose,
@@ -46,17 +54,18 @@ export default function SupplierFormModal({
         setMounted(true);
     }, []);
 
-    const [provinces, setProvinces] = useState<PSGCItem[]>([]);
-    const [cities, setCities] = useState<PSGCItem[]>([]);
-    const [barangays, setBarangays] = useState<PSGCItem[]>([]);
+    const [provinces, setProvinces] = useState<PSGCItem[] | null>(null);
+    const [cityLookup, setCityLookup] = useState<LocationLookup | null>(null);
+    const [barangayLookup, setBarangayLookup] = useState<LocationLookup | null>(null);
 
     const [selectedProvinceCode, setSelectedProvinceCode] = useState("");
     const [selectedCityCode, setSelectedCityCode] = useState("");
     const [selectedBarangayCode, setSelectedBarangayCode] = useState("");
 
-    const [loadingProvinces, setLoadingProvinces] = useState(false);
-    const [loadingCities, setLoadingCities] = useState(false);
-    const [loadingBarangays, setLoadingBarangays] = useState(false);
+    const cities = cityLookup?.parentCode === selectedProvinceCode ? cityLookup.items : undefined;
+    const barangays = barangayLookup?.parentCode === selectedCityCode ? barangayLookup.items : undefined;
+    const loadingCities = Boolean(selectedProvinceCode && !cities);
+    const loadingBarangays = Boolean(selectedCityCode && !barangays);
     const [supplierCurrencies, setSupplierCurrencies] = useState<SupplierCurrencyOption[]>([]);
     const [loadingSupplierCurrencies, setLoadingSupplierCurrencies] = useState(false);
     const [currencyError, setCurrencyError] = useState<string | null>(null);
@@ -109,21 +118,14 @@ export default function SupplierFormModal({
         }
     };
 
-    const loadProvinces = async () => {
-        setLoadingProvinces(true);
-        const list = await fetchPHProvinces();
-        setProvinces(list);
-        setLoadingProvinces(false);
-    };
-
     const handleCountrySelect = (country: string) => {
         const nextIsPH = isPhilippinesCountry(country);
 
         setSelectedProvinceCode("");
         setSelectedCityCode("");
         setSelectedBarangayCode("");
-        setCities([]);
-        setBarangays([]);
+        setCityLookup(null);
+        setBarangayLookup(null);
 
         setSupplierForm(prev => {
             const previousIsPH = isPhilippinesCountry(prev.country);
@@ -147,10 +149,36 @@ export default function SupplierFormModal({
     };
 
     useEffect(() => {
-        if (isOpen && isPH) {
-            loadProvinces();
-        }
+        if (!isOpen || !isPH) return;
+
+        const controller = new AbortController();
+        void fetchPHProvinces(controller.signal).then(list => {
+            if (controller.signal.aborted) return;
+            setProvinces([...list.filter(province => province.code !== NCR_REGION_CODE), METRO_MANILA]
+                .sort((a, b) => a.name.localeCompare(b.name)));
+        });
+        return () => controller.abort();
     }, [isOpen, isPH]);
+
+    useEffect(() => {
+        if (!isOpen || !isPH || !selectedProvinceCode) return;
+
+        const controller = new AbortController();
+        void fetchPHCities(selectedProvinceCode, controller.signal).then(items => {
+            if (!controller.signal.aborted) setCityLookup({ parentCode: selectedProvinceCode, items });
+        });
+        return () => controller.abort();
+    }, [isOpen, isPH, selectedProvinceCode]);
+
+    useEffect(() => {
+        if (!isOpen || !isPH || !selectedCityCode) return;
+
+        const controller = new AbortController();
+        void fetchPHBarangays(selectedCityCode, controller.signal).then(items => {
+            if (!controller.signal.aborted) setBarangayLookup({ parentCode: selectedCityCode, items });
+        });
+        return () => controller.abort();
+    }, [isOpen, isPH, selectedCityCode]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -183,106 +211,70 @@ export default function SupplierFormModal({
             setSelectedProvinceCode("");
             setSelectedCityCode("");
             setSelectedBarangayCode("");
-            setProvinces([]);
-            setCities([]);
-            setBarangays([]);
+            setProvinces(null);
+            setCityLookup(null);
+            setBarangayLookup(null);
         }
     }, [isOpen]);
 
-    const handleProvinceSelect = async (code: string) => {
+    const handleProvinceSelect = (code: string) => {
+        if (code === selectedProvinceCode) return;
         setSelectedProvinceCode(code);
         setSelectedCityCode("");
         setSelectedBarangayCode("");
-        setCities([]);
-        setBarangays([]);
+        setCityLookup(null);
+        setBarangayLookup(null);
 
-        const matched = provinces.find(p => p.code === code);
-        const name = matched ? matched.name : "";
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setSupplierForm((prev: any) => ({
+        setSupplierForm(prev => ({
             ...prev,
-            state_province: name,
+            state_province: provinces?.find(province => province.code === code)?.name ?? "",
             city: "",
             brgy: ""
         }));
-
-        if (code) {
-            setLoadingCities(true);
-            const list = await fetchPHCities(code);
-            setCities(list);
-            setLoadingCities(false);
-        }
     };
 
-    const handleCitySelect = async (code: string) => {
+    const handleCitySelect = (code: string) => {
+        if (code === selectedCityCode) return;
         setSelectedCityCode(code);
         setSelectedBarangayCode("");
-        setBarangays([]);
+        setBarangayLookup(null);
 
-        const matched = cities.find(c => c.code === code);
-        const name = matched ? matched.name : "";
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setSupplierForm((prev: any) => ({
+        setSupplierForm(prev => ({
             ...prev,
-            city: name,
+            city: cities?.find(city => city.code === code)?.name ?? "",
             brgy: ""
         }));
-
-        if (code) {
-            setLoadingBarangays(true);
-            const list = await fetchPHBarangays(code);
-            setBarangays(list);
-            setLoadingBarangays(false);
-        }
     };
 
     const handleBarangaySelect = (code: string) => {
         setSelectedBarangayCode(code);
 
-        const matched = barangays.find(b => b.code === code);
-        const name = matched ? matched.name : "";
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setSupplierForm((prev: any) => ({
+        setSupplierForm(prev => ({
             ...prev,
-            brgy: name
+            brgy: barangays?.find(barangay => barangay.code === code)?.name ?? ""
         }));
     };
 
     // Resolve codes from names when editing
     useEffect(() => {
-        if (isOpen && isPH && provinces.length > 0 && supplierForm.state_province && !selectedProvinceCode) {
-            const matchedProv = provinces.find(p => p.name.toLowerCase() === (supplierForm.state_province || "").toLowerCase());
-            if (matchedProv) {
-                setSelectedProvinceCode(matchedProv.code);
-                setLoadingCities(true);
-                fetchPHCities(matchedProv.code).then(list => {
-                    setCities(list);
-                    setLoadingCities(false);
-                });
-            }
-        }
+        if (!isOpen || !isPH || !provinces || !supplierForm.state_province || selectedProvinceCode) return;
+        const savedName = supplierForm.state_province.trim().toLowerCase();
+        const code = NCR_ADDRESS_NAMES.includes(savedName)
+            ? NCR_REGION_CODE
+            : provinces.find(province => province.name.toLowerCase() === savedName)?.code;
+        if (code) setSelectedProvinceCode(code);
     }, [isOpen, isPH, provinces, supplierForm.state_province, selectedProvinceCode]);
 
     useEffect(() => {
-        if (isOpen && isPH && cities.length > 0 && supplierForm.city && !selectedCityCode) {
-            const matchedCity = cities.find(c => c.name.toLowerCase() === (supplierForm.city || "").toLowerCase());
-            if (matchedCity) {
-                setSelectedCityCode(matchedCity.code);
-                setLoadingBarangays(true);
-                fetchPHBarangays(matchedCity.code).then(list => {
-                    setBarangays(list);
-                    setLoadingBarangays(false);
-                });
-            }
+        if (isOpen && isPH && cities && supplierForm.city && !selectedCityCode) {
+            const matchedCity = cities.find(city => city.name.toLowerCase() === supplierForm.city.trim().toLowerCase());
+            if (matchedCity) setSelectedCityCode(matchedCity.code);
         }
     }, [isOpen, isPH, cities, supplierForm.city, selectedCityCode]);
 
     useEffect(() => {
-        if (isOpen && isPH && barangays.length > 0 && supplierForm.brgy && !selectedBarangayCode) {
-            const matchedBrgy = barangays.find(b => b.name.toLowerCase() === (supplierForm.brgy || "").toLowerCase());
+        if (isOpen && isPH && barangays && supplierForm.brgy && !selectedBarangayCode) {
+            const matchedBrgy = barangays.find(barangay => barangay.name.toLowerCase() === supplierForm.brgy.trim().toLowerCase());
             if (matchedBrgy) {
                 setSelectedBarangayCode(matchedBrgy.code);
             }
@@ -596,42 +588,49 @@ export default function SupplierFormModal({
                                             className="col-span-2 grid grid-cols-2 gap-4"
                                         >
                                             <div className="space-y-1.5">
-                                                <label className="text-[11px] font-semibold text-muted-foreground">
-                                                    Province {loadingProvinces && "(Loading...)"}
+                                                <label htmlFor="supplier-province" className="text-[11px] font-semibold text-muted-foreground">
+                                                    Province / Region {!provinces && "(Loading...)"}
                                                 </label>
                                                 <CreatableSelect
-                                                    options={provinces.map(p => ({ value: p.code, label: p.name }))}
+                                                    id="supplier-province"
+                                                    options={provinces?.map(province => ({
+                                                        value: province.code,
+                                                        label: province.code === NCR_REGION_CODE ? "Metro Manila (NCR)" : province.name
+                                                    })) ?? []}
                                                     value={selectedProvinceCode}
                                                     onValueChange={handleProvinceSelect}
-                                                    placeholder="Select Province..."
+                                                    placeholder="Select Province / Region..."
+                                                    disabled={!provinces}
                                                     className="text-xs font-semibold"
                                                 />
                                             </div>
 
                                             <div className="space-y-1.5">
-                                                <label className="text-[11px] font-semibold text-muted-foreground">
+                                                <label htmlFor="supplier-city" className="text-[11px] font-semibold text-muted-foreground">
                                                     City / Municipality {loadingCities && "(Loading...)"}
                                                 </label>
                                                 <CreatableSelect
-                                                    options={cities.map(c => ({ value: c.code, label: c.name }))}
+                                                    id="supplier-city"
+                                                    options={cities?.map(city => ({ value: city.code, label: city.name })) ?? []}
                                                     value={selectedCityCode}
                                                     onValueChange={handleCitySelect}
                                                     placeholder="Select City..."
-                                                    disabled={!selectedProvinceCode}
+                                                    disabled={!cities}
                                                     className="text-xs font-semibold"
                                                 />
                                             </div>
 
                                             <div className="space-y-1.5 col-span-2">
-                                                <label className="text-[11px] font-semibold text-muted-foreground">
+                                                <label htmlFor="supplier-barangay" className="text-[11px] font-semibold text-muted-foreground">
                                                     Barangay {loadingBarangays && "(Loading...)"}
                                                 </label>
                                                 <CreatableSelect
-                                                    options={barangays.map(b => ({ value: b.code, label: b.name }))}
+                                                    id="supplier-barangay"
+                                                    options={barangays?.map(barangay => ({ value: barangay.code, label: barangay.name })) ?? []}
                                                     value={selectedBarangayCode}
                                                     onValueChange={handleBarangaySelect}
                                                     placeholder="Select Barangay..."
-                                                    disabled={!selectedCityCode}
+                                                    disabled={!barangays}
                                                     className="text-xs font-semibold"
                                                 />
                                             </div>

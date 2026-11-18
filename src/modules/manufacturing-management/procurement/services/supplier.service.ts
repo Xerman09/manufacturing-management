@@ -12,6 +12,7 @@ import {
     linkProductToSupplier,
     unlinkProductFromSupplier,
     saveSupplierCatalogUpdates,
+    NCR_REGION_CODE,
     fetchPHProvinces,
     fetchPHCities,
     fetchPHBarangays
@@ -31,6 +32,7 @@ export {
     linkProductToSupplier,
     unlinkProductFromSupplier,
     saveSupplierCatalogUpdates,
+    NCR_REGION_CODE,
     fetchPHProvinces,
     fetchPHCities,
     fetchPHBarangays

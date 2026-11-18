@@ -461,9 +461,11 @@ interface PSGCResponseItem {
     name: string;
 }
 
-export async function fetchPHProvinces(): Promise<PSGCItem[]> {
+export const NCR_REGION_CODE = "130000000";
+
+export async function fetchPHProvinces(signal?: AbortSignal): Promise<PSGCItem[]> {
     try {
-        const res = await fetch("https://psgc.gitlab.io/api/provinces/", { cache: "force-cache" });
+        const res = await fetch("https://psgc.gitlab.io/api/provinces/", { cache: "force-cache", signal });
         if (!res.ok) throw new Error("Failed to fetch provinces");
         const data = await res.json();
 
@@ -473,15 +475,16 @@ export async function fetchPHProvinces(): Promise<PSGCItem[]> {
             name: item.name
         })).sort((a, b) => a.name.localeCompare(b.name));
     } catch (e) {
-        console.error("[PSGC API] Error loading provinces:", e);
+        if (!signal?.aborted) console.error("[PSGC API] Error loading provinces:", e);
         return [];
     }
 }
 
-export async function fetchPHCities(provinceCode: string): Promise<PSGCItem[]> {
-    if (!provinceCode) return [];
+export async function fetchPHCities(areaCode: string, signal?: AbortSignal): Promise<PSGCItem[]> {
+    if (!areaCode) return [];
+    const collection = areaCode === NCR_REGION_CODE ? "regions" : "provinces";
     try {
-        const res = await fetch(`https://psgc.gitlab.io/api/provinces/${provinceCode}/cities-municipalities/`, { cache: "force-cache" });
+        const res = await fetch(`https://psgc.gitlab.io/api/${collection}/${areaCode}/cities-municipalities/`, { cache: "force-cache", signal });
         if (!res.ok) throw new Error("Failed to fetch cities");
         const data = await res.json();
 
@@ -491,15 +494,15 @@ export async function fetchPHCities(provinceCode: string): Promise<PSGCItem[]> {
             name: item.name
         })).sort((a, b) => a.name.localeCompare(b.name));
     } catch (e) {
-        console.error(`[PSGC API] Error loading cities for province ${provinceCode}:`, e);
+        if (!signal?.aborted) console.error(`[PSGC API] Error loading cities for ${areaCode}:`, e);
         return [];
     }
 }
 
-export async function fetchPHBarangays(cityCode: string): Promise<PSGCItem[]> {
+export async function fetchPHBarangays(cityCode: string, signal?: AbortSignal): Promise<PSGCItem[]> {
     if (!cityCode) return [];
     try {
-        const res = await fetch(`https://psgc.gitlab.io/api/cities-municipalities/${cityCode}/barangays/`, { cache: "force-cache" });
+        const res = await fetch(`https://psgc.gitlab.io/api/cities-municipalities/${cityCode}/barangays/`, { cache: "force-cache", signal });
         if (!res.ok) throw new Error("Failed to fetch barangays");
         const data = await res.json();
 
@@ -509,7 +512,7 @@ export async function fetchPHBarangays(cityCode: string): Promise<PSGCItem[]> {
             name: item.name
         })).sort((a, b) => a.name.localeCompare(b.name));
     } catch (e) {
-        console.error(`[PSGC API] Error loading barangays for city ${cityCode}:`, e);
+        if (!signal?.aborted) console.error(`[PSGC API] Error loading barangays for city ${cityCode}:`, e);
         return [];
     }
 }
