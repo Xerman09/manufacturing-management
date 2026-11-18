@@ -180,3 +180,15 @@ export function qaOutputAllocationMatchesLoggedTotal(
 
     return acceptedMicros + rejectedMicros === loggedGoodMicros + loggedRejectedMicros;
 }
+
+
+/** An inspector must supply both counts; blank is never an implicit zero. */
+export function explicitQAOutputAllocation(body: { acceptedQuantity?: unknown; rejectedQuantity?: unknown }): QAOutputAllocation | null {
+    const acceptedQuantity = parseQAOutputQuantity(body.acceptedQuantity);
+    const rejectedQuantity = parseQAOutputQuantity(body.rejectedQuantity);
+    return acceptedQuantity === null || rejectedQuantity === null ? null : { acceptedQuantity, rejectedQuantity };
+}
+
+export function initialQAInspectionCounts(verified: boolean, accepted: unknown, rejected: unknown) {
+    return { accepted: verified ? String(accepted) : "", rejected: verified ? String(rejected) : "" };
+}
