@@ -6,6 +6,7 @@ import test from "node:test";
 import ts from "typescript";
 import type { PrecisionRow } from "./_session-quantity-precision";
 
+const precision = await import(new URL("./_session-quantity-precision.ts", import.meta.url).href);
 const statuses = await import(new URL("../../../../modules/manufacturing-management/job-order-status.ts", import.meta.url).href);
 const output = await import(new URL("../../../../modules/manufacturing-management/production-workflow/utils/production-output.ts", import.meta.url).href);
 type Store = Record<string, PrecisionRow[]>;
@@ -15,7 +16,7 @@ const keys: Record<string, string> = {
     manufacturing_job_order_yield_ledger_bom_consumage: "consumage_id", jo_material_genealogy: "genealogy_id", product_manufacturing_version: "version_id"
 };
 
-function harness(options: { scale?: number; roundedCollection?: string; interrupt?: (table: string, method: string, body: PrecisionRow) => boolean } = {}) {
+function harness(options: { fresh?: boolean; reason?: unknown; rejected?: number; inactiveReason?: boolean; reasonUnavailable?: boolean; scale?: number; roundedCollection?: string; interrupt?: (table: string, method: string, body: PrecisionRow) => boolean } = {}) {
     const session = "precision-fixture";
     const lines = [1263.260241, 2826.907695].map((actualQty, index) => ({ joMaterialId: 1011, reservationId: 756 + index, productId: 10, mmLotId: 20, inventoryLotId: 30 + index, uomId: 1, batchNo: `batch-${index}`, actualQty }));
     const payload = { sessionScope: "JOB_ORDER", sessionKey: session, joId: 434, shiftName: "Day 1", productionDate: "2026-11-12", yieldQty: 4000, rejectedQty: 10, scrapQty: 0, materialsConsumed: lines };
@@ -31,11 +32,16 @@ function harness(options: { scale?: number; roundedCollection?: string; interrup
         manufacturing_job_order_yield_ledger: [{ ledger_id: 219, job_order_id: 434, jo_route_id: null, session_key: session, shift_name: "Day 1", production_date: "2026-11-12", yield_quantity: 4000, rejected_quantity: 10, scrap_quantity: 0, commit_status: "PENDING", job_order_updated: false, daily_qa_image_id: "saved-evidence", session_payload: payload, recovery_error: { code: "OLD_ERROR" } }],
         manufacturing_job_order_yield_ledger_bom_consumage: [], jo_material_genealogy: []
     };
+    store.manufacturing_job_order_routes = [{jo_route_id:1,job_order_id:434}];
+    store.manufacturing_job_order_route_operators = [{jo_route_id:1,started_at:"2026-11-12T08:00:00",stopped_at:"2026-11-12T09:00:00"}];
+    store.qa_rejection_reasons = [{id: 7, is_active: options.inactiveReason ? 0 : 1}];
+    if (options.fresh) store.manufacturing_job_order_yield_ledger = [];
     const writes: { table: string; method: string; body: PrecisionRow }[] = [];
     let interrupted = false;
     async function fetchFixture(url: string, init: RequestInit = {}) {
         const parsed = new URL(url);
         const [, , table, item] = parsed.pathname.split("/");
+        if (table === "qa_rejection_reasons" && options.reasonUnavailable) throw new Error("Reason lookup unavailable");
         assert.ok(store[table], `Unexpected network request: ${url}`);
         const method = init.method || "GET";
         const body = init.body ? JSON.parse(String(init.body)) as PrecisionRow : {};
@@ -65,13 +71,14 @@ function harness(options: { scale?: number; roundedCollection?: string; interrup
         assert.ok(data, `Missing fixture row: ${url}`);
         return Response.json({ data: structuredClone(data) });
     }
-    const apiModule = { exports: {} as { resumePendingShiftRunSession: (jo: number, key: string) => Promise<Response> } };
+    const apiModule = { exports: {} as { listRecoverableShiftRunSessions: (jo: number) => Promise<Array<{canResume: boolean;canDiscard: boolean;recoveryState:string}>>; cancelUntouchedShift: (jo: number,key: string,reason: string,actor: number) => Promise<Response>; recordShiftRunSession: (request: Request) => Promise<Response>; resumePendingShiftRunSession: (jo: number, key: string) => Promise<Response> } };
     const source = readFileSync(new URL("./_shift-run-session-service.ts", import.meta.url), "utf8");
     const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
     vm.runInNewContext(compiled, {
-        module: apiModule, exports: apiModule.exports, Request, Response, FormData, File, Buffer, URL, URLSearchParams, fetch: fetchFixture,
+        module: apiModule, exports: apiModule.exports, process, Request, Response, FormData, File, Buffer, URL, URLSearchParams, fetch: fetchFixture,
         console: { error() {}, warn() {} },
         require(name: string) {
+            if (name === "./_session-quantity-precision") return precision;
             if (name === "node:crypto") return { createHash };
             if (name === "next/headers") return { cookies: async () => ({ get: () => undefined }) };
             if (name === "next/server") return { NextResponse: Response };
@@ -86,7 +93,8 @@ function harness(options: { scale?: number; roundedCollection?: string; interrup
         }
     });
     const resume = () => apiModule.exports.resumePendingShiftRunSession(434, session);
-    return { store, writes, resume };
+    const record = () => apiModule.exports.recordShiftRunSession(new Request("http://fixture/shift", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({...payload,rejectedQty:options.rejected ?? payload.rejectedQty,rejectionReasonId:options.reason})}));
+    return { store, writes, resume, record, list: () => apiModule.exports.listRecoverableShiftRunSessions(434), cancel: () => apiModule.exports.cancelUntouchedShift(434,session,"Duplicate empty entry",24) };
 }
 
 test("six-decimal storage records two reservations against one material and clears recovery errors", async () => {
@@ -102,7 +110,7 @@ test("six-decimal storage records two reservations against one material and clea
     assert.equal(store.manufacturing_job_order_yield_ledger_bom_consumage.length, 2);
     assert.equal(store.jo_material_genealogy.length, 2);
     assert.equal(store.manufacturing_job_order_yield_ledger[0].qa_status, "Pending");
-    assert.equal((await resume()).status, 409);
+    assert.equal((await resume()).status, 200);
     assert.equal(store.manufacturing_job_orders[0].completed_quantity, 4000);
 });
 
@@ -163,4 +171,75 @@ test("incorrect reservation lots remain invalid before material writes", async (
     assert.equal(response.status, 422);
     assert.equal((await response.json()).code, "MATERIAL_INVENTORY_LOT_MISMATCH");
     assert.equal(store.manufacturing_job_order_yield_ledger_bom_consumage.length, 0);
+});
+
+
+test("actual demand above confirmed WIP is rejected before inventory writes", async () => {
+    const { store, resume, writes } = harness();
+    store.manufacturing_job_order_materials_reservations[0].issued_to_wip_quantity = 100;
+    store.manufacturing_job_order_materials_reservations[0].staged_quantity = 100;
+    const response = await resume();
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "MATERIAL_WIP_SHORTAGE");
+    assert.equal(writes.filter(row => ["manufacturing_job_order_materials_reservations", "manufacturing_job_order_materials", "jo_material_genealogy"].includes(row.table)).length, 0);
+});
+
+
+test("new rejected output requires a real active defect reason before production writes", async () => {
+    for (const reason of [undefined, null, "", 0, -1, "invalid", true, [], {}, 1.5, 999]) {
+        const {record,writes} = harness({fresh:true,reason});
+        const response = await record();
+        assert.equal(response.status,422, String(reason));
+        assert.match((await response.json()).code,/REJECTION_REASON_(REQUIRED|INVALID)/);
+        assert.equal(writes.length,0);
+    }
+    for (const options of [{inactiveReason:true}, {reasonUnavailable:true}]) {
+        const {record,writes}=harness({fresh:true,reason:7,...options});
+        const response=await record();
+        assert.equal(response.status,options.reasonUnavailable?503:422);
+        assert.equal(writes.length,0);
+    }
+});
+
+
+test("valid defect classification and zero rejected output pass reason validation", async () => {
+    for (const options of [{reason:7}, {rejected:0}, {reason:7,rejected:0.000001}]) {
+        const {record,store}=harness({fresh:true,...options});
+        const response=await record();
+        assert.equal(response.status,200,await response.text());
+        if (options.reason) assert.match(String(store.manufacturing_job_order_yield_ledger[0].remarks),/Rejection reason ID: 7/);
+    }
+});
+
+
+test("maintenance cancellation retains untouched payload and refuses partial effects", async () => {
+    const old = process.env.MM_PRODUCTION_RECOVERY_MAINTENANCE;
+    try {
+        const f=harness(); f.store.manufacturing_job_order_yield_ledger[0].request_hash="saved";
+        assert.equal((await f.cancel()).status,409);
+        process.env.MM_PRODUCTION_RECOVERY_MAINTENANCE="true";
+        assert.equal((await f.resume()).status,503);
+        f.store.manufacturing_job_order_yield_ledger_bom_consumage.push({ledger_id:219,consumage_id:1});
+        assert.equal((await f.cancel()).status,409);
+        assert.equal(f.writes.length,0);
+        f.store.manufacturing_job_order_yield_ledger_bom_consumage=[];
+        assert.equal((await f.cancel()).status,200);
+        const saved=f.store.manufacturing_job_order_yield_ledger[0];
+        assert.equal(saved.commit_status,"CANCELLED"); assert.ok(saved.session_payload); assert.equal((saved.recovery_error as Record<string, unknown>).actorId,24);
+        assert.equal((await f.cancel()).status,200); assert.equal(f.writes.length,1);
+    } finally { if(old===undefined) delete process.env.MM_PRODUCTION_RECOVERY_MAINTENANCE; else process.env.MM_PRODUCTION_RECOVERY_MAINTENANCE=old; }
+});
+
+
+test("recovery status distinguishes conflicts and excludes cancelled shifts", async () => {
+    const f=harness();
+    for(const [code,state] of [["MATERIAL_PERSISTENCE_PRECISION_MISMATCH","PRECISION_REPAIR_REQUIRED"],["MATERIAL_AGGREGATE_CHANGED","BALANCE_CONFLICT"],["NETWORK_ERROR","TEMPORARY_FAILURE"]]) {
+        f.store.manufacturing_job_order_yield_ledger[0].recovery_error={code,message:"Saved failure"};
+        const rows=await f.list();
+        assert.equal(rows[0].recoveryState,state);
+        assert.equal(rows[0].canResume,state==="TEMPORARY_FAILURE");
+        assert.equal(rows[0].canDiscard,false);
+    }
+    f.store.manufacturing_job_order_yield_ledger[0].commit_status="CANCELLED";
+    assert.equal((await f.list()).length,0);
 });

@@ -173,6 +173,7 @@ function normalizedWorkCenter(row: DirectusRow): DirectusRow {
             item_name: asset.item_id?.item_name || null,
             item_id: asset.item_id || null,
             condition: asset.condition || null,
+            asset_type: asset.asset_type || null,
             is_active: asset.is_active === undefined || asset.is_active === null ? true : Boolean(Number(asset.is_active))
         } : null,
         department
@@ -238,7 +239,7 @@ async function loadTerminalData(jobOrders: DirectusRow[], includeFiles: boolean)
                 "product_id,product_name,unit_of_measurement,unit_of_measurement.unit_id,unit_of_measurement.unit_name,unit_of_measurement.unit_shortcut")
             : Promise.resolve([] as DirectusRow[]),
         readOptionalRows("manufacturing_work_centers", itemQuery(
-            "work_center_id,work_center_name,is_active,asset_id.id,asset_id.item_image,asset_id.barcode,asset_id.rfid_code,asset_id.serial,asset_id.condition,asset_id.item_id.id,asset_id.item_id.item_name,department_id.department_id,department_id.department_name,asset_id.department.department_id,asset_id.department.department_name",
+            "work_center_id,work_center_name,is_active,asset_id.id,asset_id.asset_type,asset_id.item_image,asset_id.barcode,asset_id.rfid_code,asset_id.serial,asset_id.condition,asset_id.item_id.id,asset_id.item_id.item_name,department_id.department_id,department_id.department_name,asset_id.department.department_id,asset_id.department.department_name",
             { "filter[work_center_id][_in]": primaryAndRouteWorkCenterIds.join(",") }
         ))
     ]);

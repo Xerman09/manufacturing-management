@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -32,9 +32,30 @@ export function WorkstationBreakdownDialog({
     const [evidenceImages, setEvidenceImages] = useState<File[]>([]);
     const [evidenceImageError, setEvidenceImageError] = useState<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
+    const [eligibility, setEligibility] = useState<{eligible:boolean;message?:string} | null>(null);
+    const [checking, setChecking] = useState(false);
+    const [checkError, setCheckError] = useState<string | null>(null);
+    const [submitError, setSubmitError] = useState<string | null>(null);
+    const checkSequence = useRef(0);
+    const jobOrderId = Number(selectedJobOrder.order_id || selectedJobOrder.job_order_id || 0);
+    const checkEligibility = useCallback(async () => {
+        const sequence = ++checkSequence.current;
+        setChecking(true); setCheckError(null); setEligibility(null);
+        try {
+            const response = await fetch(`/api/manufacturing/production/breakdown-eligibility?jobOrderId=${jobOrderId}&routeId=${task?.id || 0}`,{cache:"no-store"});
+            const data = await response.json();
+            if(!response.ok || typeof data.eligible !== "boolean") throw new Error(data.error || "Unable to check machine eligibility. Please retry.");
+            if(sequence === checkSequence.current) setEligibility(data);
+        } catch(error) { if(sequence === checkSequence.current) setCheckError(error instanceof Error ? error.message : "Unable to check machine eligibility."); }
+        finally { if(sequence === checkSequence.current) setChecking(false); }
+    },[jobOrderId,task?.id]);
+    const invalidateCheck = useCallback(() => { ++checkSequence.current; },[]);
+    useEffect(() => { if(open) void checkEligibility(); return invalidateCheck; },[open,checkEligibility,invalidateCheck]);
+
 
     useEffect(() => {
         if (!open) return;
+        setSubmitError(null);
         setYieldQty("0");
         setBreakdownCategory("");
         setHaltReason("");
@@ -44,6 +65,7 @@ export function WorkstationBreakdownDialog({
 
     const handleSubmit = async () => {
         const jobOrderId = Number(selectedJobOrder.order_id || selectedJobOrder.job_order_id || 0);
+        if(checking || !eligibility?.eligible) return;
         const reason = haltReason.trim();
         if (!Number.isSafeInteger(jobOrderId) || jobOrderId <= 0) {
             toast.error("A valid Job Order is required to report a breakdown.");
@@ -72,6 +94,7 @@ export function WorkstationBreakdownDialog({
             return;
         }
 
+        setSubmitError(null);
         setSubmitting(true);
         try {
             const requestPayload = {
@@ -106,7 +129,7 @@ export function WorkstationBreakdownDialog({
             onOpenChange(false);
             onSuccess?.();
         } catch (error) {
-            toast.error(error instanceof Error ? error.message : "Failed to report the workstation breakdown.");
+            setSubmitError(error instanceof Error ? error.message : "Failed to report the workstation breakdown.");
         } finally {
             setSubmitting(false);
         }
@@ -132,6 +155,10 @@ export function WorkstationBreakdownDialog({
                         </div>
                     </div>
 
+                    {checking && <p role="status" className="text-sm">Checking linked Production machine...</p>}
+                    {(checkError || eligibility && !eligibility.eligible) && <div role="alert" className="space-y-2 rounded-lg border border-amber-500/40 p-3 text-sm"><p>{checkError || eligibility?.message}</p><p>For a non-machine stoppage, use Place on Hold if you have access.</p></div>}
+                    {submitError && <p role="alert" className="rounded-lg border border-destructive p-3 text-sm text-destructive">{submitError}</p>}
+                    {eligibility?.eligible && <>
                     <div className="space-y-1.5">
                         <Label htmlFor="breakdown-yield">Reported yield at halt</Label>
                         <Input
@@ -182,15 +209,17 @@ export function WorkstationBreakdownDialog({
                             }}
                         />
                     </div>
+                    </>}
                 </div>
 
                 <DialogFooter className="shrink-0">
                     <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
-                        Cancel
+                        {eligibility?.eligible ? "Cancel" : "Close"}
                     </Button>
-                    <Button type="button" variant="destructive" onClick={handleSubmit} disabled={submitting || !task || !breakdownCategory.trim() || !haltReason.trim() || evidenceImages.length === 0 || Boolean(evidenceImageError)}>
+                    {!eligibility?.eligible && !checking && <Button type="button" variant="outline" onClick={() => void checkEligibility()}>Retry check</Button>}
+                    {eligibility?.eligible && <Button type="button" variant="destructive" onClick={handleSubmit} disabled={submitting || !task || !breakdownCategory.trim() || !haltReason.trim() || evidenceImages.length === 0 || Boolean(evidenceImageError)}>
                         {submitting ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Reporting...</> : "Report Breakdown"}
-                    </Button>
+                    </Button>}
                 </DialogFooter>
             </DialogContent>
         </Dialog>

@@ -17,6 +17,7 @@ import {
     deriveDailyQAOutcome,
     latestDailyQAAuditsByRoute
 } from "@/modules/manufacturing-management/manufacturing-qa/daily-qa-outcome";
+import { isDispositionForYield, qaDispositionSource } from "@/modules/manufacturing-management/manufacturing-qa/qa-disposition-source";
 import { hasPagination, paginate } from "../../_pagination";
 import { JOB_ORDER_STATUS } from "@/modules/manufacturing-management/job-order-status";
 import { AuthenticatedActorError, requireManufacturingActorId } from "../_authenticated-actor";
@@ -42,6 +43,8 @@ import {
 import {
     calculateQAOutputAllocationCapacity,
     parseQAOutputQuantity,
+    explicitQAOutputAllocation,
+    qaOutputAllocationMatchesLoggedTotal,
     qaOutputAllocationCapacityErrorMessage,
     qaOutputAllocationWithinCapacity,
     sumQAOutputQuantities,
@@ -236,18 +239,12 @@ async function validateActiveRejectionReasons(rows: DailyQAOutputAllocation[], s
     }
 }
 
-function normalizeQAOutputAllocation(body: Record<string, any>, ledger: Record<string, any>): QAOutputAllocation {
-    const loggedRejectedQuantity = sumQAOutputQuantities(ledger.rejected_quantity, ledger.scrap_quantity);
-    const acceptedQuantity = parseQAOutputQuantity(
-        body?.acceptedQuantity ?? ledger.qa_accepted_quantity ?? ledger.yield_quantity ?? 0
-    );
-    const rejectedQuantity = parseQAOutputQuantity(
-        body?.rejectedQuantity ?? ledger.qa_rejected_quantity ?? loggedRejectedQuantity ?? 0
-    );
-    if (acceptedQuantity === null || rejectedQuantity === null) {
-        throw new DailyQAValidationError(422, "INVALID_QA_OUTPUT_QUANTITY", "Accepted and rejected quantities must be nonnegative numbers with no more than six decimal places.");
+function normalizeQAOutputAllocation(body: Record<string, any>): QAOutputAllocation {
+    const allocation = explicitQAOutputAllocation(body);
+    if (!allocation) {
+        throw new DailyQAValidationError(422, "INVALID_QA_OUTPUT_QUANTITY", "Enter both inspected accepted and rejected quantities, including 0 when none, with no more than six decimal places.");
     }
-    return { acceptedQuantity, rejectedQuantity };
+    return allocation;
 }
 
 function productUomValue(jobOrder: Record<string, any>): string {
@@ -1040,7 +1037,7 @@ async function registerRejectedOutputOnly(body: Record<string, any>, signal: Abo
         ),
         loadQAOutputAllocationCapacity(jobOrderId, ledgerId, signal)
     ]);
-    const allocation = normalizeQAOutputAllocation(body, ledger);
+    const allocation = normalizeQAOutputAllocation(body);
     validateQAOutputAllocationCapacity(allocation, capacity, jobOrder);
     const rejectedQuantity = allocation.rejectedQuantity;
     if (!(rejectedQuantity > 0)) {
@@ -1516,7 +1513,12 @@ export async function POST(request: Request) {
         ]);
         const productId = relationId(jobOrder.product_id, ["product_id", "id"]);
         const branchId = relationId(jobOrder.branch_id, ["branch_id", "id"]);
-        const outputAllocation = normalizeQAOutputAllocation(isEnvelope ? body : {}, ledger);
+        const outputAllocation = normalizeQAOutputAllocation(isEnvelope ? body : {});
+        if (!qaOutputAllocationMatchesLoggedTotal(outputAllocation, ledger.yield_quantity,
+            sumQAOutputQuantities(ledger.rejected_quantity, ledger.scrap_quantity))) {
+            throw new DailyQAValidationError(422, "QA_OUTPUT_TOTAL_MISMATCH",
+                "Accepted plus rejected quantity must equal the supervisor's logged shift total. QA may reclassify the good/rejected split.");
+        }
         validateQAOutputAllocationCapacity(outputAllocation, capacity, jobOrder);
         const goodOutputQuantity = outputAllocation.acceptedQuantity;
         const rejectedOutputQuantity = outputAllocation.rejectedQuantity;
@@ -1862,7 +1864,7 @@ export async function POST(request: Request) {
 
         // Fetch all daily QA inspections for this ledgerId
         operationForLog = "recalculate QA outcome";
-        const inspectionsFetch = await fetch(`${DIRECTUS_URL}/items/manufacturing_daily_qa_inspections?filter[ledger_id][_eq]=${ledgerId}`, { headers, cache: "no-store", signal: saveSignal });
+        const inspectionsFetch = await fetch(`${DIRECTUS_URL}/items/manufacturing_daily_qa_inspections?filter[ledger_id][_eq]=${ledgerId}&limit=-1`, { headers, cache: "no-store", signal: saveSignal });
         if (!inspectionsFetch.ok) {
             throw new DailyQAValidationError(502, "INSPECTION_LOOKUP_FAILED", `Daily QA inspection lookup failed with HTTP ${inspectionsFetch.status}.`);
         }
@@ -1897,7 +1899,7 @@ export async function POST(request: Request) {
 
             // 2. Alert the supervisor disposition dashboard with authoritative
             // product, operation, and station metadata.
-            const failedInps = inspections.filter((ins: any) =>
+            const failedInps = latestDailyQAAuditsByRoute(inspections).filter((ins: any) =>
                 deriveDailyQAOutcome([ins], []).status === "QA Hold"
             );
 
@@ -1943,7 +1945,7 @@ export async function POST(request: Request) {
                     disposition_status: "Pending",
                     decision: null,
                     supervisor_comments: "",
-                    inspection_remarks: String(ins.remarks || ""),
+                    inspection_remarks: `${qaDispositionSource(Number(ledgerId))}\n${String(ins.remarks || "")}`,
                     recorded_at: timestampInstant,
                     resolved_at: null,
                     resolved_by: null
@@ -1952,9 +1954,10 @@ export async function POST(request: Request) {
                 const existingDisposition = await findPendingDisposition(
                     Number(newDisp.job_order_id),
                     Number(newDisp.task_id || 0) || null,
-                    saveSignal
+                    saveSignal,
+                    qaDispositionSource(Number(ledgerId))
                 );
-                if (existingDisposition?.id) {
+                if (existingDisposition?.id && isDispositionForYield(existingDisposition, Number(ledgerId))) {
                     const { id: _existingId, ...updatePayload } = newDisp;
                     await updateDisposition(String(existingDisposition.id), {
                         ...updatePayload
@@ -2039,6 +2042,25 @@ export async function POST(request: Request) {
                 parentQuantitySyncClient(jobOrderId, saveSignal)
             );
         });
+
+        // Resolve only dispositions created by this yield's QA flow. Operational holds
+        // and historical dispositions without provenance require supervisor review.
+        if (finalLedgerStatus === "Passed") {
+            operationForLog = "resolve superseded yield QA dispositions";
+            for (const ins of latestDailyQAAuditsByRoute(inspections)) {
+                const routeId = Number(ins.jo_route_id || 0) || null;
+                const pending = await findPendingDisposition(Number(jobOrderId), routeId, saveSignal, qaDispositionSource(Number(ledgerId)));
+                if (pending?.id && isDispositionForYield(pending, Number(ledgerId))) {
+                    await updateDisposition(String(pending.id), {
+                        disposition_status: "Resolved",
+                        decision: "Passed Reinspection",
+                        supervisor_comments: [pending.supervisor_comments, `Yield ledger ${ledgerId} passed reinspection; Job Order hold retained for supervisor review.`].filter(Boolean).join("\n"),
+                        resolved_at: new Date().toISOString(),
+                        resolved_by: authenticatedInspectorId
+                    }, saveSignal);
+                }
+            }
+        }
 
         // The finished-yield inventory view resolves Passed yield rows through mm_inventory_lots.
         // The physical receipt and Job Order completion remain owned by yield closing.

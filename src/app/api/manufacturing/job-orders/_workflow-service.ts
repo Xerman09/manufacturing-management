@@ -1,3 +1,4 @@
+import { readYieldAllocationDependency, yieldAllocationPath } from "../production/_yield-allocation-lookup";
 import { createHash } from "node:crypto";
 import { DIRECTUS_URL, headers, formatPhtDateTime } from "@/app/api/manufacturing/directus-api";
 import {
@@ -39,7 +40,7 @@ const QUANTITY_EPSILON = 0.000001;
 export class JobOrderWorkflowError extends Error {
     constructor(
         message: string,
-        readonly status: 400 | 401 | 404 | 409 | 422 | 502 = 409,
+        readonly status: 400 | 401 | 404 | 409 | 422 | 502 | 503 = 409,
         readonly code = "JOB_ORDER_WORKFLOW_ERROR",
         readonly details?: Record<string, unknown>
     ) {
@@ -882,6 +883,19 @@ async function evaluateJobOrderClosure(
     const yieldLedgerIds = committedYields
         .map((yieldRow) => numberValue(yieldRow.ledger_id ?? yieldRow.id))
         .filter((id) => id > 0);
+    if (!snapshot && yieldLedgerIds.length > 0) {
+        const requestId = crypto.randomUUID();
+        const allocations = await readYieldAllocationDependency(
+            `${DIRECTUS_URL}${yieldAllocationPath(yieldLedgerIds)}`, headers,
+            { jobOrderId, requestId, lookup: "closure output allocations" }
+        );
+        if (allocations === null) {
+            throw new JobOrderWorkflowError(
+                "Output allocations could not be verified. Retry before closing this Job Order.",
+                503, "YIELD_ALLOCATIONS_UNAVAILABLE", { requestId }
+            );
+        }
+    }
     const incompleteAssessments = committedYields
         .map((yieldRow) => {
             const ledgerId = numberValue(yieldRow.ledger_id ?? yieldRow.id);

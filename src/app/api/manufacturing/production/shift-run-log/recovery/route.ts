@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { authorizeJobOrderModuleAccess, JOB_ORDER_MODULE_PATHS } from "@/app/api/manufacturing/job-orders/_module-access";
+import { authorizeJobOrderModuleAccess, requireJobOrderModuleAccess, JOB_ORDER_MODULE_PATHS } from "@/app/api/manufacturing/job-orders/_module-access";
 import {
+    cancelUntouchedShift,
     listRecoverableShiftRunSessions,
     resumePendingShiftRunSession
 } from "../../_shift-run-session-service";
@@ -25,7 +26,8 @@ export async function GET(request: Request) {
 
     try {
         const sessions = await listRecoverableShiftRunSessions(jobOrderId);
-        return NextResponse.json({ sessions });
+        const actor = await requireJobOrderModuleAccess(JOB_ORDER_MODULE_PATHS.production);
+        return NextResponse.json({ sessions: sessions.map(session => ({...session, canDiscard: actor.admin && session.canDiscard})) });
     } catch (error) {
         console.error(`Unable to load pending production sessions for Job Order ${jobOrderId}:`, error);
         return NextResponse.json({ error: "Unable to load pending shift sessions." }, { status: 502 });
@@ -53,5 +55,10 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "A valid Job Order ID and session key are required." }, { status: 400 });
     }
 
+    if (body.action === "cancel") {
+        const actor = await requireJobOrderModuleAccess(JOB_ORDER_MODULE_PATHS.production);
+        if (!actor.admin) return NextResponse.json({error:"Administrator access required."},{status:403});
+        return cancelUntouchedShift(jobOrderId, sessionKey, String(body.reason || ""), actor.userId);
+    }
     return resumePendingShiftRunSession(jobOrderId, sessionKey);
 }

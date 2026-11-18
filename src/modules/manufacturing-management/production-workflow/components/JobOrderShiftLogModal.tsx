@@ -30,6 +30,7 @@ import {
     fetchRejectionReasons,
     RecoverableShiftRunSession,
     resumeShiftRunLogSession,
+    cancelSavedShift,
     ShiftRunLogPayload,
     ShiftRunLogRequestError,
     fetchJobOrderStatusHistory,
@@ -42,10 +43,12 @@ import { toast } from "sonner";
 import { calculatePipelinedLineDurationHours } from "../../planning-engineering/utils/production-timing";
 import { exceedsAvailableStock, formatProductionQuantity, resolveJobOrderTargetQuantity, roundToInputStep } from "../utils/production-quantity";
 import {
-    calculateWipTopUpShortfall,
+    materialConsumptionShortfalls,
     calculateMaterialConsumptionDefaults,
     distributeConsumptionAcrossReservations,
     materialConsumptionReservationKey,
+    canInsertMaterialConsumptionText,
+    isMaterialConsumptionEdit,
     parseMaterialConsumptionInput,
     preserveExistingActualQuantities,
     sumProductionOutputQuantities
@@ -97,6 +100,29 @@ function applyConsumptionDefaults(
     }));
 }
 
+type ShiftDraftPayload = {
+    shiftName: string; productionDay: string; productionDate: string;
+    good: string; rejected: string; reasonId: string; rejectionRemarks: string;
+    remarks: string; varianceReason: string; quantities: Record<string, string>;
+};
+type SavedShiftDraft = { sessionKey: string; revision: number; savedAt: string; payload: ShiftDraftPayload };
+const shiftDraftEndpoint = "/api/manufacturing/production/shift-run-log/draft";
+
+async function fetchShiftDraft(jobOrderId: number): Promise<{ draft: SavedShiftDraft | null }> {
+    const response = await fetch(`${shiftDraftEndpoint}?jobOrderId=${jobOrderId}`, {
+        cache: "no-store", signal: AbortSignal.timeout(10000)
+    });
+    if (!response.ok) throw new Error("Unable to check saved drafts.");
+    return response.json();
+}
+
+function createShiftSessionKey() {
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+
 export function JobOrderShiftLogModal({
     open,
     onOpenChange,
@@ -114,6 +140,19 @@ export function JobOrderShiftLogModal({
     const [rejectedQty, setRejectedQty] = useState("0");
     const [rejectionReasons, setRejectionReasons] = useState<RejectionReason[]>([]);
     const [selectedReasonId, setSelectedReasonId] = useState<string>("");
+    const [reasonsLoading, setReasonsLoading] = useState(false);
+    const [reasonsError, setReasonsError] = useState<string | null>(null);
+    const [reasonServerError, setReasonServerError] = useState<string | null>(null);
+    const reasonRequired = Number(rejectedQty) > 0;
+    const reasonValid = rejectionReasons.some(reason => String(reason.id ?? reason.reason_id) === selectedReasonId);
+    const reasonError = reasonRequired ? reasonServerError || (!reasonValid ? "Select a rejection reason when rejected units are greater than zero." : null) : null;
+    const loadRejectionReasons = useCallback(async () => {
+        setReasonsLoading(true); setReasonsError(null); setReasonServerError(null);
+        try { setRejectionReasons(await fetchRejectionReasons()); }
+        catch { setRejectionReasons([]); setReasonsError("Unable to load rejection reasons. Please retry."); }
+        finally { setReasonsLoading(false); }
+    }, []);
+
     const [rejectionRemarks, setRejectionRemarks] = useState("");
     const [remarks, setRemarks] = useState("");
     const [varianceReason, setVarianceReason] = useState("");
@@ -143,7 +182,13 @@ export function JobOrderShiftLogModal({
     const allocatedWipByReservationRef = useRef<Map<string, number>>(new Map());
     const topUpReservationKeysByRootRef = useRef<Map<string, Set<string>>>(new Map());
     const preserveTopUpDraftOnCloseRef = useRef(false);
-    const autoResumeAttemptedRef = useRef<Set<string>>(new Set());
+    const [draftSaving, setDraftSaving] = useState(false);
+    const [availableDraft, setAvailableDraft] = useState<SavedShiftDraft | null>(null);
+    const [savedDraft, setSavedDraft] = useState<SavedShiftDraft | null>(null);
+    const [draftError, setDraftError] = useState<string | null>(null);
+    const draftSaveLock = useRef(false);
+    const initialShiftName = useRef(shiftName);
+
 
     useEffect(() => {
         shiftMaterialsRef.current = shiftMaterials;
@@ -180,6 +225,94 @@ export function JobOrderShiftLogModal({
     const jobOrderId = selectedJobOrder?.order_id || selectedJobOrder?.job_order_id;
     const jobOrderSessionKey = selectedJobOrder?.jo_id ?? null;
     const targetQuantity = resolveJobOrderTargetQuantity(selectedJobOrder);
+    const draftPayload: ShiftDraftPayload = {
+        shiftName, productionDay, productionDate, good: shiftYieldQty, rejected: rejectedQty,
+        reasonId: selectedReasonId, rejectionRemarks, remarks, varianceReason,
+        quantities: {
+            ...Object.fromEntries(shiftMaterials
+                .filter(material => manuallyEditedMaterialKeysRef.current.has(materialConsumptionReservationKey(material)))
+                .map(material => [materialConsumptionReservationKey(material), String(material.actual_qty ?? "")])),
+            ...consumptionDrafts,
+            ...consumptionInputDrafts
+        }
+    };
+    const missingDraftKeys = Object.keys(draftPayload.quantities).filter(key =>
+        !shiftMaterials.some(material => materialConsumptionReservationKey(material) === key));
+    const draftDirty = savedDraft
+        ? JSON.stringify(draftPayload) !== JSON.stringify(savedDraft.payload)
+        : Boolean(shiftYieldQty || rejectedQty !== "0" || selectedReasonId || rejectionRemarks || remarks || varianceReason ||
+            shiftName !== initialShiftName.current || productionDay !== "1" || (productionDate && productionDate !== getPhtDateInputValue()) ||
+            Object.keys(draftPayload.quantities).length);
+    const hasUnsavedShift = draftDirty || evidenceImages.length > 0;
+
+    useEffect(() => {
+        if (!open || !hasUnsavedShift) return;
+        const warn = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = "";
+        };
+        window.addEventListener("beforeunload", warn);
+        return () => window.removeEventListener("beforeunload", warn);
+    }, [open, hasUnsavedShift]);
+
+    const closeShiftForm = () => {
+        if (draftSaveLock.current || submittingShiftLog) return;
+        if (hasUnsavedShift && !window.confirm("Close and discard unsaved shift changes and selected evidence files?")) return;
+        onOpenChange(false);
+    };
+
+    const resumeDraft = (draft: SavedShiftDraft) => {
+        const data = draft.payload;
+        outputQuantitiesRef.current = { good: data.good, rejected: data.rejected };
+        setSessionKey(draft.sessionKey);
+        setShiftName(data.shiftName);
+        setProductionDay(data.productionDay);
+        setProductionDate(data.productionDate);
+        setShiftYieldQty(data.good);
+        setRejectedQty(data.rejected);
+        setSelectedReasonId(data.reasonId);
+        setRejectionRemarks(data.rejectionRemarks);
+        setRemarks(data.remarks);
+        setVarianceReason(data.varianceReason);
+        setApproveVariance(false);
+        setEvidenceImages([]);
+        setShiftMaterials(previous => applyConsumptionDefaults(
+            previous, targetQuantity, sumProductionOutputQuantities(data.good, data.rejected, 0)
+        ));
+        const quantities = { ...data.quantities };
+        const invalidRows: Record<string, string> = {};
+        for (const [key, value] of Object.entries(quantities)) {
+            if (isMaterialConsumptionEdit(value)) continue;
+            quantities[key] = "";
+            invalidRows[key] = "The saved quantity was invalid. Re-enter the amount using up to six decimal places.";
+        }
+        setConsumptionInputDrafts(quantities);
+        setConsumptionInputErrors(invalidRows);
+        setSavedDraft(draft);
+        setAvailableDraft(null);
+    };
+
+    const saveDraft = async () => {
+        if (!sessionKey || !jobOrderId || draftSaveLock.current || availableDraft || !draftDirty || loadingShiftMaterials || materialsLoadError) return;
+        draftSaveLock.current = true;
+        setDraftSaving(true);
+        setDraftError(null);
+        try {
+            const response = await fetch(shiftDraftEndpoint, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionKey, jobOrderId, revision: savedDraft?.revision ?? 0, payload: draftPayload })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || "Unable to save shift draft.");
+            setSavedDraft(result.draft);
+        } catch (error) {
+            setDraftError(error instanceof Error ? error.message : "Unable to save shift draft.");
+        } finally {
+            draftSaveLock.current = false;
+            setDraftSaving(false);
+        }
+    };
+
 
     const getUserLabel = (uId: number) => {
         const u = users.find((x) => (x.user_id || x.id) === uId);
@@ -319,7 +452,6 @@ export function JobOrderShiftLogModal({
     useEffect(() => {
         if (!open) {
             initializedFormJobOrderKeyRef.current = null;
-            autoResumeAttemptedRef.current.clear();
             return;
         }
 
@@ -346,58 +478,43 @@ export function JobOrderShiftLogModal({
         const todayStr = getPhtDateInputValue();
         setProductionDate(todayStr);
         setSessionKey("");
+        setAvailableDraft(null);
+        setSavedDraft(null);
+        setDraftError(null);
         setRecoverableSessions([]);
         setRecoveryError(null);
         setRecoveryStatus("checking");
 
         const available = getAvailableShifts();
         if (available.length > 0) {
+            initialShiftName.current = available[0].value;
             setShiftName(available[0].value);
         }
 
         // Fetch rejection reasons
-        fetchRejectionReasons()
-            .then((reasons) => setRejectionReasons(reasons))
-            .catch((err) => console.error("Error loading rejection reasons:", err));
+        void loadRejectionReasons();
 
         let cancelled = false;
-        const newSessionKey = () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-            ? crypto.randomUUID()
-            : `production-session-${Date.now()}`;
-
         fetchRecoverableShiftRunSessions(jobOrderId)
             .then(async (sessions) => {
                 if (cancelled) return;
                 setRecoverableSessions(sessions);
                 if (sessions.length === 0) {
-                    setSessionKey(newSessionKey());
+                    try {
+                        const result = await fetchShiftDraft(jobOrderId);
+                        if (cancelled) return;
+                        setAvailableDraft(result.draft);
+                    } catch {
+                        if (cancelled) return;
+                        setDraftError("Unable to check saved drafts. Reopen the Job Order to retry.");
+                    }
+                    setSessionKey(createShiftSessionKey());
                     setRecoveryStatus("none");
                     return;
                 }
 
                 setRecoveryStatus("pending");
-                if (sessions.length !== 1 || !sessions[0].canResume) return;
 
-                const session = sessions[0];
-                const attemptKey = `${jobOrderId}:${session.sessionKey}`;
-                if (autoResumeAttemptedRef.current.has(attemptKey)) return;
-                autoResumeAttemptedRef.current.add(attemptKey);
-                setRecoveryStatus("resuming");
-                setRecoveryError(null);
-                try {
-                    await resumeShiftRunLogSession(jobOrderId, session.sessionKey);
-                    if (cancelled) return;
-                    toast.success(`Recovered and recorded the pending shift for ${session.shiftName}.`);
-                    onOpenChange(false);
-                    onSuccess?.();
-                } catch (error) {
-                    if (cancelled) return;
-                    setRecoveryError(error instanceof Error ? error.message : "The pending shift could not be resumed.");
-                    setRecoveryStatus("pending");
-                    fetchRecoverableShiftRunSessions(jobOrderId)
-                        .then((latest) => { if (!cancelled) setRecoverableSessions(latest); })
-                        .catch(() => undefined);
-                }
             })
             .catch((error) => {
                 if (cancelled) return;
@@ -495,6 +612,11 @@ export function JobOrderShiftLogModal({
             return false;
         }
 
+        if (reasonRequired && (reasonError || reasonsLoading || reasonsError)) {
+            toast.error(reasonError || "Wait for valid rejection reasons to load.");
+            return false;
+        }
+
         const newYield = Number(shiftYieldQty) || 0;
         const newRejected = Number(rejectedQty) || 0;
         if (newYield + newRejected <= 0) {
@@ -558,7 +680,7 @@ export function JobOrderShiftLogModal({
 
     const handleShiftLogSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (validateShiftLog()) setIsConfirmationOpen(true);
+        if (!availableDraft && !missingDraftKeys.length && !draftSaveLock.current && validateShiftLog()) setIsConfirmationOpen(true);
     };
 
     const handleResumePendingSession = async (session: RecoverableShiftRunSession) => {
@@ -590,9 +712,14 @@ export function JobOrderShiftLogModal({
             const sessions = await fetchRecoverableShiftRunSessions(jobOrderId);
             setRecoverableSessions(sessions);
             if (sessions.length === 0) {
-                setSessionKey(typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-                    ? crypto.randomUUID()
-                    : `production-session-${Date.now()}`);
+                try {
+                    const result = await fetchShiftDraft(jobOrderId);
+                    setAvailableDraft(result.draft);
+                    setDraftError(null);
+                } catch {
+                    setDraftError("Unable to check saved drafts. Reopen the Job Order to retry.");
+                }
+                setSessionKey(createShiftSessionKey());
                 setRecoveryStatus("none");
             } else {
                 setRecoveryStatus("pending");
@@ -694,6 +821,10 @@ export function JobOrderShiftLogModal({
                 }
             }
         } catch (err: any) {
+            if (err instanceof ShiftRunLogRequestError && (err.code || "").startsWith("REJECTION_REASON_")) {
+                setReasonServerError(err.message);
+                setIsConfirmationOpen(false);
+            }
             if (err instanceof ShiftRunLogRequestError
                 && ["MATERIAL_AGGREGATE_CHANGED", "MATERIAL_RESERVATION_CHANGED"].includes(err.code || "")) {
                 setIsConfirmationOpen(false);
@@ -1108,7 +1239,7 @@ export function JobOrderShiftLogModal({
             uomId: material.uom_id ?? null,
             remainingWip: available,
             theoretical,
-            shortfall: calculateWipTopUpShortfall(requested, available),
+            shortfall: materialConsumptionShortfalls(requested, theoretical, available).topUpShortfall,
             requestedQuantity: requested,
             reservationKey,
             candidateLots: material.candidate_lots || [],
@@ -1124,9 +1255,6 @@ export function JobOrderShiftLogModal({
 
     const hasInsufficiency = shiftMaterials.some((material) =>
         exceedsAvailableStock(requestedConsumption(material), currentWipForRequest(material))
-    );
-    const hasTheoreticalShortage = shiftMaterials.some((material) =>
-        exceedsAvailableStock(materialTheoretical(material), material.available_stock)
     );
     const hasIncompleteMaterialLine = shiftMaterials.some((m) =>
         !m.reservation_id
@@ -1187,9 +1315,13 @@ export function JobOrderShiftLogModal({
             variance: values.actual - values.theoretical
         }))
         .filter((group) => Math.abs(group.variance) > Math.max(0.000001, Math.abs(group.theoretical) * varianceTolerancePct / 100));
-    const hasVarianceException = !hasTheoreticalShortage && varianceExceptions.length > 0;
+    const hasVarianceException = varianceExceptions.length > 0;
     const missingVarianceApproval = hasVarianceException && (!varianceReason.trim() || !approveVariance);
-    const isSubmitDisabled = submittingShiftLog
+    const isSubmitDisabled = (reasonRequired && (Boolean(reasonError) || reasonsLoading || Boolean(reasonsError)))
+        || submittingShiftLog
+        || draftSaving
+        || Boolean(availableDraft)
+        || missingDraftKeys.length > 0
         || loadingShiftMaterials
         || Boolean(materialsLoadError)
         || hasInvalidMaterialConsumptionDraft
@@ -1243,8 +1375,9 @@ export function JobOrderShiftLogModal({
             <Dialog
                 open={open}
                 onOpenChange={(nextOpen) => {
-                    if (!nextOpen && isTopUpOpen) return;
-                    onOpenChange(nextOpen);
+                    if (!nextOpen) {
+                        if (!isTopUpOpen) closeShiftForm();
+                    } else onOpenChange(true);
                 }}
             >
                 <DialogContent className="w-[98vw] md:w-full md:max-w-[1200px] lg:max-w-[1400px] max-h-[96vh] md:max-h-[92vh] flex flex-col bg-background border border-border/60 shadow-2xl rounded-2xl p-0 overflow-hidden">
@@ -1402,16 +1535,26 @@ export function JobOrderShiftLogModal({
                                                 <select
                                                     id="rejectionReason"
                                                     value={selectedReasonId}
-                                                    onChange={(e) => setSelectedReasonId(e.target.value)}
+                                                    onChange={(e) => { setSelectedReasonId(e.target.value); setReasonServerError(null); }}
+                                                    required={reasonRequired}
+                                                    disabled={reasonsLoading}
+                                                    aria-invalid={Boolean(reasonError)}
+                                                    aria-describedby={reasonError ? "rejection-reason-error" : undefined}
                                                     className="w-full h-8.5 rounded-lg border border-border bg-background text-foreground px-2 text-xs font-medium"
                                                 >
-                                                    <option value="">-- No Defect / Standard Run --</option>
+                                                    <option value="">{reasonRequired ? "Select rejection reason" : "-- No Defect / Standard Run --"}</option>
                                                     {rejectionReasons.map((r) => (
                                                         <option key={r.id || r.reason_id} value={r.id || r.reason_id}>
                                                             {r.code} - {r.reason_name}
                                                         </option>
                                                      ))}
                                                  </select>
+                                                {reasonError && <p id="rejection-reason-error" role="alert" className="text-xs text-red-600">{reasonError}</p>}
+                                                {reasonsLoading && <p role="status" className="text-xs">Loading rejection reasons...</p>}
+                                                {reasonsError && <p role="alert" className="text-xs text-red-600">{reasonsError}</p>}
+                                                {!reasonsLoading && !reasonsError && rejectionReasons.length === 0 && <p className="text-xs">No active rejection reasons are available.</p>}
+                                                {(reasonsError || !reasonsLoading && rejectionReasons.length === 0) && <Button type="button" size="sm" variant="outline" onClick={() => void loadRejectionReasons()}>Retry rejection reasons</Button>}
+
                                              </div>
                                              <div className="space-y-1 sm:col-span-2">
                                                  <Label htmlFor="productionRemarks" className="text-muted-foreground text-[10px]">Session Remarks</Label>
@@ -1549,7 +1692,7 @@ export function JobOrderShiftLogModal({
                                                  const availableForRequest = currentWipForRequest(m);
                                                  const isInsufficient = exceedsAvailableStock(actual, availableForRequest);
                                                 const availableStock = roundToInputStep(m.available_stock);
-                                                const shortfall = calculateWipTopUpShortfall(actual, availableForRequest);
+                                                const { actualShortfall, theoreticalShortfall, topUpShortfall: shortfall } = materialConsumptionShortfalls(actual, theoretical, availableForRequest);
                                                 const allocated = allocatedWipByReservationRef.current.get(reservationKey) ?? availableStock;
                                                 const confirmedAdditional = Math.max(0, availableStock - allocated);
                                                 const previewAdditional = Math.max(0, Number(topUpPreviews[reservationKey] || 0));
@@ -1561,7 +1704,7 @@ export function JobOrderShiftLogModal({
                                                     : isExceeded 
                                                     ? "bg-amber-500" 
                                                     : "bg-emerald-500";
-                                                const needsTopUp = isInsufficient;
+                                                const needsTopUp = exceedsAvailableStock(shortfall, 0);
 
                                                 return (
                                                      <div key={m.reservation_id || `${m.jo_material_id}-${index}`} className="p-3.5 bg-background rounded-xl border border-border/80 hover:border-primary/20 hover:shadow-sm transition-all duration-200 space-y-3">
@@ -1667,8 +1810,20 @@ export function JobOrderShiftLogModal({
                                                                              value={consumptionInputDrafts[reservationKey] ?? consumptionDrafts[reservationKey] ?? m.actual_qty}
                                                                              aria-invalid={Boolean(consumptionInputErrors[reservationKey])}
                                                                              aria-describedby={consumptionInputErrors[reservationKey] ? `actual-material-used-error-${m.jo_material_id}-${index}` : undefined}
-                                                                            onChange={(e) => {
+                                                                             onKeyDown={(event) => {
+                                                                                 if (event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
+                                                                                 if (event.key.length === 1 && !canInsertMaterialConsumptionText(event.currentTarget, event.key)) {
+                                                                                     event.preventDefault();
+                                                                                 }
+                                                                             }}
+                                                                             onPaste={(event) => {
+                                                                                 if (!canInsertMaterialConsumptionText(event.currentTarget, event.clipboardData.getData("text"))) {
+                                                                                     event.preventDefault();
+                                                                                 }
+                                                                             }}
+                                                                             onChange={(e) => {
                                                                                 const raw = e.target.value;
+                                                                                if (!isMaterialConsumptionEdit(raw)) return;
                                                                                 manuallyEditedMaterialKeysRef.current.add(reservationKey);
                                                                                 setConsumptionInputDrafts((previous) => ({ ...previous, [reservationKey]: raw }));
                                                                                 setConsumptionInputErrors((previous) => {
@@ -1700,7 +1855,8 @@ export function JobOrderShiftLogModal({
                                                             {needsTopUp && (
                                                                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
                                                                     <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
-                                                                        {`Short by ${shortfall.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${m.unit_shortcut} against entered actual consumption.`}
+                                                                        {actualShortfall > 0.000001 && <span className="block">{`Entered actual usage exceeds confirmed WIP by ${formatExactMaterialQuantity(actualShortfall)} ${m.unit_shortcut}. Add materials before saving.`}</span>}
+                                                                        {theoreticalShortfall > 0.000001 && <span className="block">{`Theoretical demand exceeds confirmed WIP by ${formatExactMaterialQuantity(theoreticalShortfall)} ${m.unit_shortcut}.`}</span>}
                                                                     </span>
                                                                     <Button
                                                                         type="button"
@@ -1754,6 +1910,33 @@ export function JobOrderShiftLogModal({
                             )}
                         </div>
 
+                        {availableDraft && (
+                            <div role="status" className="flex flex-wrap items-center gap-2 py-2">
+                                <span>Shift draft saved {new Date(availableDraft.savedAt).toLocaleString()}.</span>
+                                <Button type="button" size="sm" disabled={loadingShiftMaterials || Boolean(materialsLoadError)} onClick={() => {
+                                    if (!hasUnsavedShift || window.confirm("Replace unsaved edits with the saved draft?")) resumeDraft(availableDraft);
+                                }}>Resume draft</Button>
+                                <Button type="button" size="sm" variant="outline" onClick={() => setAvailableDraft(null)}>Start a new shift</Button>
+                            </div>
+                        )}
+                        {!loadingShiftMaterials && missingDraftKeys.length > 0 && (
+                            <div role="alert" className="py-2 text-destructive">
+                                Saved consumption references unavailable WIP rows. Review these quantities before recording.
+                                <ul>{missingDraftKeys.map(key => <li key={key}>
+                                    {key}: {draftPayload.quantities[key] || "(blank)"}
+                                    <Button type="button" size="sm" variant="link" onClick={() => {
+                                        const removeKey = (values: Record<string, string>) =>
+                                            Object.fromEntries(Object.entries(values).filter(([id]) => id !== key));
+                                        setConsumptionInputDrafts(removeKey);
+                                        setConsumptionDrafts(removeKey);
+                                        manuallyEditedMaterialKeysRef.current.delete(key);
+                                    }}>Remove unavailable row</Button>
+                                </li>)}</ul>
+                            </div>
+                        )}
+                        {draftError && <p role="alert" className="py-1 text-destructive">{draftError}</p>}
+                        {savedDraft && <p role="status" className="py-1 text-muted-foreground">Draft saved {new Date(savedDraft.savedAt).toLocaleString()}.</p>}
+                        {evidenceImages.length > 0 && <p className="py-1 text-muted-foreground">Reattach evidence files when reopening a draft.</p>}
                         <DialogFooter className="pt-4 border-t border-border/50 flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2.5 shrink-0">
                             <Button
                                 type="submit"
@@ -1762,7 +1945,12 @@ export function JobOrderShiftLogModal({
                             >
                                 Review & Record
                             </Button>
-                            <div className="grid grid-cols-2 gap-2 w-full sm:w-auto order-2 sm:order-1">
+                            <div className="flex flex-wrap gap-2 w-full sm:w-auto order-2 sm:order-1">
+                                <Button type="button" variant="outline"
+                                    disabled={!sessionKey || !draftDirty || draftSaving || submittingShiftLog || loadingShiftMaterials || Boolean(materialsLoadError) || Boolean(availableDraft)}
+                                    onClick={() => void saveDraft()}>
+                                    {draftSaving ? "Saving draft..." : "Save Draft"}
+                                </Button>
                                 <Button
                                     type="button"
                                     variant="outline"
@@ -1775,7 +1963,7 @@ export function JobOrderShiftLogModal({
                                 <Button
                                     type="button"
                                     variant="outline"
-                                    onClick={() => onOpenChange(false)}
+                                    onClick={closeShiftForm}
                                     className="border-border hover:bg-muted text-foreground h-10 text-xs font-semibold px-4 transition-all duration-200 w-full"
                                 >
                                     Cancel
@@ -1794,7 +1982,7 @@ export function JobOrderShiftLogModal({
                                             {recoveryStatus === "checking" ? "Checking for a saved shift…"
                                                 : recoveryStatus === "resuming" ? "Resuming the saved shift…"
                                                     : recoveryStatus === "error" ? "Unable to check for saved shifts"
-                                                        : "A shift is waiting to be recovered"}
+                                                        : recoveryError ? "Saved shift could not be recovered" : "A shift is waiting to be recovered"}
                                         </h3>
                                         <p className="text-sm text-muted-foreground">
                                             {recoveryStatus === "checking" || recoveryStatus === "resuming"
@@ -1815,6 +2003,8 @@ export function JobOrderShiftLogModal({
                                                                 <p className="mt-1 text-xs text-muted-foreground">
                                                                     {session.productionDate || "Date unavailable"} · Good {formatProductionQuantity(session.goodQuantity)} pcs · Rejected {formatProductionQuantity(session.rejectedQuantity)} pcs
                                                                 </p>
+                                                                {session.recoveryState && <p className="mt-2 text-xs font-semibold">{({READY:"Ready to resume",TEMPORARY_FAILURE:"Temporary failure - retry available",PRECISION_REPAIR_REQUIRED:"Precision repair required",BALANCE_CONFLICT:"Balance conflict - supervisor reconciliation required"})[session.recoveryState]}</p>}
+                                                                {!session.canResume && <p className="mt-2 text-xs">Ask an administrator to inspect this session using the production recovery maintenance command. Do not enter the same output again.</p>}
                                                                 {session.recoveryError?.message && (
                                                                     <p className="mt-2 text-xs text-amber-900 dark:text-amber-200">{session.recoveryError.message}</p>
                                                                 )}
@@ -1824,6 +2014,13 @@ export function JobOrderShiftLogModal({
                                                                     </p>
                                                                 )}
                                                             </div>
+                                                            {session.canDiscard && <Button type="button" variant="destructive" disabled={recoveryStatus === "resuming"} onClick={async () => {
+                                                                const reason = window.prompt("Reason for discarding this untouched saved shift:");
+                                                                if (!reason?.trim() || !window.confirm("Discard only if no production effects exist? The server will recheck. Saved evidence will be retained.")) return;
+                                                                setRecoveryStatus("resuming");
+                                                                try { await cancelSavedShift(session.jobOrderId,session.sessionKey,reason); onSuccess?.(); await handleRetryRecoveryCheck(); }
+                                                                catch(error) { setRecoveryError(error instanceof Error ? error.message : "Cancellation could not be confirmed."); setRecoveryStatus("pending"); }
+                                                            }}>Discard saved shift</Button>}
                                                             {session.canResume ? (
                                                                 <Button
                                                                     type="button"

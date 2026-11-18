@@ -267,6 +267,7 @@ export interface WorkCenter {
     serial?: string | null;
     asset?: {
         id?: number;
+        asset_type?: string | null;
         barcode?: string | null;
         rfid_code?: string | null;
         serial?: string | null;

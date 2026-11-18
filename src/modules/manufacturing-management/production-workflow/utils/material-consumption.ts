@@ -68,6 +68,18 @@ function roundQuantity(value: number): number {
     return Math.round(value * QUANTITY_SCALE) / QUANTITY_SCALE;
 }
 
+/** Accept incomplete decimal text while the operator is editing a reservation. */
+export function isMaterialConsumptionEdit(value: string): boolean {
+    return /^[0-9]*(?:\.[0-9]{0,6})?$(?![\s\S])/.test(value);
+}
+
+export function canInsertMaterialConsumptionText(input: HTMLInputElement, text: string): boolean {
+    const { value, selectionStart, selectionEnd } = input;
+    return isMaterialConsumptionEdit(
+        value.slice(0, selectionStart ?? value.length) + text + value.slice(selectionEnd ?? value.length)
+    );
+}
+
 export function parseMaterialConsumptionInput(rawValue: string): number | null {
     const value = rawValue.trim();
     if (!/^(?:\d+(?:\.\d{0,6})?|\.\d{1,6})$/.test(value)) return null;
@@ -107,8 +119,8 @@ function reservationBasis(reservation: MaterialConsumptionReservation): number {
 /**
  * Calculate the theoretical and default actual consumption per reservation.
  * Theoretical demand follows the Job Order's allocated/required quantity per
- * target output; actual defaults are distributed over remaining WIP and never
- * exceed a reservation's available stock.
+ * target output; actual defaults retain that demand even when WIP is short.
+ * Inventory limits are enforced when allocating and submitting consumption.
  */
 export function calculateMaterialConsumptionDefaults(
     reservations: MaterialConsumptionReservation[],
@@ -153,8 +165,7 @@ export function calculateMaterialConsumptionDefaults(
                 : roundQuantity(totalTheoretical * weights[localIndex]);
             distributedTheoretical += theoreticalQuantity;
 
-            const available = availableWeights[localIndex];
-            const actualQuantity = roundQuantity(Math.min(theoreticalQuantity, available));
+            const actualQuantity = Math.max(0, theoreticalQuantity);
             result[reservationIndex] = {
                 theoreticalQuantity: Math.max(0, theoreticalQuantity),
                 actualQuantity: actualQuantity.toFixed(6)
@@ -163,4 +174,11 @@ export function calculateMaterialConsumptionDefaults(
     }
 
     return result;
+}
+
+/** Actual shortage takes precedence; otherwise offer the theoretical shortage. */
+export function materialConsumptionShortfalls(actual: number, theoretical: number, available: number) {
+    const actualShortfall = calculateWipTopUpShortfall(actual, available);
+    const theoreticalShortfall = calculateWipTopUpShortfall(theoretical, available);
+    return { actualShortfall, theoreticalShortfall, topUpShortfall: actualShortfall > 0 ? actualShortfall : theoreticalShortfall };
 }

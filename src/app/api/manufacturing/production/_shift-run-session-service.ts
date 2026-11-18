@@ -1,3 +1,4 @@
+import { quantityUnits } from "./_session-quantity-precision";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
@@ -144,7 +145,7 @@ function finiteNumber(value: unknown): number {
 }
 
 function sameNumber(left: unknown, right: unknown): boolean {
-    return Math.abs(finiteNumber(left) - finiteNumber(right)) <= EPSILON;
+    try { return quantityUnits(left) === quantityUnits(right); } catch { return false; }
 }
 
 function textValue(value: unknown): string {
@@ -1175,6 +1176,9 @@ export async function recordShiftRunSession(request: Request): Promise<NextRespo
     let imageAttached = false;
     let sessionLedgerId = 0;
     try {
+        if (process.env.MM_PRODUCTION_RECOVERY_MAINTENANCE === "true") {
+            throw new ProductionSessionError(503, "PRODUCTION_MAINTENANCE", "Production recording is paused for supervised recovery. Please retry after maintenance.");
+        }
         const requestData = await readShiftRunRequest(request);
         let body = requestData.body;
         const submittedEvidenceFiles = requestData.evidenceFiles;
@@ -1196,7 +1200,7 @@ export async function recordShiftRunSession(request: Request): Promise<NextRespo
                 throw new ProductionSessionError(404, "PENDING_SESSION_NOT_FOUND", "The pending production session could not be found. Refresh the Job Order and check for a completed session.");
             }
             if (textValue(resumedLedger.commit_status).toUpperCase() === "COMMITTED") {
-                throw new ProductionSessionError(409, "SESSION_ALREADY_COMMITTED", "This production session is already committed. Refresh the Job Order to load its saved output.");
+                return NextResponse.json({ success: true, alreadyCommitted: true, ledgerId: numberId(resumedLedger.ledger_id), message: "This shift is already recorded. Refresh the Job Order." });
             }
             if (textValue(resumedLedger.commit_status).toUpperCase() !== "PENDING") {
                 throw new ProductionSessionError(409, "SESSION_NOT_RECOVERABLE", "This production session is not in a recoverable pending state.");
@@ -1255,6 +1259,26 @@ export async function recordShiftRunSession(request: Request): Promise<NextRespo
                 `Look up production session ${input.sessionKey}`
             );
         const existingLedger = existingLedgerRows[0] || null;
+        // Existing immutable sessions retain their original payload and recovery rules.
+        if (!existingLedger && input.rejectedQty > 0) {
+            const reasonId = Number(body?.rejectionReasonId);
+            if (!["number", "string"].includes(typeof body?.rejectionReasonId) || !Number.isSafeInteger(reasonId) || reasonId <= 0) {
+                throw new ProductionSessionError(422, "REJECTION_REASON_REQUIRED", "Select a rejection reason when rejected units are greater than zero.", { field: "rejectionReasonId" });
+            }
+            let reasons: any[];
+            try {
+                reasons = await directusRows<any>(`${DIRECTUS_URL}/items/qa_rejection_reasons?filter[id][_eq]=${reasonId}&fields=id,is_active&limit=1`, "Validate rejection reason");
+            } catch {
+                throw new ProductionSessionError(503, "REJECTION_REASON_LOOKUP_UNAVAILABLE", "Unable to verify the rejection reason. Please retry.", { field: "rejectionReasonId" });
+            }
+            if (!reasons.some(reason => Number(reason.id) === reasonId && [true, 1, "1"].includes(reason.is_active))) {
+                throw new ProductionSessionError(422, "REJECTION_REASON_INVALID", "Select an active rejection reason.", { field: "rejectionReasonId" });
+            }
+        }
+
+        if (textValue(existingLedger?.commit_status).toUpperCase() === "CANCELLED") {
+            throw new ProductionSessionError(409, "SESSION_CANCELLED", "This saved shift was cancelled. Start a new session.");
+        }
         sessionLedgerId = numberId(existingLedger?.ledger_id ?? existingLedger?.id);
         const persistedOutputHash = existingLedger
             ? {
@@ -1762,7 +1786,7 @@ export async function listRecoverableShiftRunSessions(jobOrderId: number) {
 
     try {
         rows = await directusRows<any>(
-            `${DIRECTUS_URL}/items/manufacturing_job_order_yield_ledger?${filters}&fields=ledger_id,job_order_id,jo_route_id,session_key,shift_name,production_date,yield_quantity,rejected_quantity,scrap_quantity,logged_at,daily_qa_image_id,session_payload,recovery_error`,
+            `${DIRECTUS_URL}/items/manufacturing_job_order_yield_ledger?${filters}&fields=ledger_id,job_order_id,jo_route_id,session_key,shift_name,production_date,yield_quantity,rejected_quantity,scrap_quantity,logged_at,daily_qa_image_id,session_payload,recovery_error,job_order_updated,request_hash`,
             `Load recoverable production sessions for Job Order ${jobOrderId}`
         );
     } catch (error) {
@@ -1774,7 +1798,7 @@ export async function listRecoverableShiftRunSessions(jobOrderId: number) {
         );
     }
 
-    return rows.map((row) => {
+    return Promise.all(rows.map(async (row) => {
         const payload = canReadRecoveryFields ? storedSessionPayload(row.session_payload) : null;
         const jobOrderId = numberId(row.job_order_id);
         const sessionKey = textValue(row.session_key);
@@ -1785,7 +1809,14 @@ export async function listRecoverableShiftRunSessions(jobOrderId: number) {
                 && !numberId(row.jo_route_id));
         const hasEvidence = Boolean(directusFileId(row.daily_qa_image_id));
 
+        let canDiscard = false;
+        if (process.env.MM_PRODUCTION_RECOVERY_MAINTENANCE === "true" && hasValidPayload && row.request_hash && !Number(row.job_order_updated)) {
+            const effects = await directusRows<any>(`${DIRECTUS_URL}/items/manufacturing_job_order_yield_ledger_bom_consumage?filter[ledger_id][_eq]=${numberId(row.ledger_id)}&limit=1`, "Inspect saved shift effects");
+            const links = await directusRows<any>(`${DIRECTUS_URL}/items/jo_material_genealogy?filter[job_order_id][_eq]=${jobOrderId}&filter[session_key][_eq]=${encodeURIComponent(sessionKey)}&limit=1`, "Inspect saved shift genealogy");
+            canDiscard = effects.length === 0 && links.length === 0;
+        }
         return {
+            canDiscard,
             ledgerId: numberId(row.ledger_id ?? row.id),
             jobOrderId,
             sessionKey,
@@ -1795,7 +1826,11 @@ export async function listRecoverableShiftRunSessions(jobOrderId: number) {
             rejectedQuantity: finiteNumber(row.rejected_quantity),
             scrapQuantity: finiteNumber(row.scrap_quantity),
             loggedAt: textValue(row.logged_at) || null,
-            canResume: canReadRecoveryFields && hasValidPayload && hasEvidence,
+            recoveryState: textValue((row.recovery_error as any)?.code) === "MATERIAL_PERSISTENCE_PRECISION_MISMATCH" ? "PRECISION_REPAIR_REQUIRED"
+                : ["MATERIAL_AGGREGATE_CHANGED", "MATERIAL_RESERVATION_CHANGED"].includes(textValue((row.recovery_error as any)?.code)) ? "BALANCE_CONFLICT"
+                : !hasValidPayload || !hasEvidence ? "BALANCE_CONFLICT" : row.recovery_error ? "TEMPORARY_FAILURE" : "READY",
+            canResume: process.env.MM_PRODUCTION_RECOVERY_MAINTENANCE !== "true" && canReadRecoveryFields && hasValidPayload && hasEvidence
+                && !["MATERIAL_PERSISTENCE_PRECISION_MISMATCH", "MATERIAL_AGGREGATE_CHANGED", "MATERIAL_RESERVATION_CHANGED"].includes(textValue((row.recovery_error as any)?.code)),
             recoveryError: row.recovery_error || (!canReadRecoveryFields
                 ? { code: "SESSION_RECOVERY_FIELDS_UNAVAILABLE", message: "This connection can see the saved shift but cannot read its recovery details. Ask a supervisor to reconcile it before recording another shift." }
                 : !hasValidPayload
@@ -1804,7 +1839,7 @@ export async function listRecoverableShiftRunSessions(jobOrderId: number) {
                         ? { code: "SESSION_EVIDENCE_UNAVAILABLE", message: "The session has no saved evidence attachment and needs supervisor reconciliation." }
                         : null)
         };
-    });
+    }));
 }
 
 export async function resumePendingShiftRunSession(jobOrderId: number, sessionKey: string): Promise<NextResponse> {
@@ -1814,4 +1849,28 @@ export async function resumePendingShiftRunSession(jobOrderId: number, sessionKe
         body: JSON.stringify({ resumeExisting: true, joId: jobOrderId, sessionKey })
     });
     return recordShiftRunSession(request);
+}
+
+
+// Caller must hold production-module access. No development actor fallback for cancellation.
+export async function cancelUntouchedShift(jobOrderId: number, sessionKey: string, reason: string, actorId: number): Promise<NextResponse> {
+    try {
+        if (process.env.MM_PRODUCTION_RECOVERY_MAINTENANCE !== "true") throw new ProductionSessionError(409, "RECOVERY_PAUSE_REQUIRED", "An administrator must pause production writes on every instance before cancelling a saved shift.");
+        if (!reason.trim() || reason.length > 1000) throw new ProductionSessionError(422, "CANCELLATION_REASON_REQUIRED", "Enter a cancellation reason of up to 1,000 characters.");
+        const rows = await directusRows<any>(`${DIRECTUS_URL}/items/manufacturing_job_order_yield_ledger?filter[job_order_id][_eq]=${jobOrderId}&filter[session_key][_eq]=${encodeURIComponent(sessionKey)}&limit=1`, "Inspect saved shift");
+        const row = rows[0];
+        if (!row) throw new ProductionSessionError(404, "SESSION_NOT_FOUND", "Saved shift not found.");
+        if (row.commit_status === "CANCELLED") return NextResponse.json({success:true,alreadyCancelled:true});
+        if (row.commit_status !== "PENDING" || Number(row.job_order_updated) || row.jo_route_id || !row.request_hash || !storedSessionPayload(row.session_payload)) throw new ProductionSessionError(409,"SESSION_HAS_EFFECTS","This shift cannot be discarded; supervisor reconciliation is required.");
+        const id = numberId(row.ledger_id);
+        const consumed = await directusRows<any>(`${DIRECTUS_URL}/items/manufacturing_job_order_yield_ledger_bom_consumage?filter[ledger_id][_eq]=${id}&limit=1`, "Inspect consumption effects");
+        const genealogy = await directusRows<any>(`${DIRECTUS_URL}/items/jo_material_genealogy?filter[job_order_id][_eq]=${jobOrderId}&filter[session_key][_eq]=${encodeURIComponent(sessionKey)}&limit=1`, "Inspect genealogy effects");
+        // The writer always persists consumption checkpoints before inventory application.
+        if (consumed.length || genealogy.length) throw new ProductionSessionError(409,"SESSION_HAS_EFFECTS","This shift has material effects and must be reconciled, not discarded.");
+        await directusRequest(`${DIRECTUS_URL}/items/manufacturing_job_order_yield_ledger/${id}`, "Cancel untouched saved shift", {method:"PATCH",body:JSON.stringify({commit_status:"CANCELLED",recovery_error:{code:"SESSION_CANCELLED",message:reason.trim(),actorId,recorded_at:formatPhtDateTime(),previousError:row.recovery_error || null}})});
+        return NextResponse.json({success:true,ledgerId:id});
+    } catch(error) {
+        if(error instanceof ProductionSessionError) return NextResponse.json({error:error.message,code:error.code},{status:error.status});
+        return NextResponse.json({error:"Cancellation could not be confirmed. Refresh recovery status before retrying."},{status:503});
+    }
 }
