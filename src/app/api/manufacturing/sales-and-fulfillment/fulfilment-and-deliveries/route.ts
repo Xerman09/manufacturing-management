@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { DIRECTUS_URL, headers as directusHeaders } from "../../directus-api";
 import { getUserIdFromToken } from "../../invoice-consolidation/_auth";
 import { getPhTimestamp } from "../../invoice-consolidation/_time-utils";
-import { ConsolidatedSalesOrderRecord } from "@/modules/manufacturing-management/mm/sales-and-fulfillment/fulfilment-and-deliveries/types";
+import { ConsolidatedDeliveryRecord, ConsolidatedSalesOrderRecord } from "@/modules/manufacturing-management/mm/sales-and-fulfillment/fulfilment-and-deliveries/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -110,7 +110,7 @@ interface DirectusDispatchPlan {
     total_amount?: number | null;
     remarks?: string | null;
     created_at?: string | null;
-    is_delete?: number | boolean | { type?: string; data?: number[] } | null;
+    is_delete?: number | boolean | string | { type?: string; data?: number[] } | null;
 }
 
 interface DirectusDispatchDetail {
@@ -120,6 +120,8 @@ interface DirectusDispatchDetail {
 }
 
 interface DirectusSalesOrderDetail {
+    id?: number;
+    detail_id?: number;
     order_id: number;
     product_id: number;
     ordered_quantity: number;
