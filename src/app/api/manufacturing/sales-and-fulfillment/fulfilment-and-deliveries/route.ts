@@ -96,9 +96,30 @@ interface DirectusSalesOrder {
     remarks?: string;
 }
 
+interface DirectusDispatchPlan {
+    dispatch_id: number;
+    dispatch_no: string;
+    dispatch_date?: string | null;
+    departure_date?: string | null;
+    arrival_date?: string | null;
+    driver_id?: number | null;
+    helper_id?: number | null;
+    vehicle_id?: number | null;
+    branch_id?: number | null;
+    status: string;
+    total_amount?: number | null;
+    remarks?: string | null;
+    created_at?: string | null;
+    is_delete?: number | boolean | { type?: string; data?: number[] } | null;
+}
+
+interface DirectusDispatchDetail {
+    detail_id: number;
+    dispatch_id: number;
+    sales_order_id: number;
+}
 
 interface DirectusSalesOrderDetail {
-    detail_id: number;
     order_id: number;
     product_id: number;
     ordered_quantity: number;
@@ -157,7 +178,114 @@ export async function GET(req: NextRequest) {
         const branches: DirectusBranch[] = branchRes.ok ? (await branchRes.json()).data || [] : [];
         const branchMap = new Map<number, DirectusBranch>(branches.map((b) => [Number(b.id), b]));
 
-        // 2. Fetch consolidator trips eligible for clearance
+        // 2a. Fetch dispatch plans eligible for clearance (Primary grouping entity)
+        const dispatchQs = new URLSearchParams();
+        dispatchQs.set("limit", "-1");
+        dispatchQs.set("sort", "-created_at,-dispatch_id");
+        dispatchQs.set("filter[status][_in]", "Dispatched,Approved,Completed,Delivered,Audited");
+
+        if (branchIdParam && branchIdParam !== "All") {
+            dispatchQs.set("filter[branch_id][_eq]", branchIdParam);
+        }
+
+        const dpRes = await fetch(
+            `${DIRECTUS_URL}/items/dispatch_plan?${dispatchQs.toString()}`,
+            { headers: directusHeaders, cache: "no-store" }
+        );
+        const allDispatchPlansRaw: DirectusDispatchPlan[] = dpRes.ok ? (await dpRes.json()).data || [] : [];
+        const allDispatchPlans = allDispatchPlansRaw.filter((dp) => {
+            const isDel = dp.is_delete;
+            if (isDel === true || isDel === 1 || isDel === "1") return false;
+            if (isDel && typeof isDel === "object" && "data" in isDel) {
+                const d = (isDel as { data?: number[] }).data;
+                if (Array.isArray(d) && d.length > 0 && d[0] === 1) return false;
+            }
+            return true;
+        });
+
+        const dispatchIds = allDispatchPlans.map((dp) => Number(dp.dispatch_id)).filter(Boolean);
+
+        // Fetch dispatch_plan_details (links dispatch_id -> sales_order_id)
+        const dispatchDetails: DirectusDispatchDetail[] = [];
+        if (dispatchIds.length > 0) {
+            const chunkSize = 100;
+            for (let i = 0; i < dispatchIds.length; i += chunkSize) {
+                const chunk = dispatchIds.slice(i, i + chunkSize);
+                const dpDetRes = await fetch(
+                    `${DIRECTUS_URL}/items/dispatch_plan_details?filter[dispatch_id][_in]=${chunk.join(",")}&limit=-1`,
+                    { headers: directusHeaders, cache: "no-store" }
+                );
+                if (dpDetRes.ok) {
+                    const dData = (await dpDetRes.json()).data || [];
+                    dispatchDetails.push(...dData);
+                }
+            }
+        }
+
+        const dpSoMap = new Map<number, number[]>();
+        for (const dd of dispatchDetails) {
+            const dpId = Number(dd.dispatch_id);
+            const soId = Number(dd.sales_order_id);
+            if (dpId && soId) {
+                const list = dpSoMap.get(dpId) || [];
+                list.push(soId);
+                dpSoMap.set(dpId, list);
+            }
+        }
+
+        // Fetch drivers and vehicles for dispatch plan display
+        const driverIds = [...new Set(allDispatchPlans.map((dp) => Number(dp.driver_id)).filter(Boolean))];
+        const vehicleIds = [...new Set(allDispatchPlans.map((dp) => Number(dp.vehicle_id)).filter(Boolean))];
+
+        const driverNameMap = new Map<number, string>();
+        if (driverIds.length > 0) {
+            try {
+                const uRes = await fetch(
+                    `${DIRECTUS_URL}/items/user?filter[user_id][_in]=${driverIds.join(",")}&fields=user_id,user_fname,user_lname,first_name,last_name&limit=-1`,
+                    { headers: directusHeaders, cache: "no-store" }
+                );
+                if (uRes.ok) {
+                    const uData = (await uRes.json()).data || [];
+                    for (const u of uData) {
+                        const name = [u.user_fname || u.first_name, u.user_lname || u.last_name].filter(Boolean).join(" ").trim();
+                        if (name) driverNameMap.set(Number(u.user_id), name);
+                    }
+                }
+            } catch (e) {
+                console.warn("[fulfilment-and-deliveries GET] Error fetching driver users:", e);
+            }
+        }
+
+        const vehicleMap = new Map<number, string>();
+        if (vehicleIds.length > 0) {
+            try {
+                const vRes = await fetch(
+                    `${DIRECTUS_URL}/items/vehicles?filter[vehicle_id][_in]=${vehicleIds.join(",")}&fields=vehicle_id,vehicle_plate,name&limit=-1`,
+                    { headers: directusHeaders, cache: "no-store" }
+                );
+                if (vRes.ok) {
+                    const vData = (await vRes.json()).data || [];
+                    for (const v of vData) {
+                        const vId = Number(v.vehicle_id);
+                        const is3PL =
+                            v.name?.toLowerCase().includes("third party") ||
+                            v.name?.toLowerCase().includes("3rd party") ||
+                            v.vehicle_plate?.toLowerCase().includes("3pl") ||
+                            vId === 245;
+                        const plate = v.vehicle_plate?.trim();
+                        const name = v.name?.trim();
+                        const label = plate
+                            ? (name && name !== plate ? `${plate} — ${name}` : plate)
+                            : (name || (is3PL ? "3PL — Third Party Logistics" : `Vehicle #${vId}`));
+                        vehicleMap.set(vId, label);
+                    }
+                }
+            } catch (e) {
+                console.warn("[fulfilment-and-deliveries GET] Error fetching vehicles:", e);
+            }
+        }
+
+        // 2b. Fetch consolidator trips eligible for clearance (legacy fallback)
         const consolidatorQs = new URLSearchParams();
         consolidatorQs.set("limit", "-1");
         consolidatorQs.set("sort", "-created_at,-id");
@@ -172,10 +300,7 @@ export async function GET(req: NextRequest) {
             `${DIRECTUS_URL}/items/consolidator?${consolidatorQs.toString()}`,
             { headers: directusHeaders, cache: "no-store" }
         );
-        if (!conRes.ok) {
-            throw new Error(`Failed to fetch consolidations (HTTP ${conRes.status})`);
-        }
-        const allConsolidators: DirectusConsolidator[] = (await conRes.json()).data || [];
+        const allConsolidators: DirectusConsolidator[] = conRes.ok ? (await conRes.json()).data || [] : [];
         const consolidatorIds = allConsolidators.map((c) => Number(c.id)).filter(Boolean);
 
         // 3. Fetch BOTH consolidator_details AND consolidator_invoices
@@ -255,11 +380,12 @@ export async function GET(req: NextRequest) {
             salesOrderDetails.map((s) => [Number(s.detail_id), s])
         );
 
-        // Collect all distinct order_ids & invoice_ids
+        // Collect all distinct order_ids & invoice_ids from BOTH dispatch_plan_details and consolidator
+        const dpOrderIds = dispatchDetails.map((dd) => Number(dd.sales_order_id)).filter(Boolean);
         const sodOrderIds = salesOrderDetails.map((s) => Number(s.order_id)).filter(Boolean);
         const rawInvIds = consolidatorInvoices.map((ci) => Number(ci.invoice_id)).filter(Boolean);
 
-        const candidateOrderIds = [...new Set([...sodOrderIds, ...rawInvIds])];
+        const candidateOrderIds = [...new Set([...dpOrderIds, ...sodOrderIds, ...rawInvIds])];
 
         // 6. Fetch sales_order for all candidate order IDs
         const salesOrders: DirectusSalesOrder[] = [];
@@ -1087,7 +1213,7 @@ export async function GET(req: NextRequest) {
                 for (let i = 0; i < allSodDetailIds.length; i += chunkSize) {
                     const chunk = allSodDetailIds.slice(i, i + chunkSize);
                     const resvRes = await fetch(
-                        `${DIRECTUS_URL}/items/sales_order_reservation?filter[sales_order_detail_id][_in]=${chunk.join(",")}&filter[status][_in]=Picked,Consumed&fields=reservation_id,sales_order_detail_id,product_id,inventory_lot_id,reserved_quantity,picked_quantity,status,created_at&limit=-1`,
+                        `${DIRECTUS_URL}/items/sales_order_reservation?filter[sales_order_detail_id][_in]=${chunk.join(",")}&filter[status][_in]=Picked,Consumed,Reserved&fields=reservation_id,sales_order_detail_id,product_id,inventory_lot_id,reserved_quantity,picked_quantity,status,created_at&limit=-1`,
                         { headers: directusHeaders, cache: "no-store" }
                     );
                     if (resvRes.ok) {
@@ -1192,88 +1318,44 @@ export async function GET(req: NextRequest) {
         }
     }
 
-        const parseDateMs = (ts?: string | null) => {
-            if (!ts) return 0;
-            const str = String(ts).trim();
-            return new Date(str.endsWith("Z") ? str : str + "Z").getTime();
-        };
-
-                // 11. Transform each Consolidator into a ConsolidatedDeliveryRecord with strict Gatekeeping
-                const records = allConsolidators
-                    .map((con) => {
-                        const conId = Number(con.id);
-                        const branchId = Number(con.branch_id || 1);
-                        const branchName = branchMap.get(branchId)?.branch_name || `Branch #${branchId}`;
-                        const isManifestCleared = con.status === "Completed";
-
-                        // Gather all order IDs associated with this consolidator
-                        const conSodList = conSodMap.get(conId) || [];
-                        const conOrderIdsFromDetails = conSodList
-                            .map((sodId) => sodDetailMap.get(sodId)?.order_id)
-                            .filter((id): id is number => id !== undefined && id > 0);
-
-                        const conInvList = conInvMap.get(conId) || [];
-                        const conOrderIdsFromInvoices = conInvList.map((invId) => {
-                            const inv = invoiceMapById.get(invId);
-                            return inv ? Number(inv.order_id) : invId;
-                        });
-
-                        const distinctOrderIds = [...new Set([...conOrderIdsFromDetails, ...conOrderIdsFromInvoices])];
-
-                        if (distinctOrderIds.length === 0) return null;
-
-                        // ─── GATEKEEPING RULE 3: Invoicing Status Check ───────────────────
-                        // A consolidation batch MUST NOT contain any Sales Order that is still pending invoicing ("For Invoicing" or uninvoiced)
-                        // Cleared manifests have already passed dispatch and clearance and must not be suppressed
-                        let hasUninvoicedOrder = false;
-                        if (!isManifestCleared) {
-                            for (const orderId of distinctOrderIds) {
-                                const so = salesOrderMap.get(orderId);
-                                const sidInvId =
-                                    orderIdToInvoiceIdMap.get(String(orderId)) ||
-                                    (so?.order_id ? orderIdToInvoiceIdMap.get(String(so.order_id)) : null) ||
-                                    (so?.order_no ? orderIdToInvoiceIdMap.get(so.order_no.trim().toLowerCase()) : null) ||
-                                    null;
-
-                                const inv =
-                                    (sidInvId ? invoiceMapById.get(sidInvId) : null) ||
-                                    (so?.order_id ? invoiceMapByOrderKey.get(String(so.order_id).toLowerCase()) : null) ||
-                                    (so?.order_no ? invoiceMapByOrderKey.get(so.order_no.trim().toLowerCase()) : null) ||
-                                    (so?.order_no ? invoiceMapByInvoiceNo.get(so.order_no.trim().toLowerCase()) : null) ||
-                                    invoiceMapByOrderKey.get(String(orderId).toLowerCase()) ||
-                                    invoiceMapById.get(orderId) ||
-                                    null;
-
-                                // An order still in "For Consolidation" belongs in Consolidation Planning (or reconsolidation / redispatch)
-                                if (so?.order_status === "For Consolidation") {
-                                    hasUninvoicedOrder = true;
-                                    break;
-                                }
-
-                                const isInvoicedStatus =
-                                    so &&
-                                    so.order_status !== "For Consolidation" &&
-                                    so.order_status !== "For Invoicing" &&
-                                    so.order_status !== "Draft" &&
-                                    so.order_status !== "Pending" &&
-                                    so.order_status !== "For Approval" &&
-                                    so.order_status !== "For Picking" &&
-                                    so.order_status !== "For Production";
-
-                                const hasValidInvoice = inv && inv.invoice_id;
-
-                                if (!isInvoicedStatus && !hasValidInvoice) {
-                                    hasUninvoicedOrder = true;
-                                    break;
-                                }
-                            }
-
-                            if (hasUninvoicedOrder) {
-                                return null; // Suppress consolidation batch if any SO is still pending invoicing
+        // 10c. Batch fetch dispatch_plan_details to link dispatch_no for all orders
+        const dispatchNoByOrderId = new Map<number, string>();
+        if (allNumericInvOrOrderIds.length > 0) {
+            try {
+                const chunkSize = 100;
+                for (let i = 0; i < allNumericInvOrOrderIds.length; i += chunkSize) {
+                    const chunk = allNumericInvOrOrderIds.slice(i, i + chunkSize);
+                    const dpdRes = await fetch(
+                        `${DIRECTUS_URL}/items/dispatch_plan_details?filter[sales_order_id][_in]=${chunk.join(",")}&fields=sales_order_id,dispatch_id.dispatch_no&limit=-1`,
+                        { headers: directusHeaders, cache: "no-store" }
+                    );
+                    if (dpdRes.ok) {
+                        const dpdData = (await dpdRes.json()).data || [];
+                        for (const row of dpdData) {
+                            const soId = Number(row.sales_order_id);
+                            const dispNo = typeof row.dispatch_id === "object" && row.dispatch_id !== null
+                                ? (row.dispatch_id as { dispatch_no?: string }).dispatch_no
+                                : row.dispatch_id;
+                            if (soId && dispNo) {
+                                dispatchNoByOrderId.set(soId, String(dispNo));
                             }
                         }
+                    }
+                }
+            } catch (dpdErr) {
+                console.warn("[fulfilment-and-deliveries GET] Error fetching dispatch_plan_details:", dpdErr);
+            }
+        }
 
-                        // Build child orders list: mapped per invoice (or per order if no invoices exist)
+        // 10d. Helper to assemble child orders for a trip (Dispatch Plan or Consolidator)
+        const buildChildOrdersForTrip = (
+            distinctOrderIds: number[],
+            tripCreatedAt: string | null | undefined,
+            tripDispatchNo: string | null | undefined,
+            isTripCleared: boolean,
+            fallbackStatus: string,
+            conId?: number
+        ): ConsolidatedSalesOrderRecord[] => {
                         const childOrders: ConsolidatedSalesOrderRecord[] = [];
 
                         for (const orderId of distinctOrderIds) {
@@ -1293,7 +1375,31 @@ export async function GET(req: NextRequest) {
                                 invoiceMapById.get(orderId) ||
                                 null;
 
-                            if (!so && !inv) continue;
+                            if (!so && !inv) {
+                                childOrders.push({
+                                    order_id: orderId,
+                                    order_no: `SO-${orderId}`,
+                                    order_status: fallbackStatus || "Dispatched",
+                                    dispatch_no: tripDispatchNo || null,
+                                    invoice_id: 0,
+                                    invoice_no: "---",
+                                    invoice_date: tripCreatedAt || new Date().toISOString(),
+                                    customer_code: "-",
+                                    customer_name: "-",
+                                    salesman_id: null,
+                                    salesman_code: null,
+                                    salesman_name: null,
+                                    amount: 0,
+                                    remarks: "",
+                                    fulfillment_status: isTripCleared ? "Fulfilled" : "Pending",
+                                    is_cleared: isTripCleared,
+                                    cleared_at: null,
+                                    cleared_by: null,
+                                    linked_sales_return: null,
+                                    items: [],
+                                });
+                                continue;
+                            }
 
                             const allInvoicesForOrder: DirectusInvoice[] = [
                                 ...(so?.order_id ? invoicesByOrderKey.get(String(so.order_id).toLowerCase()) || [] : []),
@@ -1327,7 +1433,7 @@ export async function GET(req: NextRequest) {
 
                                 const effectiveInvId = invoiceId || inv?.invoice_id || so?.invoice_id || null;
 
-                                const matchingUst = isManifestCleared && effectiveInvId
+                                const matchingUst = isTripCleared && effectiveInvId
                                     ? ustList.find((u) => Number(u.sales_invoice_id) === Number(effectiveInvId)) || null
                                     : null;
 
@@ -1376,7 +1482,7 @@ export async function GET(req: NextRequest) {
                                     reservations: LineItemReservation[];
                                 }> = [];
 
-                                if (!isManifestCleared) {
+                                if (!isTripCleared) {
                                     isCleared = false;
                                     orderFulfillmentStatus = "Pending";
 
@@ -1387,18 +1493,11 @@ export async function GET(req: NextRequest) {
                                         const prodDesc = prod?.short_description || (prod?.description && prod?.description !== prod?.product_name ? prod?.description : "") || "";
                                         const ordered = Number(sod.ordered_quantity || 0);
 
-                                        const conCreatedAtMs = parseDateMs(con.created_at);
                                         const rawLineReservations = sodReservationMap.get(Number(sod.detail_id)) || [];
-                                        const lineReservations = conCreatedAtMs > 0
-                                            ? rawLineReservations.filter((r) => {
-                                                if (!r.created_at) return true;
-                                                const resTime = parseDateMs(r.created_at);
-                                                return resTime >= (conCreatedAtMs - 15 * 60 * 1000);
-                                            })
-                                            : rawLineReservations;
+                                        const lineReservations = rawLineReservations;
                                         const totalPickedFromRes = lineReservations.reduce((s, r) => s + (Number(r.picked_quantity) || 0), 0);
                                         const conDetail = consolidatorDetails.find(
-                                            (cd) => Number(cd.consolidator_id) === conId && Number(cd.sales_order_detail_id) === Number(sod.detail_id)
+                                            (cd) => Number(cd.consolidator_id) === (conId || 0) && Number(cd.sales_order_detail_id) === Number(sod.detail_id)
                                         );
                                         const conPicked = conDetail ? Number(conDetail.picked_quantity !== undefined ? conDetail.picked_quantity : conDetail.applied_quantity || 0) : 0;
                                         const sodAllocated = sod.allocated_quantity !== undefined && sod.allocated_quantity !== null ? Number(sod.allocated_quantity) : null;
@@ -1538,18 +1637,11 @@ export async function GET(req: NextRequest) {
                                         const prodDesc = prod?.short_description || (prod?.description && prod?.description !== prod?.product_name ? prod?.description : "") || "";
                                         const ordered = Number(sod.ordered_quantity || 0);
 
-                                        const conCreatedAtMs = parseDateMs(con.created_at);
                                         const rawLineReservations = sodReservationMap.get(Number(sod.detail_id)) || [];
-                                        const lineReservations = conCreatedAtMs > 0
-                                            ? rawLineReservations.filter((r) => {
-                                                if (!r.created_at) return true;
-                                                const resTime = parseDateMs(r.created_at);
-                                                return resTime >= (conCreatedAtMs - 15 * 60 * 1000);
-                                            })
-                                            : rawLineReservations;
+                                        const lineReservations = rawLineReservations;
                                         const totalPickedFromRes = lineReservations.reduce((s, r) => s + (Number(r.picked_quantity) || 0), 0);
                                         const conDetail = consolidatorDetails.find(
-                                            (cd) => Number(cd.consolidator_id) === conId && Number(cd.sales_order_detail_id) === Number(sod.detail_id)
+                                            (cd) => Number(cd.consolidator_id) === (conId || 0) && Number(cd.sales_order_detail_id) === Number(sod.detail_id)
                                         );
                                         const conPicked = conDetail ? Number(conDetail.picked_quantity !== undefined ? conDetail.picked_quantity : conDetail.applied_quantity || 0) : 0;
                                         const sodAllocated = sod.allocated_quantity !== undefined && sod.allocated_quantity !== null ? Number(sod.allocated_quantity) : null;
@@ -1752,7 +1844,7 @@ export async function GET(req: NextRequest) {
                                         orderFulfillmentStatus = "Fulfilled with Returns";
                                         orderRemarks = (curInv?.remarks as string) || matchingUst?.nte || "";
                                         linkedSrToReturn = linkedSr;
-                                    } else if (invTxStatus === "Completed" || con.status === "Delivered" || con.status === "Completed") {
+                                    } else if (invTxStatus === "Completed" || fallbackStatus === "Delivered" || fallbackStatus === "Completed") {
                                         orderFulfillmentStatus = "Fulfilled";
                                         orderRemarks = (curInv?.remarks as string) || "";
                                         linkedSrToReturn = null;
@@ -1786,7 +1878,8 @@ export async function GET(req: NextRequest) {
                                 childOrders.push({
                                     order_id: Number(so?.order_id || orderId),
                                     order_no: so?.order_no || `SO-${orderId}`,
-                                    order_status: so?.order_status || con.status || "Dispatched",
+                                    order_status: so?.order_status || fallbackStatus || "Dispatched",
+                                    dispatch_no: tripDispatchNo || dispatchNoByOrderId.get(Number(so?.order_id || orderId)) || null,
                                     invoice_id: invoiceId || 0,
                                     invoice_no: invoiceNo,
                                     invoice_date: invoiceDate ? String(invoiceDate) : "",
@@ -1807,83 +1900,278 @@ export async function GET(req: NextRequest) {
                             }
                         }
 
-                        if (childOrders.length === 0) return null;
 
-                        // console.log("[fulfilment-and-deliveries API] 📦 Manifest Child Orders Resolved:", {
-                        //     consolidator_id: conId,
-                        //     consolidator_no: con.consolidator_no,
-                        //     childOrders: childOrders.map((co) => ({
-                        //         order_id: co.order_id,
-                        //         order_no: co.order_no,
-                        //         invoice_id: co.invoice_id,
-                        //         invoice_no: co.invoice_no,
-                        //         invoice_date: co.invoice_date,
-                        //         customer_name: co.customer_name,
-                        //         salesman_name: co.salesman_name,
-                        //         salesman_code: co.salesman_code,
-                        //         fulfillment_status: co.fulfillment_status,
-                        //     })),
-                        // });
+            return childOrders;
+        };
 
-                        // ─── GATEKEEPING RULE 4: Quantity Variance Check (Shortfall Allowed) ─────────
-                        // Retain manifests even if total picked quantity in consolidator does not match total ordered quantity.
-                        // Picking shortfalls are reconciled and cleared during delivery reconciliation.
-                        // const conDetailsForThisCon = consolidatorDetails.filter(
-                        //     (cd) => Number(cd.consolidator_id) === conId
-                        // );
+        // 11a. Primary Grouping: Transform each Dispatch Plan into a ConsolidatedDeliveryRecord
+        const dispatchRecords: ConsolidatedDeliveryRecord[] = allDispatchPlans
+            .map((dp) => {
+                const dpId = Number(dp.dispatch_id);
+                const branchId = Number(dp.branch_id || 1);
+                const branchName = branchMap.get(branchId)?.branch_name || `Branch #${branchId}`;
 
-                        // const totalPickedQty = conDetailsForThisCon.reduce((sum, cd) => {
-                        //     const picked = Number(cd.picked_quantity || 0);
-                        //     const applied = Number(cd.applied_quantity || 0);
-                        //     const ordered = Number(cd.ordered_quantity || 0);
-                        //     return sum + (picked > 0 ? picked : applied > 0 ? applied : ordered);
-                        // }, 0);
+                const orderIds = dpSoMap.get(dpId) || [];
+                const distinctOrderIds = [...new Set(orderIds)];
 
-                        // const totalInvoicedAllocationQty = childOrders.reduce(
-                        //     (sum, o) => sum + o.items.reduce((itemSum, item) => itemSum + item.ordered_quantity, 0),
-                        //     0
-                        // );
+                const allDpOrdersCleared = distinctOrderIds.length > 0 && distinctOrderIds.every((oId) => {
+                    const so = salesOrderMap.get(oId);
+                    const sidInvId =
+                        orderIdToInvoiceIdMap.get(String(oId)) ||
+                        (so?.order_id ? orderIdToInvoiceIdMap.get(String(so.order_id)) : null) ||
+                        (so?.order_no ? orderIdToInvoiceIdMap.get(so.order_no.trim().toLowerCase()) : null) ||
+                        null;
+                    const inv =
+                        (sidInvId ? invoiceMapById.get(sidInvId) : null) ||
+                        (so?.order_id ? invoiceMapByOrderKey.get(String(so.order_id).toLowerCase()) : null) ||
+                        null;
+                    const isSoDelivered = Boolean(so?.isDelivered === 1 || so?.isDelivered === true || so?.order_status === "Delivered" || so?.order_status === "Partially Delivered");
+                    const isInvDelivered = Boolean(inv?.isDelivered === 1 || inv?.isDelivered === true || inv?.transaction_status === "Completed" || inv?.transaction_status === "Completed with Concerns" || inv?.transaction_status === "Completed with Returns");
+                    return isSoDelivered || isInvDelivered;
+                });
 
-                        // Calculate consolidator level aggregations
-                        const totalOrdersCount = childOrders.length;
-                        const totalItemsCount = childOrders.reduce((sum, o) => sum + o.items.length, 0);
-                        const totalAmount = childOrders.reduce((sum, o) => sum + o.amount, 0);
+                const isTripCleared = dp.status === "Completed" || dp.status === "Delivered" || dp.status === "Audited" || allDpOrdersCleared;
+                const effectiveTripStatus = (dp.status === "Completed" || allDpOrdersCleared) ? "Completed" : (dp.status || "Dispatched");
 
-                        const hasAnyReturns = childOrders.some((o) => o.fulfillment_status === "Fulfilled with Returns" || o.fulfillment_status === "Unfulfilled / Returns" || Boolean(o.linked_sales_return));
-                        const hasAnyConcerns = childOrders.some((o) => o.fulfillment_status === "Fulfilled with Concerns");
-                        const isAllUnfulfilled = childOrders.length > 0 && childOrders.every((o) => o.fulfillment_status === "Unfulfilled / Returns");
+                let childOrders: ConsolidatedSalesOrderRecord[] = [];
+                if (distinctOrderIds.length > 0) {
+                    childOrders = buildChildOrdersForTrip(
+                        distinctOrderIds,
+                        dp.dispatch_date || dp.departure_date || dp.created_at,
+                        dp.dispatch_no,
+                        isTripCleared,
+                        effectiveTripStatus
+                    );
+                } else {
+                    childOrders = [
+                        {
+                            order_id: dpId,
+                            order_no: dp.dispatch_no || `DP-${dpId}`,
+                            order_status: dp.status || "Dispatched",
+                            dispatch_no: dp.dispatch_no || `DP-${dpId}`,
+                            invoice_id: 0,
+                            invoice_no: "---",
+                            invoice_date: dp.dispatch_date || dp.departure_date || dp.created_at || new Date().toISOString(),
+                            customer_code: "-",
+                            customer_name: "-",
+                            salesman_id: null,
+                            salesman_code: null,
+                            salesman_name: null,
+                            amount: Number(dp.total_amount || 0),
+                            remarks: dp.remarks || "",
+                            fulfillment_status: isTripCleared ? "Fulfilled" : "Pending",
+                            is_cleared: isTripCleared,
+                            cleared_at: null,
+                            cleared_by: null,
+                            linked_sales_return: null,
+                            items: [],
+                        },
+                    ];
+                }
 
-                        let conFulfillmentStatus: "Pending" | "Fulfilled" | "Fulfilled with Concerns" | "Fulfilled with Returns" | "Unfulfilled / Returns" = "Pending";
-                        if (!isManifestCleared) {
-                            conFulfillmentStatus = "Pending";
-                        } else if (isAllUnfulfilled) {
-                            conFulfillmentStatus = "Unfulfilled / Returns";
-                        } else if (hasAnyReturns) {
-                            conFulfillmentStatus = "Fulfilled with Returns";
-                        } else if (hasAnyConcerns) {
-                            conFulfillmentStatus = "Fulfilled with Concerns";
-                        } else {
-                            conFulfillmentStatus = "Fulfilled";
+                if (childOrders.length === 0) return null;
+
+                const totalOrdersCount = childOrders.length;
+                const totalItemsCount = childOrders.reduce((sum, o) => sum + o.items.length, 0);
+                const childOrdersSum = childOrders.reduce((sum, o) => sum + o.amount, 0);
+                const totalAmount = (dp.total_amount && Number(dp.total_amount) > 0) ? Number(dp.total_amount) : childOrdersSum;
+
+                if (childOrdersSum === 0 && totalAmount > 0 && childOrders.length > 0) {
+                    const avgAmt = Math.round((totalAmount / childOrders.length) * 100) / 100;
+                    childOrders.forEach((o) => {
+                        if (o.amount === 0) o.amount = avgAmt;
+                    });
+                }
+
+                const hasAnyReturns = childOrders.some((o) => o.fulfillment_status === "Fulfilled with Returns" || o.fulfillment_status === "Unfulfilled / Returns" || Boolean(o.linked_sales_return));
+                const hasAnyConcerns = childOrders.some((o) => o.fulfillment_status === "Fulfilled with Concerns");
+                const isAllUnfulfilled = childOrders.length > 0 && childOrders.every((o) => o.fulfillment_status === "Unfulfilled / Returns");
+
+                let dpFulfillmentStatus: "Pending" | "Fulfilled" | "Fulfilled with Concerns" | "Fulfilled with Returns" | "Unfulfilled / Returns" = "Pending";
+                if (!isTripCleared) {
+                    dpFulfillmentStatus = "Pending";
+                } else if (isAllUnfulfilled) {
+                    dpFulfillmentStatus = "Unfulfilled / Returns";
+                } else if (hasAnyReturns) {
+                    dpFulfillmentStatus = "Fulfilled with Returns";
+                } else if (hasAnyConcerns) {
+                    dpFulfillmentStatus = "Fulfilled with Concerns";
+                } else {
+                    dpFulfillmentStatus = "Fulfilled";
+                }
+
+                return {
+                    consolidator_id: dpId,
+                    consolidator_no: dp.dispatch_no || `DP-${dpId}`,
+                    dispatch_id: dpId,
+                    dispatch_no: dp.dispatch_no || `DP-${dpId}`,
+                    driver_name: driverNameMap.get(Number(dp.driver_id)) || (dp.driver_id ? `Driver #${dp.driver_id}` : "-"),
+                    vehicle_name: dp.vehicle_id && vehicleMap.has(Number(dp.vehicle_id)) ? vehicleMap.get(Number(dp.vehicle_id))! : "3PL — Third Party Logistics",
+                    status: effectiveTripStatus,
+                    branch_id: branchId,
+                    branch_name: branchName,
+                    dispatch_date: dp.dispatch_date || dp.departure_date || dp.created_at || new Date().toISOString(),
+                    total_orders: totalOrdersCount,
+                    total_items: totalItemsCount,
+                    total_amount: totalAmount,
+                    route_value: totalAmount,
+                    fulfillment_status: dpFulfillmentStatus,
+                    is_cleared: isTripCleared,
+                    orders: childOrders,
+                };
+            })
+            .filter((r): r is NonNullable<typeof r> => r !== null && r.total_orders > 0);
+
+        // 11b. Legacy Fallback: Retain unconsolidated Consolidator trips if not covered by a dispatch plan
+        const coveredOrderIds = new Set(dispatchRecords.flatMap((r) => r.orders.map((o) => o.order_id)));
+
+        const legacyRecords: ConsolidatedDeliveryRecord[] = allConsolidators
+            .map((con) => {
+                const conId = Number(con.id);
+                const branchId = Number(con.branch_id || 1);
+                const branchName = branchMap.get(branchId)?.branch_name || `Branch #${branchId}`;
+
+                const conSodList = conSodMap.get(conId) || [];
+                const conOrderIdsFromDetails = conSodList
+                    .map((sodId) => sodDetailMap.get(sodId)?.order_id)
+                    .filter((id): id is number => id !== undefined && id > 0);
+
+                const conInvList = conInvMap.get(conId) || [];
+                const conOrderIdsFromInvoices = conInvList.map((invId) => {
+                    const inv = invoiceMapById.get(invId);
+                    return inv ? Number(inv.order_id) : invId;
+                });
+
+                const distinctOrderIds = [...new Set([...conOrderIdsFromDetails, ...conOrderIdsFromInvoices])]
+                    .filter((id) => !coveredOrderIds.has(id));
+
+                if (distinctOrderIds.length === 0) return null;
+
+                const allConOrdersCleared = distinctOrderIds.length > 0 && distinctOrderIds.every((oId) => {
+                    const so = salesOrderMap.get(oId);
+                    const sidInvId =
+                        orderIdToInvoiceIdMap.get(String(oId)) ||
+                        (so?.order_id ? orderIdToInvoiceIdMap.get(String(so.order_id)) : null) ||
+                        (so?.order_no ? orderIdToInvoiceIdMap.get(so.order_no.trim().toLowerCase()) : null) ||
+                        null;
+                    const inv =
+                        (sidInvId ? invoiceMapById.get(sidInvId) : null) ||
+                        (so?.order_id ? invoiceMapByOrderKey.get(String(so.order_id).toLowerCase()) : null) ||
+                        (so?.order_no ? invoiceMapByOrderKey.get(so.order_no.trim().toLowerCase()) : null) ||
+                        (so?.order_no ? invoiceMapByInvoiceNo.get(so.order_no.trim().toLowerCase()) : null) ||
+                        invoiceMapByOrderKey.get(String(oId).toLowerCase()) ||
+                        invoiceMapById.get(oId) ||
+                        null;
+                    const isSoDelivered = Boolean(so?.isDelivered === 1 || so?.isDelivered === true || so?.order_status === "Delivered" || so?.order_status === "Partially Delivered");
+                    const isInvDelivered = Boolean(inv?.isDelivered === 1 || inv?.isDelivered === true || inv?.transaction_status === "Completed" || inv?.transaction_status === "Completed with Concerns" || inv?.transaction_status === "Completed with Returns");
+                    return isSoDelivered || isInvDelivered;
+                });
+
+                const isManifestCleared = con.status === "Completed" || allConOrdersCleared;
+                const effectiveConStatus = isManifestCleared ? "Completed" : (con.status || "Dispatched");
+
+                let hasUninvoicedOrder = false;
+                if (!isManifestCleared) {
+                    for (const orderId of distinctOrderIds) {
+                        const so = salesOrderMap.get(orderId);
+                        const sidInvId =
+                            orderIdToInvoiceIdMap.get(String(orderId)) ||
+                            (so?.order_id ? orderIdToInvoiceIdMap.get(String(so.order_id)) : null) ||
+                            (so?.order_no ? orderIdToInvoiceIdMap.get(so.order_no.trim().toLowerCase()) : null) ||
+                            null;
+
+                        const inv =
+                            (sidInvId ? invoiceMapById.get(sidInvId) : null) ||
+                            (so?.order_id ? invoiceMapByOrderKey.get(String(so.order_id).toLowerCase()) : null) ||
+                            (so?.order_no ? invoiceMapByOrderKey.get(so.order_no.trim().toLowerCase()) : null) ||
+                            (so?.order_no ? invoiceMapByInvoiceNo.get(so.order_no.trim().toLowerCase()) : null) ||
+                            invoiceMapByOrderKey.get(String(orderId).toLowerCase()) ||
+                            invoiceMapById.get(orderId) ||
+                            null;
+
+                        if (
+                            so?.order_status === "For Consolidation" ||
+                            so?.order_status === "For Loading" ||
+                            so?.order_status === "For Shipping"
+                        ) {
+                            hasUninvoicedOrder = true;
+                            break;
                         }
 
-                        return {
-                            consolidator_id: conId,
-                            consolidator_no: con.consolidator_no || `CON-${conId}`,
-                            status: con.status || "Dispatched",
-                            branch_id: branchId,
-                            branch_name: branchName,
-                            dispatch_date: con.created_at || new Date().toISOString(),
-                            total_orders: totalOrdersCount,
-                            total_items: totalItemsCount,
-                            total_amount: totalAmount,
-                            fulfillment_status: conFulfillmentStatus,
-                            is_cleared: isManifestCleared,
-                            orders: childOrders,
-                        };
-                    })
-                    .filter((r): r is NonNullable<typeof r> => r !== null && r.total_orders > 0 && (r.status === "Dispatched" || r.status === "Delivered" || r.status === "Completed" || r.status === "Approved" || r.status === "Audited"));
+                        const isInvoicedStatus =
+                            so &&
+                            so.order_status !== "For Consolidation" &&
+                            so.order_status !== "For Invoicing" &&
+                            so.order_status !== "For Loading" &&
+                            so.order_status !== "For Shipping" &&
+                            so.order_status !== "Draft" &&
+                            so.order_status !== "Pending" &&
+                            so.order_status !== "For Approval" &&
+                            so.order_status !== "For Picking" &&
+                            so.order_status !== "For Production";
 
-        // 12. Compute Overall Metrics across entire consolidations dataset
+                        const hasValidInvoice = inv && inv.invoice_id;
+
+                        if (!isInvoicedStatus && !hasValidInvoice) {
+                            hasUninvoicedOrder = true;
+                            break;
+                        }
+                    }
+
+                    if (hasUninvoicedOrder) {
+                        return null;
+                    }
+                }
+
+                const childOrders = buildChildOrdersForTrip(distinctOrderIds, con.created_at, null, isManifestCleared, effectiveConStatus, conId);
+                if (childOrders.length === 0) return null;
+
+                const totalOrdersCount = childOrders.length;
+                const totalItemsCount = childOrders.reduce((sum, o) => sum + o.items.length, 0);
+                const totalAmount = childOrders.reduce((sum, o) => sum + o.amount, 0);
+
+                const hasAnyReturns = childOrders.some((o) => o.fulfillment_status === "Fulfilled with Returns" || o.fulfillment_status === "Unfulfilled / Returns" || Boolean(o.linked_sales_return));
+                const hasAnyConcerns = childOrders.some((o) => o.fulfillment_status === "Fulfilled with Concerns");
+                const isAllUnfulfilled = childOrders.length > 0 && childOrders.every((o) => o.fulfillment_status === "Unfulfilled / Returns");
+
+                let conFulfillmentStatus: "Pending" | "Fulfilled" | "Fulfilled with Concerns" | "Fulfilled with Returns" | "Unfulfilled / Returns" = "Pending";
+                if (!isManifestCleared) {
+                    conFulfillmentStatus = "Pending";
+                } else if (isAllUnfulfilled) {
+                    conFulfillmentStatus = "Unfulfilled / Returns";
+                } else if (hasAnyReturns) {
+                    conFulfillmentStatus = "Fulfilled with Returns";
+                } else if (hasAnyConcerns) {
+                    conFulfillmentStatus = "Fulfilled with Concerns";
+                } else {
+                    conFulfillmentStatus = "Fulfilled";
+                }
+
+                return {
+                    consolidator_id: conId,
+                    consolidator_no: con.consolidator_no || `CON-${conId}`,
+                    dispatch_id: undefined,
+                    dispatch_no: undefined,
+                    driver_name: "-",
+                    vehicle_name: "-",
+                    status: effectiveConStatus,
+                    branch_id: branchId,
+                    branch_name: branchName,
+                    dispatch_date: con.created_at || new Date().toISOString(),
+                    total_orders: totalOrdersCount,
+                    total_items: totalItemsCount,
+                    total_amount: totalAmount,
+                    route_value: totalAmount,
+                    fulfillment_status: conFulfillmentStatus,
+                    is_cleared: isManifestCleared,
+                    orders: childOrders,
+                };
+            })
+            .filter((r): r is NonNullable<typeof r> => r !== null && r.total_orders > 0 && (r.status === "Dispatched" || r.status === "Delivered" || r.status === "Completed" || r.status === "Approved" || r.status === "Audited"));
+
+        const records = dispatchRecords.length > 0 ? dispatchRecords : legacyRecords;
+
+        // 12. Compute Overall Metrics across entire dispatch trips dataset
         const totalDispatched = records.length;
         const pendingClearance = records.filter((r) => r.fulfillment_status === "Pending").length;
         const fulfilledCount = records.filter((r) => r.fulfillment_status === "Fulfilled").length;
@@ -1898,8 +2186,11 @@ export async function GET(req: NextRequest) {
         const filtered = records.filter((r) => {
             const matchesSearch =
                 !search ||
+                (r.dispatch_no && r.dispatch_no.toLowerCase().includes(search)) ||
                 r.consolidator_no.toLowerCase().includes(search) ||
                 r.branch_name.toLowerCase().includes(search) ||
+                (r.driver_name && r.driver_name.toLowerCase().includes(search)) ||
+                (r.vehicle_name && r.vehicle_name.toLowerCase().includes(search)) ||
                 r.orders.some(
                     (o) =>
                         o.order_no.toLowerCase().includes(search) ||
@@ -1954,9 +2245,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { consolidator_id, orders, is_draft } = body;
+        const { consolidator_id, dispatch_id, orders, is_draft } = body;
 
-        if (!consolidator_id || !Array.isArray(orders) || orders.length === 0) {
+        if ((!consolidator_id && !dispatch_id) || !Array.isArray(orders) || orders.length === 0) {
             return NextResponse.json(
                 { message: "Invalid payload: consolidator_id and orders array are required." },
                 { status: 400 }
@@ -2745,15 +3036,61 @@ export async function POST(req: NextRequest) {
             }).catch((err) => console.warn(`[POST] Failed to update composite sales_order #${targetOrderId}:`, err));
         }
 
-        // Update consolidator status to Completed
-        await fetch(`${DIRECTUS_URL}/items/consolidator/${consolidator_id}`, {
-            method: "PATCH",
-            headers: directusHeaders,
-            body: JSON.stringify({
-                status: "Completed",
-                updated_at: phNow,
-            }),
-        }).catch((err) => console.warn(`[POST] Failed to update consolidator #${consolidator_id}:`, err));
+        // Update dispatch plan / consolidator status to Completed, keeping phNow
+        const targetPlanId = Number(dispatch_id || consolidator_id);
+        if (targetPlanId) {
+            try {
+                const dpRes = await fetch(`${DIRECTUS_URL}/items/dispatch_plan/${targetPlanId}`, {
+                    method: "PATCH",
+                    headers: directusHeaders,
+                    body: JSON.stringify({
+                        status: "Completed",
+                        updated_at: phNow,
+                    }),
+                });
+                if (!dpRes.ok) {
+                    const errText = await dpRes.text().catch(() => "");
+                    console.warn(`[POST] Failed to update dispatch_plan #${targetPlanId} with updated_at (${dpRes.status}):`, errText);
+                    // Fallback without updated_at if Directus schema rejects the field:
+                    await fetch(`${DIRECTUS_URL}/items/dispatch_plan/${targetPlanId}`, {
+                        method: "PATCH",
+                        headers: directusHeaders,
+                        body: JSON.stringify({
+                            status: "Completed",
+                        }),
+                    }).catch(() => null);
+                }
+            } catch (dpErr) {
+                console.warn(`[POST] Network error updating dispatch_plan #${targetPlanId}:`, dpErr);
+            }
+        }
+
+        if (consolidator_id) {
+            try {
+                const conRes = await fetch(`${DIRECTUS_URL}/items/consolidator/${consolidator_id}`, {
+                    method: "PATCH",
+                    headers: directusHeaders,
+                    body: JSON.stringify({
+                        status: "Completed",
+                        updated_at: phNow,
+                    }),
+                });
+                if (!conRes.ok) {
+                    const errText = await conRes.text().catch(() => "");
+                    console.warn(`[POST] Failed to update consolidator #${consolidator_id} with updated_at (${conRes.status}):`, errText);
+                    // Fallback without updated_at if Directus schema rejects the field:
+                    await fetch(`${DIRECTUS_URL}/items/consolidator/${consolidator_id}`, {
+                        method: "PATCH",
+                        headers: directusHeaders,
+                        body: JSON.stringify({
+                            status: "Completed",
+                        }),
+                    }).catch(() => null);
+                }
+            } catch (conErr) {
+                console.warn(`[POST] Network error updating consolidator #${consolidator_id}:`, conErr);
+            }
+        }
 
         return NextResponse.json({
             success: true,

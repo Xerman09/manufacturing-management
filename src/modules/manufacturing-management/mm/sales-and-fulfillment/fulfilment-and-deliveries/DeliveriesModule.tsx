@@ -154,7 +154,7 @@ export default function DeliveriesModule() {
 
                             </div>
                             <p className="text-xs text-muted-foreground mt-0.5">
-                                Reconcile delivered manifests, verify sales returns, and record receiving clearance.
+                                Reconcile dispatched delivery trips, verify sales returns, and record receiving clearance.
                             </p>
                         </div>
                     </div>
@@ -187,13 +187,13 @@ export default function DeliveriesModule() {
                 <div className="p-4 sm:p-5 rounded-xl border bg-card shadow-xs flex items-center justify-between min-h-[96px]">
                     <div className="space-y-1">
                         <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
-                            Total Dispatched Runs
+                            Total Dispatched Trips
                         </span>
                         <div className="text-2xl font-black text-foreground">
                             {metrics.total_dispatched}
                         </div>
                         <span className="text-[10px] text-muted-foreground font-medium">
-                            Consolidated Delivery Batches
+                            Dispatch Plan Delivery Trips
                         </span>
                     </div>
                     <div className="p-3 rounded-xl bg-primary/10 text-primary border border-primary/20">
@@ -211,7 +211,7 @@ export default function DeliveriesModule() {
                             {metrics.pending_clearance}
                         </div>
                         <span className="text-[10px] text-muted-foreground font-medium">
-                            Awaiting Manifest Reconciliation
+                            Awaiting Route Reconciliation
                         </span>
                     </div>
                     <div className="p-3 rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/20">
@@ -268,7 +268,7 @@ export default function DeliveriesModule() {
                             setSearchQuery(e.target.value);
                             setPage(0);
                         }}
-                        placeholder="Search consolidator no., order no., invoice no., customer..."
+                        placeholder="Search dispatch no., order no., invoice no., customer..."
                         className="w-full pl-9 pr-4 py-2 text-xs bg-background border border-input rounded-xl focus:border-primary outline-none text-foreground placeholder:text-muted-foreground shadow-xs"
                     />
                 </div>
@@ -430,7 +430,7 @@ export default function DeliveriesModule() {
             </div>
 
             {/* Main Table Area */}
-            <div className="flex-1 min-h-[520px] relative bg-card border rounded-xl shadow-sm flex flex-col overflow-hidden">
+            <div className="flex-1 relative h-auto bg-card border rounded-xl shadow-sm flex flex-col">
                 {loading && (
                     <div className="absolute inset-0 bg-background/50 backdrop-blur-sm z-30 flex items-center justify-center">
                         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -442,11 +442,11 @@ export default function DeliveriesModule() {
                         <div className="text-center py-16 px-4">
                             <ClipboardCheck className="h-12 w-12 text-muted-foreground/30 mx-auto" />
                             <h5 className="font-bold text-foreground text-xs uppercase tracking-wide mt-3">
-                                No Consolidated Delivery Records
+                                No Dispatched Delivery Records
                             </h5>
                             <p className="text-[11px] text-muted-foreground mt-1 max-w-sm mx-auto">
                                 {searchQuery || statusFilter !== "All"
-                                    ? "No delivery manifests matched your selected search filters."
+                                    ? "No dispatch trips matched your selected search filters."
                                     : "All dispatched deliveries have been cleared and reconciled."}
                             </p>
                         </div>
@@ -455,12 +455,12 @@ export default function DeliveriesModule() {
                             <thead>
                                 <tr className="border-b bg-muted/30 sticky top-0 z-10 backdrop-blur-sm">
                                     <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 w-10 text-center"></th>
-                                    <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 font-bold text-muted-foreground uppercase text-[10px]">Consolidator No</th>
+                                    <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 font-bold text-muted-foreground uppercase text-[10px]">Dispatch No</th>
                                     <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 font-bold text-muted-foreground uppercase text-[10px]">Origin Branch</th>
                                     <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 font-bold text-muted-foreground uppercase text-[10px]">Dispatch Date</th>
                                     <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 font-bold text-muted-foreground uppercase text-[10px] text-center">Orders Count</th>
-                                    <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 font-bold text-muted-foreground uppercase text-[10px] text-right">Manifest Value</th>
-                                    <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 font-bold text-muted-foreground uppercase text-[10px] text-center">Consolidation Status</th>
+                                    <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 font-bold text-muted-foreground uppercase text-[10px] text-right">Route Value</th>
+                                    <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 font-bold text-muted-foreground uppercase text-[10px] text-center">Dispatch Status</th>
                                     <th className="py-3 px-3 sm:py-3.5 sm:px-3.5 font-bold text-muted-foreground uppercase text-[10px] text-center">Action</th>
                                 </tr>
                             </thead>
@@ -471,11 +471,12 @@ export default function DeliveriesModule() {
                                 className="divide-y bg-card"
                             >
                                 {records.map((record) => {
-                                    const isExpanded = expandedRowIds.has(record.consolidator_id);
+                                    const rowKey = record.dispatch_id || record.consolidator_id;
+                                    const isExpanded = expandedRowIds.has(rowKey);
                                     const isCleared = Boolean(record.is_cleared || record.status === "Completed");
 
                                     return (
-                                        <React.Fragment key={record.consolidator_id}>
+                                        <React.Fragment key={rowKey}>
                                             {/* Header Row */}
                                             <motion.tr
                                                 variants={itemVariants}
@@ -486,7 +487,7 @@ export default function DeliveriesModule() {
                                                 <td className="py-3.5 px-3 text-center">
                                                     <button
                                                         type="button"
-                                                        onClick={() => toggleRow(record.consolidator_id)}
+                                                        onClick={() => toggleRow(rowKey)}
                                                         className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors border-none bg-transparent cursor-pointer"
                                                         title="Expand Order Breakdown"
                                                     >
@@ -498,12 +499,17 @@ export default function DeliveriesModule() {
                                                     </button>
                                                 </td>
 
-                                                {/* Consolidator No */}
+                                                {/* Dispatch No */}
                                                 <td className="py-3.5 px-3 font-black text-foreground">
                                                     <div className="flex items-center gap-1.5">
                                                         <Truck className="h-3.5 w-3.5 text-primary" />
-                                                        <span>{record.consolidator_no}</span>
+                                                        <span>{record.dispatch_no || record.consolidator_no}</span>
                                                     </div>
+                                                    {(record.driver_name || record.vehicle_name) && (
+                                                        <div className="text-[10px] text-muted-foreground font-normal truncate mt-0.5">
+                                                            {[record.driver_name, record.vehicle_name].filter(Boolean).join(" · ")}
+                                                        </div>
+                                                    )}
                                                 </td>
 
                                                 {/* Origin Branch */}
@@ -532,12 +538,12 @@ export default function DeliveriesModule() {
                                                     </span>
                                                 </td>
 
-                                                {/* Amount */}
+                                                {/* Route Value */}
                                                 <td className="py-3.5 px-3 text-right font-black text-foreground">
                                                     ₱{record.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </td>
 
-                                                {/* Consolidation Status Badge */}
+                                                {/* Dispatch Status Badge */}
                                                 <td className="py-3.5 px-3 text-center">
                                                     <span
                                                         className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
@@ -587,17 +593,17 @@ export default function DeliveriesModule() {
                                                                             <div className="flex items-center gap-2">
                                                                                 <Boxes className="h-4 w-4 text-primary" />
                                                                                 <span className="text-[10px] font-black uppercase text-foreground tracking-wider">
-                                                                                    Consolidated Sales Orders Breakdown ({record.orders.length} Invoices)
+                                                                                    Dispatch Route Orders Breakdown ({record.orders.length} Invoices)
                                                                                 </span>
                                                                             </div>
                                                                             <div className="text-[10px] text-muted-foreground">
-                                                                                Consolidator No: <b>{record.consolidator_no}</b> | Origin: <b>{record.branch_name}</b> | Status: <b>{record.status}</b>
+                                                                                Dispatch No: <b>{record.dispatch_no || record.consolidator_no}</b> | Origin: <b>{record.branch_name}</b> | Status: <b>{record.status}</b>
                                                                             </div>
                                                                         </div>
 
                                                                         {record.orders.length === 0 ? (
                                                                             <p className="text-center text-[10px] text-muted-foreground py-3">
-                                                                                No individual sales orders found for this consolidation manifest.
+                                                                                No individual sales orders found for this dispatch plan.
                                                                             </p>
                                                                         ) : (
                                                                             <div className="border rounded-lg overflow-hidden bg-background">
@@ -605,6 +611,7 @@ export default function DeliveriesModule() {
                                                                                     <thead>
                                                                                         <tr className="border-b bg-muted/30">
                                                                                             <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Status</th>
+                                                                                            <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Dispatch No</th>
                                                                                             <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Order No</th>
                                                                                             <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Invoice No</th>
                                                                                             <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Invoice Date</th>
@@ -625,6 +632,15 @@ export default function DeliveriesModule() {
                                                                                                     >
                                                                                                         {ord.fulfillment_status}
                                                                                                     </span>
+                                                                                                </td>
+                                                                                                <td className="p-2.5 font-mono text-[10px]">
+                                                                                                    {ord.dispatch_no ? (
+                                                                                                        <span className="font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
+                                                                                                            {ord.dispatch_no}
+                                                                                                        </span>
+                                                                                                    ) : (
+                                                                                                        <span className="text-muted-foreground">---</span>
+                                                                                                    )}
                                                                                                 </td>
                                                                                                 <td className="p-2.5 font-bold text-foreground">
                                                                                                     {ord.order_no}
@@ -737,7 +753,7 @@ export default function DeliveriesModule() {
                             </SelectContent>
                         </Select>
                         <span className="font-semibold text-foreground ml-2">
-                            Showing {records.length > 0 ? page * size + 1 : 0} - {Math.min((page + 1) * size, totalElements)} of {totalElements} manifests
+                            Showing {records.length > 0 ? page * size + 1 : 0} - {Math.min((page + 1) * size, totalElements)} of {totalElements} dispatch trips
                         </span>
                     </div>
 

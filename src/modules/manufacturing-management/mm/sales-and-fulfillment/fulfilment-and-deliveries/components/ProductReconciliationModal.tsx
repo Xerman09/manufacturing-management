@@ -99,6 +99,16 @@ const ReconciliationRowItem = React.memo(function ReconciliationRowItem({
     const invoicedQty = item.invoiced_quantity;
     const targetQty = (invoicedQty !== undefined && invoicedQty !== null ? invoicedQty : item.ordered_quantity) ?? 0;
 
+    const physicalDispatched = useMemo(() => {
+        return (item.reservations || []).reduce(
+            (sum, r) => sum + getReservationPickedQty(r),
+            0
+        );
+    }, [item.reservations]);
+    const maxDeliverable = physicalDispatched > 0
+        ? Math.min(targetQty, physicalDispatched)
+        : targetQty;
+
     const isFulfilledWithConcerns = dynamicStatus === "Fulfilled with Concerns";
     const isConcernActive = isFulfilledWithConcerns && Boolean(item.has_concern);
 
@@ -211,7 +221,7 @@ const ReconciliationRowItem = React.memo(function ReconciliationRowItem({
         if (rawFulfilledQty === "" || isNaN(parseInt(rawFulfilledQty, 10))) {
             const fallback = isConcernActive
                 ? 0
-                : Math.max(0, targetQty - item.returned_quantity);
+                : Math.max(0, maxDeliverable - item.returned_quantity);
             setRawFulfilledQty(fallback === 0 ? "" : String(fallback));
             onFulfilledQtyChange(originalIndex, fallback);
         } else {
@@ -538,7 +548,14 @@ export default function ProductReconciliationModal({
                             line_status: "Fulfilled with Returns" as LineStatus,
                         };
                     } else {
-                        // Product is not part of this return: reset returned to 0 and fulfilled to 100%
+                        // Product is not part of this return: reset returned to 0 and fulfilled to physical dispatch cap
+                        const physicalDispatched = (item.reservations || []).reduce(
+                            (sum, r) => sum + getReservationPickedQty(r),
+                            0
+                        );
+                        const maxDeliverable = physicalDispatched > 0
+                            ? Math.min(targetQty, physicalDispatched)
+                            : targetQty;
                         const clearedReservations = (item.reservations || []).map((r) => ({
                             ...r,
                             returned_quantity: 0,
@@ -546,7 +563,7 @@ export default function ProductReconciliationModal({
                         return {
                             ...item,
                             returned_quantity: 0,
-                            received_quantity: targetQty,
+                            received_quantity: maxDeliverable,
                             reservations: clearedReservations,
                             line_status: "Fulfilled" as LineStatus,
                         };
@@ -972,10 +989,17 @@ export default function ProductReconciliationModal({
                         item.invoiced_quantity !== undefined && item.invoiced_quantity !== null
                             ? item.invoiced_quantity
                             : item.ordered_quantity;
+                    const physicalDispatched = (item.reservations || []).reduce(
+                        (sum, r) => sum + getReservationPickedQty(r),
+                        0
+                    );
+                    const maxDeliverable = physicalDispatched > 0
+                        ? Math.min(targetQty, physicalDispatched)
+                        : targetQty;
                     return {
                         ...item,
                         returned_quantity: 0,
-                        received_quantity: targetQty,
+                        received_quantity: maxDeliverable,
                         reservations: (item.reservations || []).map((r) => ({
                             ...r,
                             returned_quantity: 0,
@@ -1196,6 +1220,13 @@ export default function ProductReconciliationModal({
                     line_status: "Fulfilled with Concerns",
                 };
             } else {
+                const physicalDispatched = (item.reservations || []).reduce(
+                    (sum, r) => sum + getReservationPickedQty(r),
+                    0
+                );
+                const maxDeliverable = physicalDispatched > 0
+                    ? Math.min(targetQty, physicalDispatched)
+                    : targetQty;
                 const updatedReservations = (item.reservations || []).map((r) => ({
                     ...r,
                     returned_quantity: 0,
@@ -1203,7 +1234,7 @@ export default function ProductReconciliationModal({
                 next[originalIndex] = {
                     ...item,
                     has_concern: false,
-                    received_quantity: targetQty,
+                    received_quantity: maxDeliverable,
                     returned_quantity: 0,
                     line_status: "Fulfilled",
                     reservations: updatedReservations,
