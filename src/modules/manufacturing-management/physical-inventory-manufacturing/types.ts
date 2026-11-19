@@ -167,3 +167,33 @@ export interface PhysicalInventoryFilters {
     status?: string;
     search?: string;
 }
+
+export interface PhysicalInventoryDraftDetailUpdate {
+    detailId: number;
+    physical_count?: number | null;
+    remarks?: string;
+}
+
+export interface PhysicalInventoryDraftChanges {
+    headerRemarks?: string;
+    detailUpdates: PhysicalInventoryDraftDetailUpdate[];
+}
+
+export interface CountSheetStockRow {
+    inventoryLotId: number;
+    lotId: number;
+    lotName: string;
+    batchNo: string;
+    productName: string;
+    productCode: string;
+    uom: string;
+    condition: string;
+    systemCount: number;
+}
+
+export interface PhysicalInventoryCountSheetData {
+    sheet: MmPhysicalInventorySheet;
+    additionalRows: CountSheetStockRow[];
+    stockCutoff: string | null;
+    excludedOtherBranchBalanceCount: number;
+}

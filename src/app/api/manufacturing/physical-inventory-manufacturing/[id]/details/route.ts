@@ -280,7 +280,7 @@ export async function POST(request: NextRequest, context: RouteParams) {
             system_count: systemCount,
             physical_count: physCountNum,
             unit_cost: unitCost,
-            remarks: remarks ? String(remarks).trim() : null,
+            remarks: String(remarks ?? "").trim() || null,
         };
 
         const createDetailUrl = `${DIRECTUS_URL}/items/mm_physical_inventory_details`;
@@ -365,30 +365,24 @@ export async function PATCH(request: NextRequest, context: RouteParams) {
         }
         const existingDetail = (await existingDetailRes.json()).data;
 
-        const isOpening = sheet.stock_type === "OPENING";
-        const physCountNum = body.physical_count !== undefined
-            ? (body.physical_count !== null && body.physical_count !== "" ? roundQty(body.physical_count) : 0)
-            : roundQty(existingDetail.physical_count || 0);
-
-        if (physCountNum < 0) {
-            return NextResponse.json({ success: false, error: "Physical count cannot be negative." }, { status: 400 });
+        // Patch supplied fields only. Directus computes variance and difference_cost.
+        const updatePayload: Record<string, unknown> = {};
+        if (body.physical_count !== undefined) {
+            const physicalCount = roundQty(body.physical_count);
+            if (physicalCount < 0) {
+                return NextResponse.json({ success: false, error: "Physical count cannot be negative." }, { status: 400 });
+            }
+            updatePayload.physical_count = physicalCount;
         }
-
-        const conditionStr = body.inventory_condition ? String(body.inventory_condition).trim().toUpperCase() : existingDetail.inventory_condition;
-        const remarksStr = body.remarks !== undefined ? (body.remarks ? String(body.remarks).trim() : null) : existingDetail.remarks;
-
-        const systemCount = roundQty(existingDetail.system_count);
-        const calculatedVariance = roundQty(physCountNum - systemCount);
-        if (!isOpening && calculatedVariance !== 0 && (!remarksStr || !remarksStr.trim())) {
-            return NextResponse.json({ success: false, error: "Variance reason is required when a Regular Physical Inventory has a nonzero variance." }, { status: 400 });
+        if (body.inventory_condition) {
+            updatePayload.inventory_condition = String(body.inventory_condition).trim().toUpperCase();
         }
-
-        // DO NOT send generated columns `variance` or `difference_cost`
-        const updatePayload: Record<string, unknown> = {
-            physical_count: physCountNum,
-            inventory_condition: conditionStr,
-            remarks: remarksStr,
-        };
+        if (body.remarks !== undefined) {
+            updatePayload.remarks = String(body.remarks ?? "").trim() || null;
+        }
+        if (Object.keys(updatePayload).length === 0) {
+            return NextResponse.json({ success: true, data: existingDetail });
+        }
 
         const updateUrl = `${DIRECTUS_URL}/items/mm_physical_inventory_details/${detailId}`;
         const res = await fetch(updateUrl, {
