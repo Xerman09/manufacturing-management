@@ -60,7 +60,9 @@ export default function QuotationModule() {
         handleRowProductSelect,
         allProjects,
         startCreateQuoteForProject,
-        selectedProjectId
+        selectedProjectId,
+        customerProjects,
+        handleSelectExistingProject
     } = useQuotation();
 
     const projectQuoteHistory = React.useMemo(() => {
@@ -135,6 +137,8 @@ export default function QuotationModule() {
                         setProjectName={setProjectName}
                         showValidationErrors={showValidationErrors}
                         selectedProjectId={selectedProjectId}
+                        customerProjects={customerProjects}
+                        onSelectExistingProject={handleSelectExistingProject}
                     />
 
                     <div className="w-full">

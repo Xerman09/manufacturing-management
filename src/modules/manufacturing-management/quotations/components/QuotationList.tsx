@@ -35,7 +35,7 @@ export function QuotationList({
     allProjects,
     startCreateQuoteForProject
 }: QuotationListProps) {
-    const [subTab, setSubTab] = useState<"all" | "executed" | "draft" | "rejected">("all");
+    const [subTab, setSubTab] = useState<"all" | "converted_to_so" | "draft" | "rejected">("all");
     const [listSearchQuery, setListSearchQuery] = useState("");
     const [listPage, setListPage] = useState(1);
     const [listItemsPerPage, setListItemsPerPage] = useState(10);
@@ -64,13 +64,13 @@ export function QuotationList({
     const filteredProjects = React.useMemo(() => {
         let filtered = allProjectsList;
 
-        // Status filter
-        if (subTab === "executed") {
-            filtered = filtered.filter(p => p.projectStatus === "Executed");
+        // Status filter based on Quotation Status
+        if (subTab === "converted_to_so") {
+            filtered = filtered.filter(p => p.latest.status === "Converted to SO");
         } else if (subTab === "rejected") {
-            filtered = filtered.filter(p => p.projectStatus === "Rejected");
+            filtered = filtered.filter(p => p.latest.status === "Rejected");
         } else if (subTab === "draft") {
-            filtered = filtered.filter(p => p.projectStatus !== "Executed" && p.projectStatus !== "Rejected");
+            filtered = filtered.filter(p => p.latest.status !== "Converted to SO" && p.latest.status !== "Rejected");
         }
 
         // Search filter
@@ -173,7 +173,7 @@ export function QuotationList({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b pb-4 gap-4">
                 <div>
                     <h3 className="text-base font-bold text-foreground">Project Quotations & Pipeline</h3>
-                    <p className="text-xs text-muted-foreground">Approve won proposals to generate Sales Orders, reject lost projects, and manage pricing sheet revision histories.</p>
+                    <p className="text-xs text-muted-foreground">Approve proposals to generate Sales Orders, reject unaccepted quotations, and manage pricing sheet revision histories.</p>
                 </div>
                 <div className="flex items-center gap-3">
                     <button
@@ -204,19 +204,24 @@ export function QuotationList({
                     />
                 </div>
 
-                <div className="relative w-full sm:w-auto min-w-[200px]">
-                    <select
-                        value={subTab}
-                        onChange={(e) => setSubTab(e.target.value as "all" | "executed" | "draft" | "rejected")}
-                        className="w-full appearance-none bg-background border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 pr-10 text-xs font-bold text-foreground outline-none focus:ring-1 focus:ring-primary shadow-sm cursor-pointer"
-                    >
-                        <option value="all">All</option>
-                        <option value="executed">Executed</option>
-                        <option value="draft">Draft</option>
-                        <option value="rejected">Rejected</option>
-                    </select>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground">
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <label className="text-xs font-bold text-muted-foreground whitespace-nowrap">
+                        Quotation Status:
+                    </label>
+                    <div className="relative w-full sm:w-auto min-w-[180px]">
+                        <select
+                            value={subTab}
+                            onChange={(e) => setSubTab(e.target.value as "all" | "converted_to_so" | "draft" | "rejected")}
+                            className="w-full appearance-none bg-background border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 pr-10 text-xs font-bold text-foreground outline-none focus:ring-1 focus:ring-primary shadow-sm cursor-pointer"
+                        >
+                            <option value="all">All Quotations</option>
+                            <option value="draft">Draft</option>
+                            <option value="converted_to_so">Converted to SO</option>
+                            <option value="rejected">Rejected</option>
+                        </select>
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground">
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -243,7 +248,7 @@ export function QuotationList({
                                         <th className="p-3 font-semibold text-muted-foreground uppercase">Latest Quotation</th>
                                         <th className="p-3 font-semibold text-muted-foreground uppercase text-right">Agreed Price</th>
                                         <th className="p-3 font-semibold text-muted-foreground uppercase text-center">Revisions</th>
-                                        <th className="p-3 font-semibold text-muted-foreground uppercase text-center">Status</th>
+                                        <th className="p-3 font-semibold text-muted-foreground uppercase text-center">Quotation Status</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y">
@@ -253,6 +258,8 @@ export function QuotationList({
                                             ? `${(q.customer_id as Customer).customer_name} (${(q.customer_id as Customer).customer_code})`
                                             : "Customer Deleted";
                                         const sellingPrice = Number(q.total_selling_price || 0);
+
+                                        const quoteStatus = q.status || "Draft";
 
                                         return (
                                             <tr
@@ -269,8 +276,8 @@ export function QuotationList({
                                                 <td className="p-3 text-center text-muted-foreground font-semibold">
                                                     <button
                                                         onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleViewSkuHistory(proj.projectName, proj.history);
+                                                             e.stopPropagation();
+                                                             handleViewSkuHistory(proj.projectName, proj.history);
                                                         }}
                                                         className="hover:underline text-primary font-bold inline-flex items-center gap-1"
                                                     >
@@ -279,13 +286,13 @@ export function QuotationList({
                                                     </button>
                                                 </td>
                                                 <td className="p-3 text-center">
-                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${proj.projectStatus === "Executed"
+                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${quoteStatus === "Converted to SO"
                                                         ? "bg-teal-500/10 text-teal-600 border-teal-500/20"
-                                                        : proj.projectStatus === "Rejected"
+                                                        : quoteStatus === "Rejected"
                                                             ? "bg-destructive/10 text-destructive border-destructive/20"
                                                             : "bg-amber-500/10 text-amber-600 border-amber-500/20"
                                                         }`}>
-                                                        {proj.projectStatus || "Draft"}
+                                                        {quoteStatus}
                                                     </span>
                                                 </td>
                                             </tr>
