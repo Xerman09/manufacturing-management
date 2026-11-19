@@ -10,6 +10,8 @@ import {
     ProductType,
     PriceType,
     StockType,
+    PhysicalInventoryDraftChanges,
+    PhysicalInventoryDraftDetailUpdate,
 } from "../types";
 import SearchableSelect from "./SearchableSelect";
 import { formatMoney } from "./PhysicalInventoryList";
@@ -38,15 +40,10 @@ interface Props {
     }) => Promise<void>;
     onOpenAddDetailModal: (lotId?: number) => void;
     onRemoveDetail: (detail: MmPhysicalInventoryDetail) => void;
-    onSaveInlineCount?: (detail: MmPhysicalInventoryDetail, newPhysCount: number | null) => Promise<void>;
-    onSaveInlineRemark?: (detail: MmPhysicalInventoryDetail, remarks: string) => Promise<void>;
-    onSaveDraftBatch?: (
-        headerPayload?: { remarks?: string },
-        modifiedCounts?: Array<{ detailId: number; physical_count: number | null }>,
-        modifiedRemarks?: Array<{ detailId: number; remarks: string }>
-    ) => Promise<void>;
+    onSaveInlineDetail: (update: PhysicalInventoryDraftDetailUpdate) => Promise<void>;
+    onSaveDraftBatch: (changes: PhysicalInventoryDraftChanges) => Promise<void>;
     onOpenOffsettingModal?: () => void;
-    onSubmit: () => void;
+    onSubmit: (changes: PhysicalInventoryDraftChanges) => Promise<boolean>;
     onReturnToDraft?: () => void;
     onCommit?: () => void;
     onPrintCountSheet?: (sheet: MmPhysicalInventorySheet, filterLot?: number | string | null) => void;
@@ -73,8 +70,7 @@ export default function PhysicalInventoryForm({
     onSaveHeader,
     onOpenAddDetailModal,
     onRemoveDetail,
-    onSaveInlineCount,
-    onSaveInlineRemark,
+    onSaveInlineDetail,
     onSaveDraftBatch,
     onSubmit,
     onReturnToDraft,
@@ -177,8 +173,10 @@ export default function PhysicalInventoryForm({
     });
     const [startingDate, setStartingDate] = useState<string>(() => formatDateTimeInput(sheet?.starting_date));
     const [cutoffDate, setCutoffDate] = useState<string>(() => formatDateTimeInput(sheet?.cutoff_date));
-    const [remarks, setRemarks] = useState<string>(sheet?.remarks || "");
+    const [headerRemarksDraft, setHeaderRemarksDraft] = useState<string | null>(null);
+    const remarks = headerRemarksDraft ?? sheet?.remarks ?? "";
     const [countsMap, setCountsMap] = useState<Record<number, string>>({});
+    const [inlineSaves, setInlineSaves] = useState<Record<number, number>>({});
     const [viewMode, setViewMode] = useState<"GROUPED" | "FLAT">("GROUPED");
     const [lineItemSearch, setLineItemSearch] = useState("");
     const [saving, setSaving] = useState(false);
@@ -205,7 +203,6 @@ export default function PhysicalInventoryForm({
                 setStartingDate(formatDateTimeInput(lastCommittedCutoffDate));
             }
             if (sheet.cutoff_date) setCutoffDate(formatDateTimeInput(sheet.cutoff_date));
-            setRemarks(sheet.remarks || "");
         } else {
             if (priceTypes.length > 0) {
                 setPriceTypeId((prev) => (prev > 0 ? prev : priceTypes[0].price_type_id));
@@ -235,6 +232,7 @@ export default function PhysicalInventoryForm({
                 cutoff_date: cutoffDate,
                 remarks: remarks.trim(),
             });
+            setHeaderRemarksDraft(null);
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Failed to save header";
             setError(msg);
@@ -253,100 +251,55 @@ export default function PhysicalInventoryForm({
         )
     );
 
-    // Unsaved Changes / Dirty State Tracking
-    const isHeaderRemarksDirty = useMemo(() => {
-        return remarks.trim() !== (sheet?.remarks || "").trim();
-    }, [remarks, sheet?.remarks]);
+    const { draftChanges, hasInvalidCount } = useMemo(() => {
+        const detailUpdates: PhysicalInventoryDraftDetailUpdate[] = [];
+        let hasInvalidCount = false;
+        for (const detail of details) {
+            const detailId = detail.physical_inventory_detail_id || detail.id;
+            if (!detailId) continue;
 
-    const isCountsDirty = useMemo(() => {
-        for (const [dIdStr, valStr] of Object.entries(countsMap)) {
-            if (valStr === undefined) continue;
-            const dId = Number(dIdStr);
-            const detailObj = details.find((d) => (d.physical_inventory_detail_id || d.id) === dId);
-            if (!detailObj) continue;
-
-            const origPhys = detailObj.physical_count;
-            const origStr = origPhys !== null && origPhys !== undefined ? String(Math.round(Number(origPhys))) : "";
-            if (valStr.trim() !== origStr.trim()) {
-                return true;
+            const update: PhysicalInventoryDraftDetailUpdate = { detailId };
+            // The pending save can change the comparison values before the next write runs.
+            const savingDetail = (inlineSaves[detailId] ?? 0) > 0;
+            const countText = countsMap[detailId]?.trim();
+            const savedCount = detail.physical_count == null ? "" : String(Math.round(Number(detail.physical_count)));
+            if (countText !== undefined && (savingDetail || countText !== savedCount)) {
+                const count = Number(countText);
+                if (!Number.isFinite(count) || count < 0) {
+                    hasInvalidCount = true;
+                    continue;
+                }
+                update.physical_count = countText === "" ? null : Math.round(count);
             }
+
+            const note = remarksMap[detailId]?.trim();
+            if (note !== undefined && (savingDetail || note !== (detail.remarks || "").trim())) update.remarks = note;
+            if (update.physical_count !== undefined || update.remarks !== undefined) detailUpdates.push(update);
         }
-        return false;
-    }, [countsMap, details]);
 
-    const isItemRemarksDirty = useMemo(() => {
-        for (const [dIdStr, remarkStr] of Object.entries(remarksMap)) {
-            if (remarkStr === undefined) continue;
-            const dId = Number(dIdStr);
-            const detailObj = details.find((d) => (d.physical_inventory_detail_id || d.id) === dId);
-            if (!detailObj) continue;
+        const headerRemarks = remarks.trim() !== (sheet?.remarks || "").trim() ? remarks.trim() : undefined;
+        return { draftChanges: { headerRemarks, detailUpdates }, hasInvalidCount };
+    }, [countsMap, details, inlineSaves, remarksMap, remarks, sheet?.remarks]);
 
-            const origRemark = (detailObj.remarks || "").trim();
-            if (remarkStr.trim() !== origRemark) {
-                return true;
-            }
-        }
-        return false;
-    }, [remarksMap, details]);
+    const hasUnsavedChanges = hasInvalidCount || draftChanges.headerRemarks !== undefined || draftChanges.detailUpdates.length > 0;
+    const isDraftBusy = loading || saving || savingDraft;
 
-    const hasUnsavedChanges = isHeaderRemarksDirty || isCountsDirty || isItemRemarksDirty;
+    function clearDraftEdits() {
+        setCountsMap({});
+        setRemarksMap({});
+        setHeaderRemarksDraft(null);
+    }
 
     const handleSaveDraft = async () => {
         setError(null);
+        if (hasInvalidCount) {
+            setError("Physical count must be a nonnegative number.");
+            return;
+        }
         setSavingDraft(true);
         try {
-            const modifiedHeader = isHeaderRemarksDirty ? { remarks: remarks.trim() } : undefined;
-
-            const modifiedCounts: Array<{ detailId: number; physical_count: number | null }> = [];
-            for (const [dIdStr, valStr] of Object.entries(countsMap)) {
-                const dId = Number(dIdStr);
-                const detailObj = details.find((d) => (d.physical_inventory_detail_id || d.id) === dId);
-                if (!detailObj) continue;
-
-                const origPhys = detailObj.physical_count;
-                const origStr = origPhys !== null && origPhys !== undefined ? String(Math.round(Number(origPhys))) : "";
-                if (valStr.trim() !== origStr.trim()) {
-                    const num = valStr.trim() === "" ? null : Math.round(Number(valStr));
-                    if (num === null || (!isNaN(num) && num >= 0)) {
-                        modifiedCounts.push({ detailId: dId, physical_count: num });
-                    }
-                }
-            }
-
-            const modifiedRemarks: Array<{ detailId: number; remarks: string }> = [];
-            for (const [dIdStr, remarkStr] of Object.entries(remarksMap)) {
-                const dId = Number(dIdStr);
-                const detailObj = details.find((d) => (d.physical_inventory_detail_id || d.id) === dId);
-                if (!detailObj) continue;
-
-                const origRemark = (detailObj.remarks || "").trim();
-                if (remarkStr.trim() !== origRemark) {
-                    modifiedRemarks.push({ detailId: dId, remarks: remarkStr.trim() });
-                }
-            }
-
-            if (onSaveDraftBatch) {
-                await onSaveDraftBatch(modifiedHeader, modifiedCounts, modifiedRemarks);
-            } else {
-                if (modifiedHeader && sheet?.physical_inventory_id) {
-                    await onSaveHeader({ branch_id: branchId, remarks: remarks.trim() });
-                }
-                for (const item of modifiedCounts) {
-                    const detailObj = details.find((d) => (d.physical_inventory_detail_id || d.id) === item.detailId);
-                    if (detailObj && onSaveInlineCount) {
-                        await onSaveInlineCount(detailObj, item.physical_count);
-                    }
-                }
-                for (const item of modifiedRemarks) {
-                    const detailObj = details.find((d) => (d.physical_inventory_detail_id || d.id) === item.detailId);
-                    if (detailObj && onSaveInlineRemark) {
-                        await onSaveInlineRemark(detailObj, item.remarks);
-                    }
-                }
-            }
-
-            setCountsMap({});
-            setRemarksMap({});
+            await onSaveDraftBatch(draftChanges);
+            clearDraftEdits();
 
             setDraftSavedToast(true);
             setTimeout(() => setDraftSavedToast(false), 4500);
@@ -357,6 +310,48 @@ export default function PhysicalInventoryForm({
             setSavingDraft(false);
         }
     };
+
+    async function handleSubmitForReview() {
+        setError(null);
+        if (hasInvalidCount) {
+            setError("Physical count must be a nonnegative number.");
+            return;
+        }
+        if (await onSubmit(draftChanges)) clearDraftEdits();
+    }
+
+    function saveInlineDetail(detailId: number, event: React.FocusEvent<HTMLInputElement>) {
+        if (isDraftBusy || event.relatedTarget?.closest("[data-draft-action]")) return;
+        const update = draftChanges.detailUpdates.find(row => row.detailId === detailId);
+        if (!update) return;
+
+        setInlineSaves(current => ({ ...current, [detailId]: (current[detailId] ?? 0) + 1 }));
+        void onSaveInlineDetail(update).finally(() => {
+            setInlineSaves(current => ({ ...current, [detailId]: current[detailId] - 1 }));
+        });
+    }
+
+    function renderRemarks(detail: MmPhysicalInventoryDetail, detailId: number) {
+        if (!isDraft) return <span className="truncate text-muted-foreground">{detail.remarks || "—"}</span>;
+        return (
+            <input
+                type="text"
+                aria-label="Remarks (optional)"
+                value={remarksMap[detailId] ?? detail.remarks ?? ""}
+                onChange={(event) => {
+                    const value = event.target.value;
+                    setRemarksMap(prev => ({ ...prev, [detailId]: value }));
+                }}
+                onBlur={viewMode === "FLAT" ? (event) => saveInlineDetail(detailId, event) : undefined}
+                onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                }}
+                disabled={isDraftBusy}
+                placeholder="Remarks (optional)"
+                className="w-full px-2 py-1 text-xs bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/20"
+            />
+        );
+    }
 
     const groupedByLot = React.useMemo(() => {
         const map = new Map<string, { lotName: string; lotObj: unknown; items: MmPhysicalInventoryDetail[] }>();
@@ -539,7 +534,8 @@ export default function PhysicalInventoryForm({
                             <button
                                 type="button"
                                 onClick={handleSaveDraft}
-                                disabled={!hasUnsavedChanges || loading || saving || savingDraft}
+                                data-draft-action=""
+                                disabled={!hasUnsavedChanges || isDraftBusy}
                                 className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed ${hasUnsavedChanges
                                     ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/20 ring-2 ring-emerald-500/30 cursor-pointer"
                                     : "bg-card text-slate-500 dark:text-slate-400 border border-border cursor-not-allowed"
@@ -560,8 +556,9 @@ export default function PhysicalInventoryForm({
                             </button>
                             <button
                                 type="button"
-                                onClick={onSubmit}
-                                disabled={loading || saving || savingDraft || details.length === 0}
+                                onClick={handleSubmitForReview}
+                                data-draft-action=""
+                                disabled={isDraftBusy || details.length === 0}
                                 className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-xs disabled:opacity-50"
                             >
                                 <Send className="h-4 w-4" />
@@ -804,8 +801,8 @@ export default function PhysicalInventoryForm({
                         type="text"
                         placeholder="Add optional notes or audit reference..."
                         value={remarks}
-                        onChange={(e) => setRemarks(e.target.value)}
-                        disabled={isReadOnly}
+                        onChange={(e) => setHeaderRemarksDraft(e.target.value)}
+                        disabled={isReadOnly || isDraftBusy}
                         className="w-full px-3 py-2 text-sm bg-background border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/20 disabled:opacity-70"
                     />
                 </div>
@@ -1170,7 +1167,7 @@ export default function PhysicalInventoryForm({
                                                             <th className="px-3 py-2 text-right">Variance</th>
                                                             <th className="px-3 py-2 text-right">Unit Cost</th>
                                                             <th className="px-3 py-2 text-right">Diff Cost</th>
-                                                            <th className="px-3 py-2">Remarks</th>
+                                                            <th className="px-3 py-2">{isDraft ? "Remarks (optional)" : "Remarks"}</th>
                                                             {isDraft && <th className="px-3 py-2 text-right">Actions</th>}
                                                         </tr>
                                                     </thead>
@@ -1244,6 +1241,7 @@ export default function PhysicalInventoryForm({
                                                                                     type="number"
                                                                                     min="0"
                                                                                     step="1"
+                                                                                    disabled={isDraftBusy}
                                                                                     value={rawInput !== undefined ? rawInput : (hasSavedCount ? String(Math.round(Number(origPhys))) : "")}
                                                                                     onChange={(e) => {
                                                                                         const val = e.target.value;
@@ -1268,33 +1266,7 @@ export default function PhysicalInventoryForm({
                                                                     <td className="px-3 py-2.5 text-right font-mono">{formatMoney(unitCost)}</td>
                                                                     <td className="px-3 py-2.5 text-right font-mono font-semibold">{formatMoney(diffCost)}</td>
                                                                     <td className="px-3 py-2.5 min-w-[180px] max-w-xs">
-                                                                        {isDraft ? (
-                                                                            <div className="space-y-0.5">
-                                                                                <input
-                                                                                    type="text"
-                                                                                    value={remarksMap[dId] !== undefined ? remarksMap[dId] : (d.remarks || "")}
-                                                                                    onChange={(e) => {
-                                                                                        const val = e.target.value;
-                                                                                        setRemarksMap((prev) => ({ ...prev, [dId]: val }));
-                                                                                    }}
-                                                                                    onKeyDown={(e) => {
-                                                                                        if (e.key === "Enter") {
-                                                                                            (e.target as HTMLInputElement).blur();
-                                                                                        }
-                                                                                    }}
-                                                                                    placeholder={Math.abs(varQty) > 0.0001 ? "Reason required *" : "Remarks..."}
-                                                                                    className={`w-full px-2 py-1 text-xs bg-background border rounded-lg focus:outline-hidden focus:ring-2 ${Math.abs(varQty) > 0.0001 && !d.remarks?.trim()
-                                                                                        ? "border-rose-400 focus:ring-rose-400 bg-rose-50/50 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200 placeholder:text-rose-400 font-medium"
-                                                                                        : "border-input focus:ring-primary/20"
-                                                                                        }`}
-                                                                                />
-                                                                                {Math.abs(varQty) > 0.0001 && !d.remarks?.trim() && (
-                                                                                    <p className="text-[10px] font-semibold text-rose-600">Variance reason required</p>
-                                                                                )}
-                                                                            </div>
-                                                                        ) : (
-                                                                            <span className="truncate text-muted-foreground">{d.remarks || "—"}</span>
-                                                                        )}
+                                                                        {renderRemarks(d, dId)}
                                                                     </td>
                                                                     {isDraft && (
                                                                         <td className="px-3 py-2.5 text-right">
@@ -1349,7 +1321,7 @@ export default function PhysicalInventoryForm({
                                                 <th className="px-3 py-2.5 text-right">Variance</th>
                                                 <th className="px-3 py-2.5 text-right">Unit Cost</th>
                                                 <th className="px-3 py-2.5 text-right">Diff Cost</th>
-                                                <th className="px-3 py-2.5">Remarks</th>
+                                                <th className="px-3 py-2.5">{isDraft ? "Remarks (optional)" : "Remarks"}</th>
                                                 {isDraft && <th className="px-3 py-2.5 text-right">Actions</th>}
                                             </tr>
                                         </thead>
@@ -1424,20 +1396,13 @@ export default function PhysicalInventoryForm({
                                                                         type="number"
                                                                         min="0"
                                                                         step="1"
+                                                                        disabled={isDraftBusy}
                                                                         value={rawInput !== undefined ? rawInput : (hasSavedCount ? String(Math.round(Number(origPhys))) : "")}
                                                                         onChange={(e) => {
                                                                             const val = e.target.value;
                                                                             setCountsMap((prev) => ({ ...prev, [dId]: val }));
                                                                         }}
-                                                                        onBlur={async () => {
-                                                                            const valStr = countsMap[dId];
-                                                                            if (valStr !== undefined) {
-                                                                                const num = valStr.trim() === "" ? 0 : Math.round(Number(valStr));
-                                                                                if (!isNaN(num) && num >= 0 && onSaveInlineCount) {
-                                                                                    await onSaveInlineCount(d, num);
-                                                                                }
-                                                                            }
-                                                                        }}
+                                                                        onBlur={(event) => saveInlineDetail(dId, event)}
                                                                         onKeyDown={(e) => {
                                                                             if (e.key === "Enter") {
                                                                                 (e.target as HTMLInputElement).blur();
@@ -1457,39 +1422,7 @@ export default function PhysicalInventoryForm({
                                                         <td className="px-3 py-2.5 text-right font-mono">{formatMoney(unitCost)}</td>
                                                         <td className="px-3 py-2.5 text-right font-mono font-semibold">{formatMoney(diffCost)}</td>
                                                         <td className="px-3 py-2.5 min-w-[180px] max-w-xs">
-                                                            {isDraft ? (
-                                                                <div className="space-y-0.5">
-                                                                    <input
-                                                                        type="text"
-                                                                        value={remarksMap[dId] !== undefined ? remarksMap[dId] : (d.remarks || "")}
-                                                                        onChange={(e) => {
-                                                                            const val = e.target.value;
-                                                                            setRemarksMap((prev) => ({ ...prev, [dId]: val }));
-                                                                        }}
-                                                                        onBlur={async () => {
-                                                                            const rVal = remarksMap[dId];
-                                                                            if (rVal !== undefined && onSaveInlineRemark) {
-                                                                                await onSaveInlineRemark(d, rVal);
-                                                                            }
-                                                                        }}
-                                                                        onKeyDown={(e) => {
-                                                                            if (e.key === "Enter") {
-                                                                                (e.target as HTMLInputElement).blur();
-                                                                            }
-                                                                        }}
-                                                                        placeholder={Math.abs(varQty) > 0.0001 ? "Reason required *" : "Remarks..."}
-                                                                        className={`w-full px-2 py-1 text-xs bg-background border rounded-lg focus:outline-hidden focus:ring-2 ${Math.abs(varQty) > 0.0001 && !d.remarks?.trim()
-                                                                            ? "border-rose-400 focus:ring-rose-400 bg-rose-50/50 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200 placeholder:text-rose-400 font-medium"
-                                                                            : "border-input focus:ring-primary/20"
-                                                                            }`}
-                                                                    />
-                                                                    {Math.abs(varQty) > 0.0001 && !d.remarks?.trim() && (
-                                                                        <p className="text-[10px] font-semibold text-rose-600">Variance reason required</p>
-                                                                    )}
-                                                                </div>
-                                                            ) : (
-                                                                <span className="truncate text-muted-foreground">{d.remarks || "—"}</span>
-                                                            )}
+                                                            {renderRemarks(d, dId)}
                                                         </td>
                                                         {isDraft && (
                                                             <td className="px-3 py-2.5 text-right">

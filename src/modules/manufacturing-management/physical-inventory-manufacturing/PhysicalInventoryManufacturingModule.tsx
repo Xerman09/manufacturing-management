@@ -1,10 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
     MmPhysicalInventorySheet,
+    PhysicalInventoryCountSheetData,
     MmPhysicalInventoryDetail,
+    PhysicalInventoryDraftChanges,
+    PhysicalInventoryDraftDetailUpdate,
     MmOffsetPairing,
     Branch,
     Product,
@@ -18,6 +21,7 @@ import {
 import {
     fetchPhysicalInventorySheets,
     fetchPhysicalInventorySheet,
+    fetchPhysicalInventoryCountSheet,
     createPhysicalInventoryHeader,
     updatePhysicalInventoryHeader,
     addPhysicalInventoryDetail,
@@ -55,6 +59,7 @@ export default function PhysicalInventoryManufacturingModule() {
     const [view, setView] = useState<"LIST" | "FORM">("LIST");
     const [sheets, setSheets] = useState<MmPhysicalInventorySheet[]>([]);
     const [activeSheet, setActiveSheet] = useState<MmPhysicalInventorySheet | null>(null);
+    const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
 
     // Master data
     const [branches, setBranches] = useState<Branch[]>([]);
@@ -82,17 +87,16 @@ export default function PhysicalInventoryManufacturingModule() {
     const [isOffsettingModalOpen, setIsOffsettingModalOpen] = useState(false);
     const [offsetPairings, setOffsetPairings] = useState<MmOffsetPairing[]>([]);
 
-    const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
-    const [printableSheet, setPrintableSheet] = useState<MmPhysicalInventorySheet | null>(null);
-    const [printTargetLot, setPrintTargetLot] = useState<number | string | null>(null);
+    const [printPreview, setPrintPreview] = useState<{
+        data: PhysicalInventoryCountSheetData;
+        targetLot: number | string | null;
+    } | null>(null);
 
     const handleOpenPrintModal = async (sheet: MmPhysicalInventorySheet, filterLot?: number | string | null) => {
         try {
             setLoading(true);
-            const fullSheet = await fetchPhysicalInventorySheet(sheet.physical_inventory_id);
-            setPrintableSheet(fullSheet);
-            setPrintTargetLot(filterLot ?? null);
-            setIsPrintModalOpen(true);
+            const data = await fetchPhysicalInventoryCountSheet(sheet.physical_inventory_id);
+            setPrintPreview({ data, targetLot: filterLot ?? null });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Failed to load count sheet for printing";
             showToast(msg, "error");
@@ -283,77 +287,46 @@ export default function PhysicalInventoryManufacturingModule() {
         }
     };
 
-    const handleSaveInlineCount = async (detail: MmPhysicalInventoryDetail, newPhysCount: number | null) => {
-        if (!activeSheet) return;
-        const dId = detail.physical_inventory_detail_id || detail.id;
-        if (!dId) return;
+    function queueDraftWrite<T>(write: () => Promise<T>): Promise<T> {
+        const pending = draftWriteQueue.current.then(write);
+        draftWriteQueue.current = pending.then(() => undefined, () => undefined);
+        return pending;
+    }
 
+    async function persistDraftChanges(sheetId: number, changes: PhysicalInventoryDraftChanges) {
+        if (changes.headerRemarks !== undefined) {
+            await updatePhysicalInventoryHeader(sheetId, { remarks: changes.headerRemarks });
+        }
+        for (const { detailId, ...fields } of changes.detailUpdates) {
+            await updatePhysicalInventoryDetail(sheetId, detailId, fields);
+        }
+    }
+
+    const handleSaveInlineDetail = async (update: PhysicalInventoryDraftDetailUpdate) => {
+        const sheetId = activeSheet?.physical_inventory_id;
+        if (!sheetId) return;
         try {
-            setLoading(true);
-            await updatePhysicalInventoryDetail(activeSheet.physical_inventory_id, dId, {
-                physical_count: newPhysCount,
+            await queueDraftWrite(async () => {
+                await persistDraftChanges(sheetId, { detailUpdates: [update] });
+                const refreshed = await fetchPhysicalInventorySheet(sheetId);
+                setActiveSheet(current => current?.physical_inventory_id === sheetId ? refreshed : current);
             });
-            showToast("Physical count updated.");
-            const refreshed = await fetchPhysicalInventorySheet(activeSheet.physical_inventory_id);
-            setActiveSheet(refreshed);
-            await loadSheets();
+            showToast("Line item saved.");
         } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : "Failed to update physical count";
+            const msg = err instanceof Error ? err.message : "Failed to save the line item";
             showToast(msg, "error");
-        } finally {
-            setLoading(false);
         }
     };
 
-    const handleSaveInlineRemark = async (detail: MmPhysicalInventoryDetail, remarks: string) => {
-        if (!activeSheet) return;
-        const dId = detail.physical_inventory_detail_id || detail.id;
-        if (!dId) return;
-
-        try {
-            setLoading(true);
-            await updatePhysicalInventoryDetail(activeSheet.physical_inventory_id, dId, {
-                remarks: remarks.trim(),
-            });
-            showToast("Remarks updated.");
-            const refreshed = await fetchPhysicalInventorySheet(activeSheet.physical_inventory_id);
-            setActiveSheet(refreshed);
-            await loadSheets();
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : "Failed to update remarks";
-            showToast(msg, "error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleSaveDraftBatch = async (
-        headerPayload?: { remarks?: string },
-        modifiedCounts?: Array<{ detailId: number; physical_count: number | null }>,
-        modifiedRemarks?: Array<{ detailId: number; remarks: string }>
-    ) => {
+    const handleSaveDraftBatch = async (changes: PhysicalInventoryDraftChanges) => {
         if (!activeSheet) return;
         const sheetId = activeSheet.physical_inventory_id;
         try {
-            if (headerPayload?.remarks !== undefined) {
-                await updatePhysicalInventoryHeader(sheetId, { remarks: headerPayload.remarks });
-            }
-            if (modifiedCounts && modifiedCounts.length > 0) {
-                for (const item of modifiedCounts) {
-                    await updatePhysicalInventoryDetail(sheetId, item.detailId, {
-                        physical_count: item.physical_count,
-                    });
-                }
-            }
-            if (modifiedRemarks && modifiedRemarks.length > 0) {
-                for (const item of modifiedRemarks) {
-                    await updatePhysicalInventoryDetail(sheetId, item.detailId, {
-                        remarks: item.remarks,
-                    });
-                }
-            }
-            const refreshed = await fetchPhysicalInventorySheet(sheetId);
-            setActiveSheet(refreshed);
+            await queueDraftWrite(async () => {
+                await persistDraftChanges(sheetId, changes);
+                const refreshed = await fetchPhysicalInventorySheet(sheetId);
+                setActiveSheet(current => current?.physical_inventory_id === sheetId ? refreshed : current);
+            });
             showToast("Draft progress saved successfully.");
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Failed to save draft progress";
@@ -393,23 +366,29 @@ export default function PhysicalInventoryManufacturingModule() {
     };
 
     // Submit handler
-    const handleSubmitSheet = async (targetSheet?: MmPhysicalInventorySheet) => {
+    const handleSubmitSheet = async (targetSheet?: MmPhysicalInventorySheet, changes?: PhysicalInventoryDraftChanges): Promise<boolean> => {
         const sheetToSubmit = targetSheet || activeSheet;
-        if (!sheetToSubmit) return;
-        if (!window.confirm(`Submit Physical Inventory sheet ${sheetToSubmit.pi_no} for review?`)) return;
+        if (!sheetToSubmit) return false;
+        if (!window.confirm(`Submit Physical Inventory sheet ${sheetToSubmit.pi_no} for review?`)) return false;
 
+        const sheetId = sheetToSubmit.physical_inventory_id;
         try {
             setLoading(true);
-            await submitPhysicalInventorySheet(sheetToSubmit.physical_inventory_id);
-            const fullSheet = await fetchPhysicalInventorySheet(sheetToSubmit.physical_inventory_id);
-            showToast(`Physical Inventory ${fullSheet.pi_no} submitted for review.`);
-            if (activeSheet?.physical_inventory_id === fullSheet.physical_inventory_id) {
-                setActiveSheet(fullSheet);
-            }
+            const submitted = await queueDraftWrite(async () => {
+                if (changes) await persistDraftChanges(sheetId, changes);
+                return submitPhysicalInventorySheet(sheetId);
+            });
+            const fullSheet = await fetchPhysicalInventorySheet(sheetId).catch(() => null);
+            setActiveSheet(current => current?.physical_inventory_id === sheetId
+                ? fullSheet ?? { ...current, status: submitted.status }
+                : current);
+            showToast(`Physical Inventory ${sheetToSubmit.pi_no} submitted for review.`);
             await loadSheets();
+            return true;
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Failed to submit sheet";
             showToast(msg, "error");
+            return false;
         } finally {
             setLoading(false);
         }
@@ -582,11 +561,10 @@ export default function PhysicalInventoryManufacturingModule() {
                         setIsDetailModalOpen(true);
                     }}
                     onRemoveDetail={handleRemoveDetail}
-                    onSaveInlineCount={handleSaveInlineCount}
-                    onSaveInlineRemark={handleSaveInlineRemark}
+                    onSaveInlineDetail={handleSaveInlineDetail}
                     onSaveDraftBatch={handleSaveDraftBatch}
                     onOpenOffsettingModal={() => setIsOffsettingModalOpen(true)}
-                    onSubmit={() => handleSubmitSheet()}
+                    onSubmit={(changes) => handleSubmitSheet(undefined, changes)}
                     onReturnToDraft={() => handleReturnToDraft()}
                     onPrintCountSheet={handleOpenPrintModal}
                 />
@@ -669,15 +647,11 @@ export default function PhysicalInventoryManufacturingModule() {
             />
 
             {/* Printable Count Sheet Modal */}
-            {isPrintModalOpen && printableSheet && (
+            {printPreview && (
                 <PrintableManufacturingCountSheet
-                    sheet={printableSheet}
-                    targetLot={printTargetLot}
-                    onClose={() => {
-                        setIsPrintModalOpen(false);
-                        setPrintableSheet(null);
-                        setPrintTargetLot(null);
-                    }}
+                    {...printPreview.data}
+                    targetLot={printPreview.targetLot}
+                    onClose={() => setPrintPreview(null)}
                 />
             )}
         </div>

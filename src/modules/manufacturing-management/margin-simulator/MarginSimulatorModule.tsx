@@ -3,7 +3,9 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Sliders, RefreshCw, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-import { fetchProducts, fetchVersions, fetchBOMDetails } from "@/modules/manufacturing-management/finished-goods-master/services/finished-goods-api";
+import { fetchProducts, fetchVersions, fetchBOMDetails, fetchUnits, saveBOMDetails } from "@/modules/manufacturing-management/finished-goods-master/services/finished-goods-api";
+import { materialTypeFromProduct } from "@/modules/manufacturing-management/finished-goods-master/material-types";
+import type { ProductOverhead, RouteStep } from "@/modules/manufacturing-management/finished-goods-master/types";
 
 // Re-using mock product model internally
 interface BOMItem {
@@ -31,11 +33,16 @@ interface Product {
     routingCost: number;
     has_versions?: boolean;
     unitOfMeasurementCount?: number;
+    maintainingQuantity?: number | null;
+    customOverhead?: number;
+    status?: string;
+    productImage?: string;
     bomId?: number;
     versionId?: number;
     versionName?: string;
     routings?: unknown[];
     overheads?: unknown[];
+    bomLoaded?: boolean;
     description?: string;
     barcode?: string;
     densityFactor?: number;
@@ -152,9 +159,22 @@ export default function MarginSimulatorModule() {
                         expectedYieldPercent: 100, // standard fallback
                         targetSellingPrice: p.targetSellingPrice,
                         bom: [],
+                        bomLoaded: false,
                         routingCost: 0,
                         has_versions: p.has_versions,
-                        unitOfMeasurementCount: p.unit_of_measurement_count
+                        unitOfMeasurementCount: p.unit_of_measurement_count,
+                        maintainingQuantity: p.maintaining_quantity ?? 0,
+                        status: p.status,
+                        productImage: p.product_image || "",
+                        description: p.description || "",
+                        barcode: p.barcode || "",
+                        densityFactor: p.densityFactor || 1.0,
+                        product_brand: p.product_brand,
+                        product_category: p.product_category,
+                        product_class: p.product_class,
+                        product_segment: p.product_segment,
+                        product_section: p.product_section,
+                        product_shelf_life: p.product_shelf_life
                     }));
 
                     // Prepend DB products to the mock products so DB items show up first
@@ -192,8 +212,8 @@ export default function MarginSimulatorModule() {
     const [targetPrice, setTargetPrice] = useState(initialProduct.targetSellingPrice);
     const [savingCurrent, setSavingCurrent] = useState(false);
 
-    // Track which product's sandbox parameters are currently in state to prevent cross-product overwrite on load
-    const loadedProductIdRef = useRef<string>("");
+    // Increment this when the selection changes so a slow request cannot overwrite the new product.
+    const bomRequestIdRef = useRef(0);
 
     // Fetch BOM recipe dynamically when selectedId changes
     useEffect(() => {
@@ -201,6 +221,9 @@ export default function MarginSimulatorModule() {
 
         const currentProd = products.find(p => p.id === selectedId);
         if (!currentProd) return;
+
+        const requestId = ++bomRequestIdRef.current;
+        const isCurrentRequest = () => bomRequestIdRef.current === requestId;
 
         const applySandboxState = (bomItems: BOMItem[], standardYield: number, standardPrice: number) => {
             setSimYield(standardYield);
@@ -215,11 +238,11 @@ export default function MarginSimulatorModule() {
             });
             setPriceOverrides(initialPrices);
             setImportedOverrides(initialImported);
-            loadedProductIdRef.current = selectedId;
         };
 
         // If mock product, load standard mock details directly
         if (currentProd.id.startsWith("prod-")) {
+            setLoadingBOM(false);
             applySandboxState(
                 currentProd.bom,
                 Number(currentProd.expectedYieldPercent) || 100,
@@ -228,8 +251,9 @@ export default function MarginSimulatorModule() {
             return;
         }
 
-        // Database product: Use cached BOM if already loaded to avoid redundant network calls
-        if (currentProd.bom && currentProd.bom.length > 0) {
+        // Database product: use the loaded BOM, including a valid empty BOM, to avoid refetch loops
+        if (currentProd.bomLoaded || (currentProd.bom && currentProd.bom.length > 0)) {
+            setLoadingBOM(false);
             applySandboxState(
                 currentProd.bom,
                 Number(currentProd.expectedYieldPercent) || 100,
@@ -243,26 +267,29 @@ export default function MarginSimulatorModule() {
             setLoadingBOM(true);
             try {
                 const versions = await fetchVersions(Number(currentProd!.id));
+                if (!isCurrentRequest()) return;
                 if (!versions || versions.length === 0) {
-                    setProducts(prev => prev.map(p => p.id === currentProd!.id ? { ...p, bom: [], routingCost: 0 } : p));
+                    setProducts(prev => prev.map(p => p.id === currentProd!.id ? { ...p, bom: [], bomLoaded: true, routingCost: 0 } : p));
                     applySandboxState([], 100, currentProd!.targetSellingPrice);
                     return;
                 }
                 // Fetch details for the first version (latest/active version)
                 const activeVersion = versions[0];
                 const details = await fetchBOMDetails(Number(currentProd!.id), activeVersion.version_id);
+                if (!isCurrentRequest()) return;
                 if (details) {
                     const ingredients = details.routes?.flatMap(r => r.bom_items || []) || [];
+                    const productUomById = new Map(products.map(p => [p.id, p.baseUom]));
                     const mappedBom: BOMItem[] = ingredients.map(ing => ({
                         id: String(ing.id),
                         productId: ing.product_id,
                         name: ing.product_name || `Component #${ing.product_id}`,
                         type: "raw_material" as const,
-                        quantity: ing.quantity_required,
-                        uom: String(ing.unit_of_measurement || "pc"),
+                        quantity: Number(ing.quantity_required) || 0,
+                        uom: productUomById.get(String(ing.product_id)) || String(ing.unit_of_measurement || "pc"),
                         uomId: typeof ing.unit_of_measurement === "number" ? ing.unit_of_measurement : 0,
-                        wastagePercent: ing.wastage_factor_percentage || 0,
-                        landedCost: ing.cost_per_unit || 0,
+                        wastagePercent: Number(ing.wastage_factor_percentage) || 0,
+                        landedCost: Number(ing.cost_per_unit) || 0,
                         foreignSourced: false,
                         isForeign: ing.is_foreign || false
                     }));
@@ -275,10 +302,12 @@ export default function MarginSimulatorModule() {
                         ...p,
                         expectedYieldPercent: Number(details.expected_yield_percentage) || 100,
                         bom: mappedBom,
+                        bomLoaded: true,
                         routingCost: calculatedRoutingCost,
                         bomId: details.version_id,
                         versionId: details.version_id,
                         versionName: details.version_name,
+                        customOverhead: Number(details.custom_overhead ?? 0),
                         routings: details.routes || [],
                         overheads: (details as unknown as { overheads?: unknown[] }).overheads || []
                     } : p));
@@ -289,14 +318,16 @@ export default function MarginSimulatorModule() {
                         currentProd!.targetSellingPrice
                     );
                 } else {
-                    setProducts(prev => prev.map(p => p.id === currentProd!.id ? { ...p, bom: [], routingCost: 0 } : p));
+                    setProducts(prev => prev.map(p => p.id === currentProd!.id ? { ...p, bom: [], bomLoaded: true, routingCost: 0 } : p));
                     applySandboxState([], 100, currentProd!.targetSellingPrice);
                 }
             } catch (err) {
-                console.error("Error loading simulator BOM:", err);
-                toast.error("Failed to load BOM details for the selected product");
+                if (isCurrentRequest()) {
+                    console.error("Error loading simulator BOM:", err);
+                    toast.error("Failed to load BOM details for the selected product");
+                }
             } finally {
-                setLoadingBOM(false);
+                if (isCurrentRequest()) setLoadingBOM(false);
             }
         }
         loadBOM();
@@ -305,6 +336,8 @@ export default function MarginSimulatorModule() {
 
 
     const handleProductChange = (productId: string) => {
+        // Invalidate any in-flight BOM request before changing the selection.
+        bomRequestIdRef.current += 1;
         setSelectedId(productId);
     };
 
@@ -318,6 +351,69 @@ export default function MarginSimulatorModule() {
         });
     };
 
+    async function buildSimulatorBomPayload(versionId: number, versionName: string, status: string) {
+        const units = await fetchUnits();
+        const unitId = units.find(unit =>
+            unit.unit_shortcut === product.baseUom || unit.unit_name === product.baseUom
+        )?.unit_id;
+        if (!unitId) throw new Error(`Base UOM "${product.baseUom}" could not be resolved.`);
+
+        const routes: RouteStep[] = ((product.routings as RouteStep[] | undefined) ?? []).map(route => ({
+            ...route,
+            bom_items: (route.bom_items ?? []).map(item => {
+                const itemOverride = product.bom.find(bomItem => bomItem.id === String(item.id));
+                const cost = itemOverride
+                    ? (priceOverrides[itemOverride.id] ?? itemOverride.landedCost)
+                    : Number(item.cost_per_unit ?? 0);
+                const isForeign = itemOverride
+                    ? (importedOverrides[itemOverride.id] ?? itemOverride.foreignSourced ?? itemOverride.isForeign ?? false)
+                    : Boolean(item.is_foreign);
+                return {
+                    ...item,
+                    quantity_required: itemOverride?.quantity ?? Number(item.quantity_required ?? 0),
+                    unit_of_measurement: itemOverride?.uomId || item.unit_of_measurement,
+                    wastage_factor_percentage: itemOverride?.wastagePercent ?? Number(item.wastage_factor_percentage ?? 0),
+                    cost_per_unit: cost,
+                    is_foreign: isForeign,
+                    material_type: item.material_type ?? materialTypeFromProduct(item.product_type, item.has_versions),
+                };
+            }),
+        }));
+
+        return {
+            productId: Number(product.id),
+            versionId,
+            details: {
+                version_name: versionName,
+                base_quantity: 1,
+                uom_id: unitId,
+                expected_yield_percentage: simYield,
+                custom_overhead: product.customOverhead ?? 0,
+                status,
+                title: product.title,
+                sku: product.sku,
+                barcode: product.barcode || "",
+                baseUom: product.baseUom,
+                targetSellingPrice: targetPrice,
+                densityFactor: product.densityFactor || 1,
+                productBrand: product.product_brand,
+                productCategory: product.product_category,
+                productClass: product.product_class,
+                productSegment: product.product_segment,
+                productSection: product.product_section,
+                productShelfLife: product.product_shelf_life,
+                unitOfMeasurementCount: product.unitOfMeasurementCount ?? 1,
+                unit_of_measurement: unitId,
+                maintaining_quantity: product.maintainingQuantity ?? 0,
+                productImage: product.productImage || undefined,
+                has_bom: true,
+                description: product.description || "",
+            },
+            routes,
+            overheads: (product.overheads ?? []) as ProductOverhead[],
+        };
+    }
+
     const handleSaveCurrentVersion = async () => {
         if (!product.bomId) {
             toast.error("No active BOM version to save to.");
@@ -326,54 +422,20 @@ export default function MarginSimulatorModule() {
 
         setSavingCurrent(true);
         try {
-            // 1. Format ingredients with overrides and updated imported settings
-            const updatedIngredients = product.bom.map(item => ({
-                id: item.id,
-                productId: item.productId,
-                name: item.name,
-                type: item.type,
-                quantity: item.quantity,
-                uom: item.uom,
-                uomId: item.uomId,
-                wastagePercent: item.wastagePercent,
-                landedCost: priceOverrides[item.id] !== undefined ? priceOverrides[item.id] : item.landedCost,
-                isForeign: importedOverrides[item.id] !== undefined ? importedOverrides[item.id] : (item.isForeign || item.foreignSourced || false)
-            }));
-
-            // 2. Format details payload
-            const details = {
-                title: product.title,
-                sku: product.sku,
-                barcode: product.barcode || "",
-                baseUom: product.baseUom,
-                expectedYieldPercent: simYield,
-                targetSellingPrice: targetPrice,
-                densityFactor: product.densityFactor || 1.0,
-                productBrand: product.product_brand,
-                productCategory: product.product_category,
-                productClass: product.product_class,
-                productSegment: product.product_segment,
-                productSection: product.product_section,
-                productShelfLife: product.product_shelf_life,
-                description: product.description || ""
-            };
-
-            // 3. Save details, ingredients, and routings to the current BOM version
-            const saveRes = await fetch("/api/manufacturing/finished-goods/bom-details", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    productId: Number(product.id),
-                    bomId: product.bomId,
-                    details,
-                    ingredients: updatedIngredients,
-                    routings: product.routings || [],
-                    overheads: product.overheads || []
-                })
-            });
-
-            if (!saveRes.ok) {
-                throw new Error("Failed to save BOM overrides to the current version");
+            const payload = await buildSimulatorBomPayload(
+                product.bomId,
+                product.versionName || "Current",
+                product.status || "Active",
+            );
+            const result = await saveBOMDetails(
+                payload.productId,
+                payload.versionId,
+                payload.details,
+                payload.routes,
+                payload.overheads,
+            );
+            if (!result.success) {
+                throw new Error("The BOM save was not confirmed by the server.");
             }
 
             toast.success(`Successfully saved simulator data to active version ${product.versionName || ""}!`);
@@ -389,9 +451,13 @@ export default function MarginSimulatorModule() {
                     expectedYieldPercent: 100,
                     targetSellingPrice: p.targetSellingPrice,
                     bom: [],
+                    bomLoaded: false,
                     routingCost: 0,
                     has_versions: p.has_versions,
                     unitOfMeasurementCount: p.unit_of_measurement_count,
+                    maintainingQuantity: p.maintaining_quantity ?? 0,
+                    status: p.status,
+                    productImage: p.product_image || "",
                     description: p.description || "",
                     barcode: p.barcode || "",
                     densityFactor: p.densityFactor || 1.0,
@@ -408,12 +474,8 @@ export default function MarginSimulatorModule() {
                         return {
                             ...p,
                             expectedYieldPercent: simYield,
-                            bom: product.bom.map(item => ({
-                                ...item,
-                                landedCost: priceOverrides[item.id] !== undefined ? priceOverrides[item.id] : item.landedCost,
-                                foreignSourced: importedOverrides[item.id] !== undefined ? importedOverrides[item.id] : (item.foreignSourced || item.isForeign || false),
-                                isForeign: importedOverrides[item.id] !== undefined ? importedOverrides[item.id] : (item.foreignSourced || item.isForeign || false)
-                            })),
+                            bomLoaded: false,
+                            bom: [],
                             routingCost: product.routingCost,
                             bomId: product.bomId,
                             versionId: product.versionId,
@@ -443,16 +505,18 @@ export default function MarginSimulatorModule() {
 
         setPromoting(true);
         try {
-            // 1. Create the new version (clones from base BOM)
+            // 1. Create the new active version, cloning the current routes and BOM.
             const verRes = await fetch("/api/manufacturing/finished-goods/versions", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     productId: Number(product.id),
-                    baseBomId: product.bomId,
+                    baseVersionId: product.bomId,
                     expectedYield: simYield,
-                    bomName: `BOM v${newVersionName.trim()} for ${product.title}`,
-                    versionName: newVersionName.trim()
+                    versionName: newVersionName.trim(),
+                    baseQuantity: 1,
+                    status: "Active",
+                    is_primary: true
                 })
             });
 
@@ -462,61 +526,22 @@ export default function MarginSimulatorModule() {
             }
 
             const verJson = await verRes.json();
-            if (!verJson.success || !verJson.bom) {
-                throw new Error("API did not return success or new BOM data.");
+            const newVersionId = Number(verJson.version?.version_id);
+            if (!verJson.success || !Number.isSafeInteger(newVersionId) || newVersionId <= 0) {
+                throw new Error("API did not return a valid new version.");
             }
 
-            const newBom = verJson.bom;
-            const newBomId = newBom.bom_id;
-
-            // 2. Format ingredients with overrides and updated imported settings
-            const updatedIngredients = product.bom.map(item => ({
-                id: item.id,
-                productId: item.productId,
-                name: item.name,
-                type: item.type,
-                quantity: item.quantity,
-                uom: item.uom,
-                uomId: item.uomId,
-                wastagePercent: item.wastagePercent,
-                landedCost: priceOverrides[item.id] !== undefined ? priceOverrides[item.id] : item.landedCost,
-                isForeign: importedOverrides[item.id] !== undefined ? importedOverrides[item.id] : (item.isForeign || item.foreignSourced || false)
-            }));
-
-            // 3. Format details payload
-            const details = {
-                title: product.title,
-                sku: product.sku,
-                barcode: product.barcode || "",
-                baseUom: product.baseUom,
-                expectedYieldPercent: simYield,
-                targetSellingPrice: targetPrice,
-                densityFactor: product.densityFactor || 1.0,
-                productBrand: product.product_brand,
-                productCategory: product.product_category,
-                productClass: product.product_class,
-                productSegment: product.product_segment,
-                productSection: product.product_section,
-                productShelfLife: product.product_shelf_life,
-                description: product.description || ""
-            };
-
-            // 4. Save details, ingredients, and routings to the new BOM version
-            const saveRes = await fetch("/api/manufacturing/finished-goods/bom-details", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    productId: Number(product.id),
-                    bomId: newBomId,
-                    details,
-                    ingredients: updatedIngredients,
-                    routings: product.routings || [],
-                    overheads: product.overheads || []
-                })
-            });
-
-            if (!saveRes.ok) {
-                throw new Error("Failed to save BOM overrides to the new version");
+            // 2. Apply the simulator overrides to the new version.
+            const payload = await buildSimulatorBomPayload(newVersionId, newVersionName.trim(), "Active");
+            const result = await saveBOMDetails(
+                payload.productId,
+                payload.versionId,
+                payload.details,
+                payload.routes,
+                payload.overheads,
+            );
+            if (!result.success) {
+                throw new Error("The promoted BOM was not confirmed by the server.");
             }
 
             toast.success(`Successfully promoted simulation to version ${newVersionName.trim()}!`);
@@ -534,9 +559,13 @@ export default function MarginSimulatorModule() {
                     expectedYieldPercent: 100,
                     targetSellingPrice: p.targetSellingPrice,
                     bom: [],
+                    bomLoaded: false,
                     routingCost: 0,
                     has_versions: p.has_versions,
                     unitOfMeasurementCount: p.unit_of_measurement_count,
+                    maintainingQuantity: p.maintaining_quantity ?? 0,
+                    status: p.status,
+                    productImage: p.product_image || "",
                     description: p.description || "",
                     barcode: p.barcode || "",
                     densityFactor: p.densityFactor || 1.0,
@@ -868,7 +897,7 @@ export default function MarginSimulatorModule() {
                                                             </div>
                                                         </td>
                                                         <td className="p-3 text-center text-muted-foreground">{item.uom}</td>
-                                                        <td className="p-3 font-medium">₱{item.landedCost.toFixed(2)}</td>
+                                                        <td className="p-3 font-medium">₱{Number(item.landedCost).toFixed(2)}</td>
                                                         <td className="p-3 w-40">
                                                             <div className="relative">
                                                                 <span className="absolute left-1.5 top-1.5 text-[10px] text-muted-foreground">₱</span>
