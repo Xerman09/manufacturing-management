@@ -103,7 +103,11 @@ export const ApprovalHistoryAudit: React.FC = () => {
                                     </div>
 
                                     <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                                        {new Date(entry.createdAt).toLocaleString()}
+                                        {(() => {
+                                            if (!entry.createdAt) return "-";
+                                            const d = new Date(entry.createdAt);
+                                            return isNaN(d.getTime()) ? "-" : d.toLocaleString();
+                                        })()}
                                     </span>
                                 </div>
                             );

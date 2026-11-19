@@ -209,7 +209,9 @@ export const SupplierSummaryTable: React.FC<SupplierSummaryTableProps> = ({ supp
                                             )}
                                         </td>
                                         <td className="py-3 px-3 text-center font-mono text-[11px]">
-                                            {res.isExpired ? (
+                                            {!bid.validUntil ? (
+                                                <span className="text-muted-foreground">-</span>
+                                            ) : res.isExpired ? (
                                                 <span className="text-rose-600 font-bold">Expired</span>
                                             ) : res.expiresInDays <= 7 ? (
                                                 <span className="text-amber-600 font-bold">{res.expiresInDays}d left</span>

@@ -306,7 +306,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                                     Full Project Excel (.xlsx)
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                    onClick={() => exportFullProjectTemplate(currentProject || undefined)}
+                                    onClick={() => exportFullProjectTemplate()}
                                     className="cursor-pointer text-xs gap-2"
                                 >
                                     <FileSpreadsheet className="h-4 w-4 text-teal-600" />

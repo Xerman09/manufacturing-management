@@ -136,14 +136,7 @@ export async function exportRfqToExcel(project: RfqProject, options?: DynamicExp
         fgColor: { argb: "FFE2E8F0" },
     };
 
-    const ratesToExport = filteredProject.exchangeRates && filteredProject.exchangeRates.length > 0
-        ? filteredProject.exchangeRates
-        : [
-            { currencyCode: "USD", rateToComparison: 56.50 },
-            { currencyCode: "EUR", rateToComparison: 61.20 },
-            { currencyCode: "CNY", rateToComparison: 7.85 },
-            { currencyCode: "JPY", rateToComparison: 0.38 },
-        ];
+    const ratesToExport = filteredProject.exchangeRates || [];
 
     ratesToExport.forEach((r) => {
         ratesSheet.addRow([r.currencyCode, r.rateToComparison]);
@@ -1142,126 +1135,179 @@ export function exportRfqToJson(project: RfqProject, options?: DynamicExportOpti
 export const exportRfqToCsv = exportRfqBidsToCsv;
 
 /**
- * Generates and downloads a clean, full-project template Excel workbook (.xlsx)
- * pre-populated with project setup, exchange rates, pass/fail quality criteria,
- * items with specifications, and vendor quotation columns.
+ * Generates and downloads a clean, blank full-project template Excel workbook (.xlsx)
+ * with the 5 canonical input sheets (Project Setup, Exchange Rates, Quality Criteria,
+ * Requested Items, and Bids & Quotations) containing only headers, ready for user data entry.
  */
 export async function exportFullProjectTemplate(project?: RfqProject): Promise<void> {
-    const templateProject: RfqProject = project || {
-        id: "rfq-template",
-        rfqTitle: "Procurement Canvass Project Template",
-        rfqReference: "RFQ-2026-CANVASS-TEMPLATE",
-        roundNo: 1,
-        comparisonCurrency: "PHP",
-        budget: 5000000,
-        notes: "Detailed project notes and canvass guidelines.",
-        targetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        fxRiskBufferPct: 3,
-        costOfMoneyPctPerYear: 8,
-        defaultVatPct: 12,
-        countVatAsCost: true,
-        calcCustomsAuto: true,
-        scoringWeightPricePct: 50,
-        scoringWeightQualityPct: 35,
-        scoringWeightLeadTimePct: 15,
-        status: "Draft",
-        version: 1,
-        preparedBy: "",
-        preparedByTitle: "Procurement Specialist",
-        reviewedBy: "",
-        reviewedByTitle: "Procurement Lead",
-        approvedBy: "",
-        approvedByTitle: "Operations Director",
-        justification: "",
-        awardStrategy: "LOWEST_TOTAL_OPTIMIZED",
-        items: [
-            {
-                id: "item-1",
-                itemName: "LED panel light 60x60",
-                specifications: "40W, 4000lm, 4000K Natural White, CRI>80, IP40",
-                quantity: 1200,
-                uom: "PCS",
-                targetUnitPrice: 1350,
-                hsCode: "9405.11",
-                dutyPct: 10,
-                weightPerUnitKg: 3.5,
-                cbmPerUnit: 0.024,
-                sortOrder: 1,
-            },
-            {
-                id: "item-2",
-                itemName: "LED driver",
-                specifications: "Constant current 1050mA, 42V DC, isolated, PF>0.95",
-                quantity: 1200,
-                uom: "PCS",
-                targetUnitPrice: 380,
-                hsCode: "8504.40",
-                dutyPct: 3,
-                weightPerUnitKg: 0.3,
-                cbmPerUnit: 0.001,
-                sortOrder: 2,
-            },
-        ],
-        qualityCriteria: [
-            {
-                id: "crit-1",
-                criterionType: "PASS_FAIL",
-                criterionName: "ISO 9001:2015 / CE / RoHS Certification",
-                weightPct: 0,
-                sortOrder: 1,
-            },
-            {
-                id: "crit-2",
-                criterionType: "PASS_FAIL",
-                criterionName: "Certificate of Analysis (COA) / Factory Test Report per batch",
-                weightPct: 0,
-                sortOrder: 2,
-            },
-            {
-                id: "crit-3",
-                criterionType: "SCORED",
-                criterionName: "Technical Specification Compliance & Photometric Test",
-                weightPct: 40,
-                sortOrder: 3,
-            },
-            {
-                id: "crit-4",
-                criterionType: "SCORED",
-                criterionName: "Warranty Period & After-Sales Replacement Commitment",
-                weightPct: 30,
-                sortOrder: 4,
-            },
-            {
-                id: "crit-5",
-                criterionType: "SCORED",
-                criterionName: "Manufacturing Capacity & Delivery Track Record",
-                weightPct: 30,
-                sortOrder: 5,
-            },
-        ],
-        exchangeRates: [
-            { currencyCode: "USD", rateToComparison: 56.50 },
-            { currencyCode: "EUR", rateToComparison: 61.20 },
-            { currencyCode: "CNY", rateToComparison: 7.85 },
-            { currencyCode: "JPY", rateToComparison: 0.38 },
-        ],
-        customsRates: {
-            cdsCompCurr: 100,
-            birDstCompCurr: 30,
-            containerSecurityUsd: 5,
-            arrastre20ftCompCurr: 4738,
-            arrastre40ftCompCurr: 10869,
-            wharfage20ftCompCurr: 519.35,
-            wharfage40ftCompCurr: 779.05,
-            lclArrastrePerRtCompCurr: 149,
-            lclWharfagePerRtCompCurr: 30.55,
-            lcBankChargePct: 0.125,
-        },
-        ipcBrackets: [],
-        bids: [],
-        awards: [],
-        approvalHistory: [],
+    void project;
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "VOS ERP - Supplier Comparison";
+    workbook.created = new Date();
+
+    // =========================================================================
+    // SHEET 1: Project Setup (Configuration parameters with blank user fields)
+    // =========================================================================
+    const setupSheet = workbook.addWorksheet("Project Setup", {
+        views: [{ showGridLines: true }],
+    });
+    setupSheet.addRow(["PROJECT / RFQ CONFIGURATION & SETUP"]).font = { size: 14, bold: true };
+    const setupHeader = setupSheet.addRow(["Parameter", "Configured Value", "Description / Notes"]);
+    setupHeader.font = { bold: true };
+    setupHeader.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" },
     };
 
-    await exportRfqToExcel(templateProject);
+    const setupParams: [string, string | number, string][] = [
+        ["Project / RFQ Title", "", "Official procurement title"],
+        ["Reference No", "", "RFQ tracking reference number"],
+        ["Target Date", "", "Required delivery or canvass closing date (YYYY-MM-DD)"],
+        ["Approved Budget", "", "Approved budget amount in comparison currency"],
+        ["Comparison Currency", "PHP", "Base evaluation currency (e.g. PHP, USD)"],
+        ["Project Status", "Draft", "Current workflow stage"],
+        ["Notes", "", "Procurement notes and specifications"],
+        ["FX Risk Buffer (%)", 3, "Buffer applied on foreign currency CIF for hedging"],
+        ["Cost of Money (% / yr)", 8, "Annual interest rate applied to payment terms"],
+        ["Default VAT (%)", 12, "Standard VAT percentage"],
+        ["Count VAT as Cost", "Yes", "Whether VAT is factored into landed cost (Yes/No)"],
+        ["Calc Customs Auto", "Yes", "Automatic calculation of Philippine customs & arrastre fees (Yes/No)"],
+        ["Scoring Weight Price (%)", 50, "Weight percentage for price evaluation"],
+        ["Scoring Weight Quality (%)", 35, "Weight percentage for technical & quality evaluation"],
+        ["Scoring Weight Lead Time (%)", 15, "Weight percentage for lead time evaluation"],
+        ["Award Strategy", "MANUAL", "Selected award optimization method (MANUAL / LOWEST_TOTAL_OPTIMIZED)"],
+        ["Prepared By", "", "Name of procurement specialist"],
+        ["Prepared By Title", "Procurement Specialist", "Position title"],
+        ["Reviewed By", "", "Name of technical reviewer"],
+        ["Reviewed By Title", "Procurement Lead", "Position title"],
+        ["Approved By", "", "Name of approving officer"],
+        ["Approved By Title", "Operations Director", "Position title"],
+        ["Justification", "", "Executive justification for award"],
+        ["Customs CDS Fee", 100, "Customs Entry Processing Fee"],
+        ["Customs BIR DST", 30, "Documentary Stamp Tax"],
+        ["Container Security (USD)", 5, "Container security charge in USD"],
+        ["Arrastre 20ft", 4738, "20ft container arrastre charge"],
+        ["Arrastre 40ft", 10869, "40ft container arrastre charge"],
+        ["Wharfage 20ft", 519.35, "20ft container wharfage charge"],
+        ["Wharfage 40ft", 779.05, "40ft container wharfage charge"],
+        ["LCL Arrastre / RT", 149, "LCL arrastre rate per revenue ton"],
+        ["LCL Wharfage / RT", 30.55, "LCL wharfage rate per revenue ton"],
+        ["LC Bank Charge (%)", 0.125, "Bank charge on letter of credit"],
+    ];
+
+    setupParams.forEach(([param, val, desc]) => {
+        setupSheet.addRow([param, val, desc]);
+    });
+    setupSheet.columns = [{ width: 28 }, { width: 38 }, { width: 45 }];
+
+    // =========================================================================
+    // SHEET 2: Exchange Rates (Headers only)
+    // =========================================================================
+    const ratesSheet = workbook.addWorksheet("Exchange Rates", {
+        views: [{ showGridLines: true }],
+    });
+    ratesSheet.addRow(["EVALUATION EXCHANGE RATES"]).font = { size: 14, bold: true };
+    const ratesHeader = ratesSheet.addRow([
+        "Currency Code",
+        "Rate to Comparison Currency (PHP)",
+    ]);
+    ratesHeader.font = { bold: true };
+    ratesHeader.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" },
+    };
+    ratesSheet.columns = [{ width: 18 }, { width: 36 }];
+
+    // =========================================================================
+    // SHEET 3: Quality Criteria (Headers only)
+    // =========================================================================
+    const critSheet = workbook.addWorksheet("Quality Criteria", {
+        views: [{ showGridLines: true }],
+    });
+    critSheet.addRow(["QUALITY CRITERIA & MANDATORY REQUIREMENTS (1.5)"]).font = { size: 14, bold: true };
+    const critHeader = critSheet.addRow([
+        "Criterion Type",
+        "Criterion Name",
+        "Weight (%)",
+        "Sort Order",
+        "Evaluation Rule",
+    ]);
+    critHeader.font = { bold: true };
+    critHeader.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" },
+    };
+    critSheet.columns = [{ width: 18 }, { width: 40 }, { width: 14 }, { width: 12 }, { width: 45 }];
+
+    // =========================================================================
+    // SHEET 4: Requested Items (Headers only)
+    // =========================================================================
+    const itemsSheet = workbook.addWorksheet("Requested Items", {
+        views: [{ showGridLines: true }],
+    });
+    itemsSheet.addRow(["REQUESTED PROCUREMENT ITEMS & SPECIFICATIONS"]).font = { size: 14, bold: true };
+    const itemsHeader = itemsSheet.addRow([
+        "#",
+        "Item Name",
+        "Specifications",
+        "Quantity",
+        "UOM",
+        "Target Unit Price",
+        "HS Code",
+        "Duty %",
+        "Weight (kg/unit)",
+        "Volume (cbm/unit)",
+        "Product ID",
+        "Template ID",
+        "Variant ID",
+    ]);
+    itemsHeader.font = { bold: true };
+    itemsHeader.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE2E8F0" },
+    };
+    itemsSheet.columns = [
+        { width: 6 },
+        { width: 28 },
+        { width: 35 },
+        { width: 12 },
+        { width: 10 },
+        { width: 18 },
+        { width: 14 },
+        { width: 10 },
+        { width: 16 },
+        { width: 16 },
+        { width: 14 },
+        { width: 14 },
+        { width: 14 },
+    ];
+
+    // =========================================================================
+    // SHEET 5: Bids & Quotations (Headers only)
+    // =========================================================================
+    const bidsSheet = workbook.addWorksheet("Bids & Quotations", {
+        views: [{ showGridLines: true }],
+    });
+    const bidsHeaderRow = bidsSheet.addRow([...BIDS_CANONICAL_COLUMNS]);
+    bidsHeaderRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    bidsHeaderRow.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF1E293B" }, // Slate-800
+    };
+    bidsSheet.columns.forEach((col, idx) => {
+        const headerText = BIDS_CANONICAL_COLUMNS[idx] || "";
+        col.width = Math.max(headerText.length + 4, 12);
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    saveAs(blob, "Supplier-Bid-Full-Project-Template.xlsx");
 }

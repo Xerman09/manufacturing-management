@@ -20,6 +20,7 @@ export const ScoringWeightsControls: React.FC<ScoringWeightsControlsProps> = ({
 }) => {
     const { currentProject, updateProject } = useBidComparisonStore();
 
+    const isLocked = currentProject?.status === "Submitted" || currentProject?.status === "Approved";
     const wP = currentProject?.scoringWeightPricePct ?? 50;
     const wQ = currentProject?.scoringWeightQualityPct ?? 35;
     const wL = currentProject?.scoringWeightLeadTimePct ?? 15;
@@ -109,6 +110,7 @@ export const ScoringWeightsControls: React.FC<ScoringWeightsControlsProps> = ({
                             
                         </div>
                         <Slider
+                            disabled={isLocked}
                             value={[localWP]}
                             onValueChange={([val]) => {
                                 setLocalWP(val);
@@ -134,6 +136,7 @@ export const ScoringWeightsControls: React.FC<ScoringWeightsControlsProps> = ({
                              
                         </div>
                         <Slider
+                            disabled={isLocked}
                             value={[localWQ]}
                             onValueChange={([val]) => {
                                 setLocalWQ(val);
@@ -159,6 +162,7 @@ export const ScoringWeightsControls: React.FC<ScoringWeightsControlsProps> = ({
                              
                         </div>
                         <Slider
+                            disabled={isLocked}
                             value={[localWL]}
                             onValueChange={([val]) => {
                                 setLocalWL(val);

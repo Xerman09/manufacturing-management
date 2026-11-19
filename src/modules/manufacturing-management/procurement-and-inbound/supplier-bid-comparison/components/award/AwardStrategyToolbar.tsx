@@ -35,7 +35,13 @@ export const AwardStrategyToolbar: React.FC = () => {
         const res = summary.results[recBidId];
         const bid = currentProject.bids.find((b) => b.id === recBidId);
 
-        const newAwards: ItemAward[] = items.map((item) => {
+        const quotedItems = items.filter((item) => res.items[item.id]?.hasQuote);
+        if (quotedItems.length === 0) {
+            toast.error(`${bid?.supplierName || "Recommended supplier"} has no quoted items to award.`);
+            return;
+        }
+
+        const newAwards: ItemAward[] = quotedItems.map((item) => {
             const breakdown = res.items[item.id];
             return {
                 id: "award-" + item.id,
@@ -52,7 +58,12 @@ export const AwardStrategyToolbar: React.FC = () => {
             awards: newAwards,
             awardStrategy: "ALL_RECOMMENDED",
         }));
-        toast.success(`Awarded all items to ${bid?.supplierName}`);
+
+        if (quotedItems.length < items.length) {
+            toast.warning(`Awarded ${quotedItems.length} of ${items.length} items to ${bid?.supplierName} (unquoted items left unawarded).`);
+        } else {
+            toast.success(`Awarded all items to ${bid?.supplierName}`);
+        }
     };
 
     // 2. Lowest Total (Optimized Split Award)

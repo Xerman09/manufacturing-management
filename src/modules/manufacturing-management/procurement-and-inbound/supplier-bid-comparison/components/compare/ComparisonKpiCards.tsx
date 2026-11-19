@@ -79,7 +79,7 @@ export const ComparisonKpiCards: React.FC = () => {
                             <TrendingDown className="h-3.5 w-3.5" />
                             LOWEST SINGLE BID
                         </span>
-                        {summary.lowestSingleVsAveragePct !== null && (
+                        {summary.lowestSingleVsAveragePct !== null && summary.lowestSingleVsAveragePct > 0 && (
                             <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 dark:bg-emerald-900 px-1 rounded">
                                 -{summary.lowestSingleVsAveragePct}% avg
                             </span>

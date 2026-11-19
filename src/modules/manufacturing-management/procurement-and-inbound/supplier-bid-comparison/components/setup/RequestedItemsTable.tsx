@@ -10,19 +10,9 @@ import { ComboboxSelect, ComboboxOption } from "../shared/ComboboxSelect";
 import { NumericInputField } from "../shared/NumericInputField";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { RequestedItem } from "../../types";
-import { calculateCbm, convertToKg } from "../../constants/uom-conversions";
 
 export const RequestedItemsTable: React.FC = () => {
     const { currentProject, updateProject, lookups } = useBidComparisonStore();
-
-    const productOptions: ComboboxOption[] = React.useMemo(() => {
-        return (lookups.products || []).map((p) => ({
-            value: p.productName,
-            label: p.productName,
-            subLabel: `${p.productCode ? p.productCode + " · " : ""}${p.uom} · Target: ₱${p.targetUnitPrice}`,
-            extra: p,
-        }));
-    }, [lookups.products]);
 
     const unitOptions: ComboboxOption[] = React.useMemo(() => {
         const fallback = [
@@ -93,33 +83,6 @@ export const RequestedItemsTable: React.FC = () => {
         }));
     };
 
-    const handleProductSelect = (itemId: string, selectedName: string, option?: ComboboxOption) => {
-        if (option && option.extra) {
-            const p = option.extra as {
-                productId?: number;
-                cbmLength?: number;
-                cbmWidth?: number;
-                cbmHeight?: number;
-                weightKg?: number;
-                uom?: string;
-                targetUnitPrice?: number;
-            };
-            const cbm = calculateCbm(p.cbmLength || 0, p.cbmWidth || 0, p.cbmHeight || 0);
-            const kg = convertToKg(p.weightKg || 0);
-
-            handleUpdateItem(itemId, {
-                itemName: selectedName,
-                productId: p.productId,
-                uom: p.uom || "pcs",
-                targetUnitPrice: p.targetUnitPrice || 0,
-                weightPerUnitKg: kg,
-                cbmPerUnit: cbm,
-            });
-        } else {
-            handleUpdateItem(itemId, { itemName: selectedName });
-        }
-    };
-
     // Calculate total target price across all items
     const totalTargetPrice = items.reduce(
         (sum, it) => sum + (it.quantity || 0) * (it.targetUnitPrice || 0),
@@ -153,7 +116,7 @@ export const RequestedItemsTable: React.FC = () => {
                     <thead className="bg-muted/40 border-b text-muted-foreground font-semibold">
                         <tr>
                             <th className="py-2 px-2.5 w-8 text-center">#</th>
-                            <th className="py-2 px-2.5 min-w-[200px]">Item Name / Catalog</th>
+                            <th className="py-2 px-2.5 min-w-[200px]">Item Name</th>
                             <th className="py-2 px-2.5 min-w-[160px]">Specifications</th>
                             <th className="py-2 px-2.5 w-24">Qty</th>
                             <th className="py-2 px-2.5 w-22">UOM</th>
@@ -183,11 +146,10 @@ export const RequestedItemsTable: React.FC = () => {
                                             {idx + 1}
                                         </td>
                                         <td className="py-2 px-2.5">
-                                            <ComboboxSelect
-                                                options={productOptions}
+                                            <Input
                                                 value={item.itemName}
-                                                onChange={(val, opt) => handleProductSelect(item.id, val, opt)}
-                                                placeholder="Select product or type..."
+                                                onChange={(e) => handleUpdateItem(item.id, { itemName: e.target.value })}
+                                                placeholder="Enter item name..."
                                                 className="h-7 text-xs bg-background"
                                             />
                                         </td>

@@ -548,34 +548,44 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
               if (!isNaN(num)) projectSetup!.scoringWeightLeadTimePct = num;
             } else if (/cds.*fee|customs.*entry/i.test(key)) {
               projectSetup!.customsRates = projectSetup!.customsRates || {};
-              projectSetup!.customsRates.cdsCompCurr = parseFloat(String(val).replace(/[^0-9.-]/g, "")) || 100;
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              projectSetup!.customsRates.cdsCompCurr = !isNaN(num) ? num : 100;
             } else if (/bir.*dst|stamp.*tax/i.test(key)) {
               projectSetup!.customsRates = projectSetup!.customsRates || {};
-              projectSetup!.customsRates.birDstCompCurr = parseFloat(String(val).replace(/[^0-9.-]/g, "")) || 30;
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              projectSetup!.customsRates.birDstCompCurr = !isNaN(num) ? num : 30;
             } else if (/container.*security/i.test(key)) {
               projectSetup!.customsRates = projectSetup!.customsRates || {};
-              projectSetup!.customsRates.containerSecurityUsd = parseFloat(String(val).replace(/[^0-9.-]/g, "")) || 5;
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              projectSetup!.customsRates.containerSecurityUsd = !isNaN(num) ? num : 5;
             } else if (/arrastre.*20/i.test(key)) {
               projectSetup!.customsRates = projectSetup!.customsRates || {};
-              projectSetup!.customsRates.arrastre20ftCompCurr = parseFloat(String(val).replace(/[^0-9.-]/g, "")) || 4738;
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              projectSetup!.customsRates.arrastre20ftCompCurr = !isNaN(num) ? num : 4738;
             } else if (/arrastre.*40/i.test(key)) {
               projectSetup!.customsRates = projectSetup!.customsRates || {};
-              projectSetup!.customsRates.arrastre40ftCompCurr = parseFloat(String(val).replace(/[^0-9.-]/g, "")) || 10869;
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              projectSetup!.customsRates.arrastre40ftCompCurr = !isNaN(num) ? num : 10869;
             } else if (/wharfage.*20/i.test(key)) {
               projectSetup!.customsRates = projectSetup!.customsRates || {};
-              projectSetup!.customsRates.wharfage20ftCompCurr = parseFloat(String(val).replace(/[^0-9.-]/g, "")) || 519.35;
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              projectSetup!.customsRates.wharfage20ftCompCurr = !isNaN(num) ? num : 519.35;
             } else if (/wharfage.*40/i.test(key)) {
               projectSetup!.customsRates = projectSetup!.customsRates || {};
-              projectSetup!.customsRates.wharfage40ftCompCurr = parseFloat(String(val).replace(/[^0-9.-]/g, "")) || 779.05;
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              projectSetup!.customsRates.wharfage40ftCompCurr = !isNaN(num) ? num : 779.05;
             } else if (/lcl.*arrastre/i.test(key)) {
               projectSetup!.customsRates = projectSetup!.customsRates || {};
-              projectSetup!.customsRates.lclArrastrePerRtCompCurr = parseFloat(String(val).replace(/[^0-9.-]/g, "")) || 149;
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              projectSetup!.customsRates.lclArrastrePerRtCompCurr = !isNaN(num) ? num : 149;
             } else if (/lcl.*wharfage/i.test(key)) {
               projectSetup!.customsRates = projectSetup!.customsRates || {};
-              projectSetup!.customsRates.lclWharfagePerRtCompCurr = parseFloat(String(val).replace(/[^0-9.-]/g, "")) || 30.55;
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              projectSetup!.customsRates.lclWharfagePerRtCompCurr = !isNaN(num) ? num : 30.55;
             } else if (/lc.*bank.*charge/i.test(key)) {
               projectSetup!.customsRates = projectSetup!.customsRates || {};
-              projectSetup!.customsRates.lcBankChargePct = parseFloat(String(val).replace(/[^0-9.-]/g, "")) || 0.125;
+              const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+              projectSetup!.customsRates.lcBankChargePct = !isNaN(num) ? num : 0.125;
             } else if (/ipc.*brackets?|price.*change.*brackets?/i.test(key)) {
               try {
                 const parsedIpc = typeof val === "string" ? JSON.parse(val) : val;
@@ -879,11 +889,11 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             for (let c = 0; c < row.length; c++) {
               const cell = String(row[c] || "").toLowerCase().trim();
               if (/supplier/i.test(cell)) suppCol = c;
+              else if (/mime/i.test(cell)) mimeCol = c;
               else if (/doc.*type|type/i.test(cell)) typeCol = c;
               else if (/file.*name|document.*name/i.test(cell)) nameCol = c;
               else if (/directus|file.*id/i.test(cell)) idCol = c;
               else if (/size|bytes/i.test(cell)) sizeCol = c;
-              else if (/mime/i.test(cell)) mimeCol = c;
               else if (/url|link|download/i.test(cell)) urlCol = c;
             }
             if (suppCol >= 0 && (nameCol >= 0 || urlCol >= 0 || idCol >= 0)) {
@@ -1149,6 +1159,14 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
           return "";
         };
 
+        const getRawVal = (m: Record<string, unknown>, ...keys: string[]): unknown => {
+          for (const k of keys) {
+            const v = m[k];
+            if (v !== undefined && v !== null && v !== "") return v;
+          }
+          return "";
+        };
+
         rawRows.forEach((raw, idx) => {
           const map: Record<string, unknown> = {};
           for (const [k, v] of Object.entries(raw)) {
@@ -1186,7 +1204,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
 
           const supplierId = getVal(map, "supplierid", "vendorid").trim();
           const quotationRef = getVal(map, "quotationref", "quotationreference", "quoteref").trim();
-          const quoteDate = parseDateOnly(getVal(map, "quotedate", "date"));
+          const quoteDate = parseDateOnly(getRawVal(map, "quotedate", "date"));
           const contactPerson = getVal(map, "contactperson", "contactname", "contact").trim();
           const contactEmail = getVal(map, "contactemail", "email").trim();
           const contactPhone = getVal(map, "contactphone", "phone", "tel").trim();
@@ -1240,7 +1258,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             netDays: parseCleanInt(getVal(map, "netdays", "balanceduedays"), 0),
             earlyPayDiscountPct: parseCleanFloat(getVal(map, "earlypay", "earlypaypct", "discountforpromptpayment", "earlypaydiscountpct"), 0),
             earlyPayDays: parseCleanInt(getVal(map, "earlypaydays", "earlypaymentdiscountdays", "earlypaydiscountdays"), 0),
-            validUntil: parseDateOnly(getVal(map, "validuntil", "quotationvaliduntil")),
+            validUntil: parseDateOnly(getRawVal(map, "validuntil", "quotationvaliduntil")),
             qualityScore: parseCleanFloat(getVal(map, "quality15appliedtoallcriteria", "quality", "qualityscore"), 0),
             notes: getVal(map, "notes").trim(),
             supplierId: supplierId || undefined,
@@ -1263,6 +1281,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
         setDetectedProjectSetup(projectSetup);
         if (projectSetup) {
           setImportScope("full_project");
+        } else {
+          setImportScope(currentProject ? "bids_only" : "full_project");
         }
 
         if (rows.length > 0) {
@@ -1929,7 +1949,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             if (first.takeEarlyPayDiscount !== undefined) bid.takeEarlyPayDiscount = first.takeEarlyPayDiscount;
             if (first.ftaCode !== undefined) {
               bid.ftaAgreementName = first.ftaCode;
-              if (first.ftaCode) bid.dutyMode = "FTA";
+              if (first.ftaCode && !first.dutyMode) bid.dutyMode = "FTA";
             }
             if (first.ftaDutyPct !== undefined && !isNaN(first.ftaDutyPct)) bid.ftaDutyPct = first.ftaDutyPct;
             if (first.vatPct !== undefined && !isNaN(first.vatPct)) bid.vatPct = first.vatPct;
@@ -1947,14 +1967,18 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
             if (first.netDays !== undefined && !isNaN(first.netDays)) bid.balanceDueDays = first.netDays;
             if (first.earlyPayDiscountPct !== undefined && !isNaN(first.earlyPayDiscountPct)) {
               bid.earlyPayDiscountPct = first.earlyPayDiscountPct;
-              bid.takeEarlyPayDiscount = first.earlyPayDiscountPct > 0;
+              if (first.takeEarlyPayDiscount === undefined) {
+                bid.takeEarlyPayDiscount = first.earlyPayDiscountPct > 0;
+              }
             }
             if (first.earlyPayDays !== undefined && !isNaN(first.earlyPayDays)) bid.earlyPayDiscountDays = first.earlyPayDays;
             if (first.notes) bid.notes = first.notes;
 
-            Object.keys(initialScores).forEach((critId) => {
-              bid!.scores[critId] = initialScores[critId];
-            });
+            if (parsedQualityScores.size > 0 && sMap) {
+              Object.keys(initialScores).forEach((critId) => {
+                bid!.scores[critId] = initialScores[critId];
+              });
+            }
 
             if (supplierAtts.length > 0) {
               const existingFileIds = new Set((bid.attachments || []).map((a) => a.directusFileId || a.fileUrl || a.fileName));
@@ -2057,35 +2081,39 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
           }
           className={
             parsedRows.length === 0
-              ? "!w-[94vw] !max-w-[720px] flex flex-col p-6 shadow-2xl border-border bg-card transition-all"
+              ? "!w-[94vw] !max-w-[780px] flex flex-col p-6 shadow-2xl border-border bg-card transition-all"
               : "!w-[95vw] !max-w-[1280px] !h-[88vh] !max-h-[92vh] flex flex-col p-5 shadow-2xl border-border bg-card transition-all"
           }
         >
           {/* Header */}
-          <DialogHeader className="space-y-1 pb-3 border-b shrink-0">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
-                  <Upload className="w-5 h-5" />
-                </div>
-                <div>
-                  <DialogTitle className="text-base font-bold text-foreground">
-                    {parsedRows.length === 0 ? "Import Bids from CSV or Excel" : "Review & Import Bids"}
-                  </DialogTitle>
-                  <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                    {parsedRows.length === 0
-                      ? "Upload vendor quotation sheets to automatically map commercial terms and price breaks."
-                      : "Select suppliers to import and configure your merge strategy."}
-                  </DialogDescription>
-                </div>
+          <DialogHeader className="space-y-3 pb-3 border-b shrink-0">
+            <div className="flex items-start gap-3 pr-8">
+              <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0 mt-0.5">
+                <Upload className="w-5 h-5" />
               </div>
+              <div className="min-w-0 flex-1">
+                <DialogTitle className="text-base font-bold text-foreground">
+                  {parsedRows.length === 0 ? "Import Bids from CSV or Excel" : "Review & Import Bids"}
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                  {parsedRows.length === 0
+                    ? "Upload vendor quotation sheets to automatically map commercial terms and price breaks."
+                    : "Select suppliers to import and configure your merge strategy."}
+                </DialogDescription>
+              </div>
+            </div>
 
-              {parsedRows.length === 0 ? (
-                <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+            {parsedRows.length === 0 ? (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-border/40 text-xs">
+                <span className="text-[11px] text-muted-foreground font-medium flex items-center gap-1.5">
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-muted-foreground" />
+                  Download starter templates:
+                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => exportFullProjectTemplate(currentProject || undefined)}
+                    onClick={() => exportFullProjectTemplate()}
                     className="gap-1.5 text-xs h-7 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/40 hover:bg-emerald-100"
                     title="Download Complete Multi-Sheet Project Template (Setup, Rates, Criteria, Items with Specs, and Bids)"
                   >
@@ -2115,23 +2143,23 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
                     </Button>
                   )}
                 </div>
-              ) : (
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant="outline" className="text-xs font-medium border-border gap-1 py-1">
-                    <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
-                    {detectedSuppliers.length} Suppliers Detected
-                  </Badge>
-                  <Badge variant="outline" className="text-xs font-medium border-border gap-1 py-1">
-                    <Package className="w-3.5 h-3.5 text-muted-foreground" />
-                    {detectedItemsCount} Items Found
-                  </Badge>
-                  <Badge variant="secondary" className="text-xs font-medium gap-1 py-1">
-                    <Layers className="w-3.5 h-3.5" />
-                    {parsedRows.length} Rows
-                  </Badge>
-                </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 pt-1 border-t border-border/40">
+                <Badge variant="outline" className="text-xs font-medium border-border gap-1 py-1">
+                  <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
+                  {detectedSuppliers.length} Suppliers Detected
+                </Badge>
+                <Badge variant="outline" className="text-xs font-medium border-border gap-1 py-1">
+                  <Package className="w-3.5 h-3.5 text-muted-foreground" />
+                  {detectedItemsCount} Items Found
+                </Badge>
+                <Badge variant="secondary" className="text-xs font-medium gap-1 py-1">
+                  <Layers className="w-3.5 h-3.5" />
+                  {parsedRows.length} Rows
+                </Badge>
+              </div>
+            )}
           </DialogHeader>
 
           {/* Hidden File Input (Always Available) */}
