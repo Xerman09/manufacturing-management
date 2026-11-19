@@ -28,17 +28,18 @@ export function getExchangeRate(
  * Lookup IPC bracket fee based on dutiable value per declaration.
  */
 export function lookupIpcCharge(dutiableValuePerDeclaration: number, brackets: IpcBracket[]): number {
+    if (!Array.isArray(brackets) || brackets.length === 0) return 0;
     const sorted = [...brackets].sort((a, b) => a.bracketOrder - b.bracketOrder);
     for (const b of sorted) {
         if (b.maxDutiableValueCompCurr !== null) {
             if (dutiableValuePerDeclaration <= b.maxDutiableValueCompCurr) {
-                return b.chargeCompCurr;
+                return b.chargeCompCurr ?? 0;
             }
         } else {
-            return b.chargeCompCurr; // Highest bracket
+            return b.chargeCompCurr ?? 0; // Highest bracket
         }
     }
-    return 2000;
+    return sorted[sorted.length - 1]?.chargeCompCurr ?? 0;
 }
 
 /**
@@ -102,9 +103,12 @@ export function calculateSupplierLandedCost(
         ratesMap[r.currencyCode.toUpperCase()] = r.rateToComparison;
     }
 
+    const effFreightCurr = (bid.freightCurrency || "").trim() || bid.quoteCurrency;
+    const effInsuranceCurr = (bid.insuranceCurrency || "").trim() || bid.quoteCurrency;
+
     const supplierFxRate = getExchangeRate(bid.quoteCurrency, compCurr, ratesMap);
-    const freightFxRate = getExchangeRate(bid.freightCurrency, compCurr, ratesMap);
-    const insuranceFxRate = getExchangeRate(bid.insuranceCurrency, compCurr, ratesMap);
+    const freightFxRate = getExchangeRate(effFreightCurr, compCurr, ratesMap);
+    const insuranceFxRate = getExchangeRate(effInsuranceCurr, compCurr, ratesMap);
     const usdFxRate = getExchangeRate("USD", compCurr, ratesMap);
 
     const incoterm = INCOTERMS_CONFIG[bid.incoterm || "DELIVERED"] || INCOTERMS_CONFIG.DELIVERED;
@@ -112,6 +116,18 @@ export function calculateSupplierLandedCost(
 
     const warnings: string[] = [];
     const blockingIssues: string[] = [];
+
+    // Warn explicitly if any foreign currency used by this bid is missing from Exchange Rates
+    const checkedCurrs = new Set<string>();
+    for (const rawCurr of [bid.quoteCurrency, effFreightCurr, effInsuranceCurr]) {
+        const c = (rawCurr || "").toUpperCase().trim();
+        if (c && c !== compCurr.toUpperCase() && !checkedCurrs.has(c)) {
+            checkedCurrs.add(c);
+            if (!ratesMap[c] || ratesMap[c] <= 0) {
+                warnings.push(`Missing exchange rate for ${c} in Evaluation Exchange Rates (temporarily using 1:1 with ${compCurr})`);
+            }
+        }
+    }
 
     // Filter items if awardedItemIds is provided
     const evaluatedItems = awardedItemIds
@@ -406,49 +422,50 @@ export function calculateSupplierLandedCost(
     let wharfageCompCurr = 0;
     let containerSecurityCompCurr = 0;
     let lcBankChargeCompCurr = 0;
-    const otherPortChargesCompCurr = bid.otherPortChargesCompCurr || 0;
+    let otherPortChargesCompCurr = 0;
     let brokerageCompCurr = 0;
 
     if (!isLocal && incoterm.buyerPaysBrokerageAndCustoms) {
         brokerageCompCurr = bid.brokerageCompCurr || 0;
+        otherPortChargesCompCurr = bid.otherPortChargesCompCurr || 0;
 
         if (project.calcCustomsAuto) {
-            const customsRates = project.customsRates;
+            const customsRates = project.customsRates || ({} as typeof project.customsRates);
             // IPC
             const ipcChargePerDecl = lookupIpcCharge(dutiablePerDeclaration, project.ipcBrackets);
             ipcCompCurr = ipcChargePerDecl * declarationsCount;
 
-            // CDS & DST
-            cdsCompCurr = (customsRates.cdsCompCurr || 100) * declarationsCount;
-            birDstCompCurr = (customsRates.birDstCompCurr || 30) * declarationsCount;
+            // CDS & DST (respect deliberate 0 values)
+            cdsCompCurr = (customsRates.cdsCompCurr ?? 100) * declarationsCount;
+            birDstCompCurr = (customsRates.birDstCompCurr ?? 30) * declarationsCount;
 
             // Arrastre & Wharfage
             if (incoterm.buyerPaysArrastreAndWharfage) {
                 if (shipmentType === "FCL") {
                     arrastreCompCurr = Number(
                         (
-                            estimatedContainers20ft * customsRates.arrastre20ftCompCurr +
-                            estimatedContainers40ft * customsRates.arrastre40ftCompCurr
+                            estimatedContainers20ft * (customsRates.arrastre20ftCompCurr ?? 0) +
+                            estimatedContainers40ft * (customsRates.arrastre40ftCompCurr ?? 0)
                         ).toFixed(3)
                     );
                     wharfageCompCurr = Number(
                         (
-                            estimatedContainers20ft * customsRates.wharfage20ftCompCurr +
-                            estimatedContainers40ft * customsRates.wharfage40ftCompCurr
+                            estimatedContainers20ft * (customsRates.wharfage20ftCompCurr ?? 0) +
+                            estimatedContainers40ft * (customsRates.wharfage40ftCompCurr ?? 0)
                         ).toFixed(3)
                     );
                     containerSecurityCompCurr = Number(
-                        (teuCount * customsRates.containerSecurityUsd * usdFxRate).toFixed(3)
+                        (teuCount * (customsRates.containerSecurityUsd ?? 0) * usdFxRate).toFixed(3)
                     );
                 } else if (shipmentType === "LCL") {
-                    arrastreCompCurr = Number((revenueTons * customsRates.lclArrastrePerRtCompCurr).toFixed(3));
-                    wharfageCompCurr = Number((revenueTons * customsRates.lclWharfagePerRtCompCurr).toFixed(3));
+                    arrastreCompCurr = Number((revenueTons * (customsRates.lclArrastrePerRtCompCurr ?? 0)).toFixed(3));
+                    wharfageCompCurr = Number((revenueTons * (customsRates.lclWharfagePerRtCompCurr ?? 0)).toFixed(3));
                 }
             }
 
             // LC bank charge
             if (bid.paidByLc) {
-                const lcRate = (customsRates.lcBankChargePct || 0.125) / 100;
+                const lcRate = (customsRates.lcBankChargePct ?? 0.125) / 100;
                 lcBankChargeCompCurr = Number((cifDutiableValueCompCurr * lcRate).toFixed(3));
             }
         }
@@ -531,7 +548,7 @@ export function calculateSupplierLandedCost(
     }
 
     const netBalanceDueCompCurr = balanceBeforeDiscount - earlyPayDiscountAmountCompCurr;
-    const costOfMoney = (project.costOfMoneyPctPerYear || 8.0) / 100;
+    const costOfMoney = (project.costOfMoneyPctPerYear ?? 8.0) / 100;
     const leadTimeDays = bid.leadTimeDays || 0;
 
     const carryingCostDownPayment = (costOfMoney * downPaymentCompCurr * leadTimeDays) / 365;
@@ -575,14 +592,19 @@ export function calculateSupplierLandedCost(
         const valueShare =
             goodsAfterDiscountCompCurr > 0 ? breakdown.goodsCompCurr / goodsAfterDiscountCompCurr : 0;
 
-        // FX Buffer allocated specifically to each item's foreign goods and freight share
-        const fG = bid.quoteCurrency.toUpperCase() !== compCurr;
-        const fF = bid.freightCurrency.toUpperCase() !== compCurr;
-        const itemFxBase =
-            (fG ? breakdown.goodsCompCurr : 0) +
-            (fF && bid.freightBasis !== "PCT_GOODS" ? breakdown.freightCompCurr : 0) +
-            (fF && bid.insuranceBasis !== "PCT_GOODS_AND_FREIGHT" ? breakdown.insuranceCompCurr : 0);
-        breakdown.fxBufferCompCurr = Number(((fxRiskPct / 100) * itemFxBase).toFixed(3));
+        // FX Buffer allocated specifically to each item's foreign goods, freight, and insurance share (only for international bids)
+        if (!isLocal && fxRiskPct > 0) {
+            const fG = (bid.quoteCurrency || "").toUpperCase() !== compCurr.toUpperCase();
+            const fF = effFreightCurr.toUpperCase() !== compCurr.toUpperCase();
+            const fI = effInsuranceCurr.toUpperCase() !== compCurr.toUpperCase();
+            const itemFxBase =
+                (fG ? breakdown.goodsCompCurr : 0) +
+                (fF && bid.freightBasis !== "PCT_GOODS" ? breakdown.freightCompCurr : 0) +
+                (fI && bid.insuranceBasis !== "PCT_GOODS_AND_FREIGHT" ? breakdown.insuranceCompCurr : 0);
+            breakdown.fxBufferCompCurr = Number(((fxRiskPct / 100) * itemFxBase).toFixed(3));
+        } else {
+            breakdown.fxBufferCompCurr = 0;
+        }
 
         // VAT allocated in proportion to (CIF + Duty) for import, or valueShare for local
         if (project.countVatAsCost && vatCompCurr > 0) {
@@ -632,13 +654,17 @@ export function calculateSupplierLandedCost(
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const validDate = new Date(bid.validUntil);
-        const diffMs = validDate.getTime() - today.getTime();
-        expiresInDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-        if (expiresInDays < 0) {
-            isExpired = true;
-            blockingIssues.push(`Quote expired on ${bid.validUntil} (${Math.abs(expiresInDays)} day(s) ago)`);
-        } else if (expiresInDays <= 7) {
-            warnings.push(`Quote expires soon in ${expiresInDays} day(s) on ${bid.validUntil}`);
+        if (isNaN(validDate.getTime())) {
+            warnings.push(`Quote validity date "${bid.validUntil}" is invalid`);
+        } else {
+            const diffMs = validDate.getTime() - today.getTime();
+            expiresInDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+            if (expiresInDays < 0) {
+                isExpired = true;
+                blockingIssues.push(`Quote expired on ${bid.validUntil} (${Math.abs(expiresInDays)} day(s) ago)`);
+            } else if (expiresInDays <= 7) {
+                warnings.push(`Quote expires soon in ${expiresInDays} day(s) on ${bid.validUntil}`);
+            }
         }
     } else {
         warnings.push("Quote validity period has not been specified by supplier");

@@ -56,10 +56,10 @@ export function evaluateAndCompareSuppliers(
         }
     }
 
-    // 4. Calculate Scores for Each Supplier
-    const wP = project.scoringWeightPricePct || 50;
-    const wQ = project.scoringWeightQualityPct || 35;
-    const wL = project.scoringWeightLeadTimePct || 15;
+    // 4. Calculate Scores for Each Supplier (respect deliberate 0% weights)
+    const wP = project.scoringWeightPricePct ?? 50;
+    const wQ = project.scoringWeightQualityPct ?? 35;
+    const wL = project.scoringWeightLeadTimePct ?? 15;
     const totalWeights = wP + wQ + wL;
 
     for (const bid of bids) {

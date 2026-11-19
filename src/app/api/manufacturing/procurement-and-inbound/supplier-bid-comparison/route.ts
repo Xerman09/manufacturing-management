@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
 import { getJwtSubFromReq } from "@/lib/directus";
 import { decodeJwtPayload } from "@/lib/auth-utils";
 import {
@@ -234,12 +233,14 @@ function cleanUserReadableErrorMessage(err: unknown, section?: string): string {
  * Directus helper: fetch list with filter
  */
 async function fetchCollection<T>(collection: string, query: string): Promise<T[]> {
-    const res = await fetch(`${DIRECTUS_URL}/items/${collection}?${query}`, {
+    const hasLimit = /(^|&)limit=/.test(query);
+    const fullQuery = hasLimit ? query : query ? `${query}&limit=-1` : "limit=-1";
+    const res = await fetch(`${DIRECTUS_URL}/items/${collection}?${fullQuery}`, {
         headers: getHeaders(),
         cache: "no-store",
     });
     if (!res.ok) {
-        if (res.status === 404 || res.status === 403) return [];
+        if (res.status === 404) return [];
         throw new Error(`Directus ${collection} query failed: HTTP ${res.status}`);
     }
     const data = await res.json();
@@ -722,25 +723,9 @@ export async function PUT(request: NextRequest) {
         const headers = getHeaders();
         let rfqDbId = parseDbId(project.id) || parseDbId(project.dbId);
 
-        // If project does not yet have a numeric database ID, resolve or create it
+        // If project does not yet have a numeric database ID, create a new row in mm_rfq
+        // (Never silently adopt an existing live project by rfq_reference, which would overwrite it)
         if (!rfqDbId) {
-            // Check if project exists by reference and round
-            try {
-                const searchRes = await fetch(
-                    `${DIRECTUS_URL}/items/mm_rfq?filter[rfq_reference][_eq]=${encodeURIComponent(project.rfqReference || "")}&filter[round_no][_eq]=${project.roundNo || 1}&filter[deleted_at][_null]=true&limit=1`,
-                    { headers, cache: "no-store" }
-                );
-                if (searchRes.ok) {
-                    const searchData = await searchRes.json();
-                    if (searchData.data && searchData.data.length > 0) {
-                        rfqDbId = Number(searchData.data[0].id);
-                    }
-                }
-            } catch {
-                // If query fails, fall through to create or local fallback
-            }
-
-            // If still no ID found in DB, create initial row in mm_rfq
             if (!rfqDbId) {
                 let safeRef = (project.rfqReference || `RFQ-${Date.now().toString().slice(-6)}`).trim();
                 const roundNo = project.roundNo || 1;
@@ -962,6 +947,7 @@ interface SyncResult {
         items: Record<string, number>;
         criteria: Record<string, number>;
         bids: Record<string, number>;
+        attachments?: Record<string, number>;
     };
     partialFailure?: { section: string; error: string };
 }
@@ -977,6 +963,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
     const critIdMap = new Map<string, number>();
     const bidIdMap = new Map<string, number>();
     const bidItemIdMap = new Map<string, number>();
+    const attIdMap = new Map<string, number>();
 
     // -------------------------------------------------------------
     // A. Sync mm_rfq_items
@@ -1487,16 +1474,16 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
                     const activeAttIds = new Set<number>();
 
                     for (const att of bid.attachments) {
-                        const existingAttId = att.dbId || (typeof att.id === "number" ? att.id : parseDbId(att.id));
+                        // Skip offline placeholder files that were never uploaded to Directus
+                        if (!att.directusFileId || att.directusFileId.startsWith("local-") || att.directusFileId.length !== 36) {
+                            continue;
+                        }
 
-                        // Directus file ID must be a valid 36-char string per schema
-                        const validDirectusId = (att.directusFileId && att.directusFileId.length === 36)
-                            ? att.directusFileId
-                            : crypto.randomUUID();
+                        const existingAttId = att.dbId || (typeof att.id === "number" ? att.id : parseDbId(att.id));
 
                         const attPayload = {
                             rfq_bid_id: resolvedBidId,
-                            directus_file_id: validDirectusId,
+                            directus_file_id: att.directusFileId,
                             file_name: att.fileName || "unnamed_document",
                             mime_type: att.mimeType || "application/octet-stream",
                             file_size: att.fileSize || 0,
@@ -1506,10 +1493,13 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
                         if (existingAttId && existingAttMap.has(existingAttId)) {
                             await patchItem("mm_rfq_bid_attachments", existingAttId, attPayload).catch(() => null);
                             activeAttIds.add(existingAttId);
+                            attIdMap.set(att.id, existingAttId);
                         } else {
                             const createdAtt = await postItem<{ id: number }>("mm_rfq_bid_attachments", attPayload).catch(() => null);
                             if (createdAtt?.id) {
-                                activeAttIds.add(Number(createdAtt.id));
+                                const newAttDbId = Number(createdAtt.id);
+                                activeAttIds.add(newAttDbId);
+                                attIdMap.set(att.id, newAttDbId);
                             }
                         }
                     }
@@ -1639,6 +1629,7 @@ async function syncChildEntities(rfqId: number, project: RfqProject, userId: num
             items: Object.fromEntries(itemIdMap),
             criteria: Object.fromEntries(critIdMap),
             bids: Object.fromEntries(bidIdMap),
+            attachments: Object.fromEntries(attIdMap),
         },
     };
 }

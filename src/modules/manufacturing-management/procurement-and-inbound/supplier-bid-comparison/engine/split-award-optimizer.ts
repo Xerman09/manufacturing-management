@@ -117,11 +117,16 @@ export function optimizeSplitAward(
         }
     }
 
-    // If item count <= 10, run exact search across item partitions
+    // If item count <= 10, run bounded exact search across item partitions (capped to prevent browser hangs)
     if (n <= 10 && eligibleBids.length <= 10) {
         const currentAssignment = new Array(n).fill(-1);
+        const MAX_SEARCH_NODES = 25000;
+        let visitedNodes = 0;
 
         const search = (itemIdx: number) => {
+            if (visitedNodes >= MAX_SEARCH_NODES) return;
+            visitedNodes++;
+
             if (itemIdx === n) {
                 // Evaluate partition
                 const masks = new Array(eligibleBids.length).fill(0);
@@ -145,6 +150,7 @@ export function optimizeSplitAward(
             }
 
             for (let bIdx = 0; bIdx < eligibleBids.length; bIdx++) {
+                if (visitedNodes >= MAX_SEARCH_NODES) break;
                 const bid = eligibleBids[bIdx];
                 if ((bidItemBitmasks.get(bid.id)! & (1 << itemIdx)) !== 0) {
                     currentAssignment[itemIdx] = bIdx;

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { SupplierBid } from "../../types";
 import { calculateSupplierLandedCost } from "../../engine/landed-cost-calculator";
+import { INCOTERMS_CONFIG } from "../../constants/incoterms";
 
 interface LandedCostBreakdownCardProps {
     bid: SupplierBid;
@@ -23,11 +24,12 @@ export const LandedCostBreakdownCard: React.FC<LandedCostBreakdownCardProps> = (
     if (!currentProject || !res) return null;
 
     const compCurr = currentProject.comparisonCurrency || "PHP";
+    const incoterm = INCOTERMS_CONFIG[bid.incoterm || "DELIVERED"] || INCOTERMS_CONFIG.DELIVERED;
 
     const costLines = [
         { label: "Goods value (after discount)", amount: res.goodsAfterDiscountCompCurr, foreign: bid.quoteCurrency !== compCurr },
-        { label: "Ocean / Air Freight", amount: res.freightCompCurr, paidBySupplier: !res.freightCompCurr && bid.supplierType === "INTERNATIONAL" },
-        { label: "Marine Cargo Insurance", amount: res.insuranceCompCurr, paidBySupplier: !res.insuranceCompCurr && bid.supplierType === "INTERNATIONAL" },
+        { label: "Ocean / Air Freight", amount: res.freightCompCurr, paidBySupplier: !incoterm.buyerPaysFreight && bid.supplierType === "INTERNATIONAL" },
+        { label: "Marine Cargo Insurance", amount: res.insuranceCompCurr, paidBySupplier: !incoterm.buyerPaysInsurance && bid.supplierType === "INTERNATIONAL" },
         { label: "Dutiable Value (CIF)", amount: res.cifDutiableValueCompCurr, isSubtotal: true },
         { label: `FX Risk Buffer (${currentProject.fxRiskBufferPct}%)`, amount: res.fxBufferCompCurr },
         { label: "Customs Import Duty", amount: res.dutyCompCurr },

@@ -363,6 +363,25 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
     },
 
     selectProject: async (projectId: string) => {
+        // Flush any pending unsaved edits on the outgoing project before switching
+        const outgoing = get().currentProject;
+        if (outgoing && outgoing.id !== projectId && get().isDirty) {
+            await get().saveProjectNow();
+        }
+
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
+        if (maxWaitTimer) {
+            clearTimeout(maxWaitTimer);
+            maxWaitTimer = null;
+        }
+        if (localStorageTimer) {
+            clearTimeout(localStorageTimer);
+            localStorageTimer = null;
+        }
+
         lastSavedContentHash = "";
         let loadedFromLocal = false;
 
@@ -386,7 +405,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                         const parsed: RfqProject = JSON.parse(saved);
                         set({
                             currentProject: parsed,
-                            activeBidId: parsed.bids.length > 0 ? parsed.bids[0].id : null,
+                            activeBidId: Array.isArray(parsed.bids) && parsed.bids.length > 0 ? parsed.bids[0].id : null,
                             storageStatus: parsed.status === "Approved" || parsed.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
                             lastSavedTimestamp: getPhilippineTimestamp(),
                         });
@@ -398,6 +417,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             }
 
             // 2. Fetch live project from Directus API
+            let loadError: string | null = null;
             try {
                 const res = await fetch(`/api/manufacturing/procurement-and-inbound/supplier-bid-comparison?id=${encodeURIComponent(projectId)}`);
                 if (res.ok) {
@@ -405,9 +425,9 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                     if (data.project) {
                         const proj: RfqProject = data.project;
 
-                        // Guard: If user navigated away to "All RFQs" or switched projects while fetch was in-flight, discard
+                        // Guard: If user navigated away to "All RFQs" or switched to another project while fetch was in-flight, discard
                         const currentActiveId = typeof window !== "undefined" ? localStorage.getItem(ACTIVE_PROJECT_ID_KEY) : null;
-                        if (!currentActiveId || currentActiveId !== projectId || get().currentProject === null) {
+                        if (get().switchingToProjectId !== projectId || (currentActiveId && currentActiveId !== projectId)) {
                             return;
                         }
 
@@ -428,22 +448,49 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                         }
                         return;
                     }
+                    loadError = data.error || "Project data was empty.";
+                } else {
+                    const errJson = await res.json().catch(() => null);
+                    loadError = errJson?.error || `Failed to load project (HTTP ${res.status})`;
                 }
-            } catch {
-                // Network failure or offline
+            } catch (err) {
+                loadError = (err as Error)?.message || "Unable to reach server to load project.";
             }
 
-            // 3. Fallback: only create project if user is still actively on this project
-            const stillActive = typeof window !== "undefined" ? localStorage.getItem(ACTIVE_PROJECT_ID_KEY) : null;
-            if (!loadedFromLocal && !get().currentProject && stillActive === projectId) {
-                get().createNewProject();
+            // 3. Report error explicitly if project could not be loaded (no silent blank project fallback)
+            if (!loadedFromLocal && !get().currentProject && get().switchingToProjectId === projectId) {
+                if (typeof window !== "undefined") {
+                    try {
+                        localStorage.removeItem(ACTIVE_PROJECT_ID_KEY);
+                    } catch {
+                        // Ignore storage error
+                    }
+                }
+                toast.error(loadError || "Failed to open RFQ project.");
             }
         } finally {
-            set({ isLoadingProject: false, switchingToProjectId: null });
+            if (get().switchingToProjectId === projectId) {
+                set({ isLoadingProject: false, switchingToProjectId: null });
+            }
         }
     },
 
     clearCurrentProject: () => {
+        // Flush any unsaved work via keepalive before leaving so recent typing is never lost
+        const outgoing = get().currentProject;
+        if (outgoing && get().isDirty && !inFlightSave) {
+            try {
+                fetch("/api/manufacturing/procurement-and-inbound/supplier-bid-comparison", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(outgoing),
+                    keepalive: true,
+                }).catch(() => null);
+            } catch {
+                // Ignore keepalive error
+            }
+        }
+
         // Cancel all in-flight and scheduled timers immediately
         if (debounceTimer) {
             clearTimeout(debounceTimer);
@@ -592,6 +639,14 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             version: 1,
             rejectionReason: undefined,
             approvalRemarks: undefined,
+            customsRates: {
+                ...DEFAULT_CUSTOMS_RATES,
+                ...(importedProject.customsRates || {}),
+            },
+            ipcBrackets:
+                Array.isArray(importedProject.ipcBrackets) && importedProject.ipcBrackets.length > 0
+                    ? importedProject.ipcBrackets
+                    : DEFAULT_IPC_BRACKETS.map((b) => ({ ...b })),
             items: cleanItems,
             qualityCriteria: cleanQualityCriteria,
             bids: cleanBids,
@@ -902,6 +957,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             }
         }
 
+        const sentProjectId = currentProject.id;
         set({ isSaving: true, saveError: null });
 
         inFlightSave = (async () => {
@@ -939,10 +995,10 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                         return;
                     }
 
-                    // CRITICAL: Always preserve user's in-progress keystrokes and live state
+                    // CRITICAL: Verify user is still on the exact same project before stamping server IDs
                     const liveProject = get().currentProject;
                     const activeKey = typeof window !== "undefined" ? localStorage.getItem(ACTIVE_PROJECT_ID_KEY) : null;
-                    if (!liveProject || !activeKey) {
+                    if (!liveProject || !activeKey || liveProject.id !== sentProjectId) {
                         set({ isSaving: false });
                         return;
                     }
@@ -960,10 +1016,11 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                     };
 
                     if (data.resolvedIds) {
-                        const { items: itemMap, criteria: critMap, bids: bidMap } = data.resolvedIds as {
+                        const { items: itemMap, criteria: critMap, bids: bidMap, attachments: attMap } = data.resolvedIds as {
                             items?: Record<string, number>;
                             criteria?: Record<string, number>;
                             bids?: Record<string, number>;
+                            attachments?: Record<string, number>;
                         };
 
                         if (itemMap && updatedProject.items) {
@@ -980,6 +1037,14 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                             updatedProject.bids = updatedProject.bids.map((b) =>
                                 bidMap[b.id] ? { ...b, dbId: bidMap[b.id] } : b
                             );
+                        }
+                        if (attMap && updatedProject.bids) {
+                            updatedProject.bids = updatedProject.bids.map((b) => ({
+                                ...b,
+                                attachments: (b.attachments || []).map((att) =>
+                                    attMap[att.id] ? { ...att, dbId: attMap[att.id] } : att
+                                ),
+                            }));
                         }
                     }
 

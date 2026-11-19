@@ -43,6 +43,7 @@ export const ApprovalWorkflowCard: React.FC = () => {
 
     const canSubmit =
         status === "Draft" &&
+        items.length > 0 &&
         unawardedItems.length === 0 &&
         !missingJustification &&
         !awardedDisqualified &&
@@ -218,7 +219,7 @@ export const ApprovalWorkflowCard: React.FC = () => {
                         </span>
                         <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                                {unawardedItems.length === 0 ? (
+                                {items.length > 0 && unawardedItems.length === 0 ? (
                                     <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                                 ) : (
                                     <XCircle className="h-3.5 w-3.5 text-rose-500" />

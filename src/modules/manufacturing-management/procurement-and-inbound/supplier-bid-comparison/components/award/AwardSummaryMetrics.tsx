@@ -15,6 +15,12 @@ export const AwardSummaryMetrics: React.FC = () => {
         [currentProject]
     );
 
+    const opt = React.useMemo(() => {
+        if (!currentProject || !summary) return null;
+        const validBids = currentProject.bids.filter((b) => summary.results[b.id]?.isValid);
+        return optimizeSplitAward(currentProject, validBids);
+    }, [currentProject, summary]);
+
     if (!currentProject || !summary) return null;
 
     const items = currentProject.items || [];
@@ -26,7 +32,7 @@ export const AwardSummaryMetrics: React.FC = () => {
     const awardTotalLanded = awards.reduce((sum, a) => sum + (a.awardedLandedTotal || 0), 0);
 
     // Total target price
-    const totalTarget = items.reduce((sum, it) => sum + it.quantity * it.targetUnitPrice, 0);
+    const totalTarget = items.reduce((sum, it) => sum + (it.quantity || 0) * (it.targetUnitPrice || 0), 0);
     const varianceVsTarget = awardTotalLanded - totalTarget;
 
     // Compare with average market quotes for awarded items (matching prototype awardCalc)
@@ -58,9 +64,7 @@ export const AwardSummaryMetrics: React.FC = () => {
     const budgetVariance = currentProject.budget ? awardTotalLanded - currentProject.budget : null;
     const isOverBudget = budgetVariance !== null && budgetVariance > 0;
 
-    // Optimized check
-    const validBids = currentProject.bids.filter((b) => summary.results[b.id]?.isValid);
-    const opt = optimizeSplitAward(currentProject, validBids);
+    // Optimized check (memoized above)
     const canSaveMore = opt && opt.optimizedTotalCompCurr < awardTotalLanded - 1;
 
     return (
