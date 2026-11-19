@@ -3,6 +3,7 @@ import { extractId, parseBooleanFlag, resolveBatchPrices, recalculateHeaderTotal
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
 import { canEditOffsetPairings, prepareOffsetPairingsForSave, OffsetPairingError, readOffsetPairings, sameOffsetPairings, writeOffsetPairings } from "@/modules/manufacturing-management/physical-inventory-offsetting/utils/offset-pairings";
 import type { OffsettingPairing } from "@/modules/manufacturing-management/physical-inventory-offsetting/types";
+import { readPhysicalInventorySheet } from "./_read";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,30 +24,12 @@ export async function GET(_request: NextRequest, context: RouteParams) {
             return NextResponse.json({ success: false, error: "Invalid Physical Inventory ID" }, { status: 400 });
         }
 
-        const headerUrl = `${DIRECTUS_URL}/items/mm_physical_inventory/${sheetId}?fields=*,branch_id.*,product_type_id.*,price_type_id.*,encoder_id.*,committed_by.*,cancelled_by.*`;
-        const headerRes = await fetch(headerUrl, { headers, cache: "no-store" });
-        if (!headerRes.ok) {
+        const sheet = await readPhysicalInventorySheet(sheetId);
+        if (!sheet) {
             return NextResponse.json({ success: false, error: "Physical Inventory sheet not found" }, { status: 404 });
         }
 
-        const headerData = (await headerRes.json()).data;
-
-        const offsetPairings = readOffsetPairings(headerData?.remarks);
-
-        // Fetch details
-        const detailsUrl = `${DIRECTUS_URL}/items/mm_physical_inventory_details?filter[physical_inventory_id][_eq]=${sheetId}&limit=-1&fields=*,inventory_lot_id.*,lot_id.*,lot_id.unit_id.*,product_id.*,product_id.product_type.*,product_id.unit_of_measurement.*,unit_id.*`;
-        const detailsRes = await fetch(detailsUrl, { headers, cache: "no-store" });
-        if (!detailsRes.ok) throw new Error("Failed to load the audit detail records. Reload before editing pairings.");
-        const detailsData = (await detailsRes.json()).data || [];
-
-        return NextResponse.json({
-            success: true,
-            data: {
-                ...headerData,
-                details: detailsData,
-                offset_pairings: offsetPairings,
-            },
-        });
+        return NextResponse.json({ success: true, data: sheet });
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : "Internal Server Error";
         return NextResponse.json({ success: false, error: msg }, { status: error instanceof OffsetPairingError ? error.status : 500 });

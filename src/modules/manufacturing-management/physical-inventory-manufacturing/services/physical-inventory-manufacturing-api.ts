@@ -11,6 +11,7 @@ import {
     PriceType,
     Unit,
     PhysicalInventoryFilters,
+    PhysicalInventoryCountSheetData,
 } from "../types";
 import { saveOffsettingPairings } from "../../physical-inventory-offsetting/services/offsetting-api";
 
@@ -34,9 +35,22 @@ export async function fetchPhysicalInventorySheets(filters?: PhysicalInventoryFi
 
 export async function fetchPhysicalInventorySheet(id: number): Promise<MmPhysicalInventorySheet> {
     const res = await fetch(`${API_BASE}/${id}`, { cache: "no-store" });
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-        throw new Error(json.error || "Failed to fetch physical inventory sheet");
+    const json = res.headers.get("content-type")?.includes("application/json")
+        ? await res.json().catch(() => null)
+        : null;
+    if (!res.ok || !json?.success || !Array.isArray(json.data?.details)) {
+        throw new Error(json?.error || "The physical inventory sheet could not be loaded. Refresh the page and try again.");
+    }
+    return json.data;
+}
+
+export async function fetchPhysicalInventoryCountSheet(id: number): Promise<PhysicalInventoryCountSheetData> {
+    const res = await fetch(`${API_BASE}/${id}/count-sheet`, { cache: "no-store" });
+    const json = res.headers.get("content-type")?.includes("application/json")
+        ? await res.json().catch(() => null)
+        : null;
+    if (!res.ok || !json?.success || !Array.isArray(json.data?.sheet?.details) || !Array.isArray(json.data?.additionalRows)) {
+        throw new Error(json?.error || "The physical inventory count sheet could not be loaded. Refresh the page and try again.");
     }
     return json.data;
 }

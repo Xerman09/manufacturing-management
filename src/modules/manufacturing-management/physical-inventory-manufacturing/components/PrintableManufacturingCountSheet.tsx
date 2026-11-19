@@ -1,152 +1,131 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Printer, Download, X, MapPin, Package, Calendar } from "lucide-react";
-import { MmPhysicalInventorySheet, MmPhysicalInventoryDetail } from "../types";
+import { Download, Printer, X } from "lucide-react";
+import type { CountSheetStockRow, MmPhysicalInventorySheet } from "../types";
 import { downloadManufacturingCountSheetPDF } from "../utils/exportManufacturingCountSheetPDF";
-import { formatQty } from "../utils/number-format";
+import {
+    buildManufacturingCountSheet,
+    COUNT_SHEET_COLUMNS,
+    COUNT_SHEET_FONT_PT,
+    COUNT_SHEET_MARGIN_MM,
+    COUNT_SHEET_SIGNATURE_GAP_MM,
+    COUNT_SHEET_SIGNATURES,
+    COUNT_SHEET_SIGNOFF_OFFSET_MM,
+    COUNT_SHEET_SIGNING_SPACE_MM,
+    COUNT_SHEET_TABLE_TITLE,
+    COUNT_SHEET_TITLE,
+} from "../utils/manufacturing-count-sheet";
 
 interface PrintableManufacturingCountSheetProps {
     sheet: MmPhysicalInventorySheet;
+    additionalRows?: CountSheetStockRow[];
+    stockCutoff?: string | null;
+    excludedOtherBranchBalanceCount?: number;
     targetLot?: number | string | null;
     onClose: () => void;
 }
 
-function formatDate(dateStr?: string | null): string {
-    if (!dateStr) return "N/A";
-    const str = String(dateStr).trim();
-    if (str.includes("T")) {
-        const parts = str.split("T");
-        return `${parts[0]} ${parts[1].slice(0, 5)}`;
-    }
-    return str;
-}
-
-interface GroupedBatch {
-    batchNo: string;
-    mfgDate: string;
-    expDate: string;
-    items: MmPhysicalInventoryDetail[];
-}
-
-interface GroupedLot {
-    lotName: string;
-    batches: GroupedBatch[];
-}
-
-export default function PrintableManufacturingCountSheet({ sheet, targetLot, onClose }: PrintableManufacturingCountSheetProps) {
-    const [mounted, setMounted] = useState(false);
+export default function PrintableManufacturingCountSheet({
+    sheet, additionalRows, stockCutoff, excludedOtherBranchBalanceCount = 0, targetLot, onClose,
+}: PrintableManufacturingCountSheetProps) {
     const [showPhysicalCount, setShowPhysicalCount] = useState(false);
+    const [printedAt] = useState(() => new Date().toISOString());
+    const data = useMemo(
+        () => buildManufacturingCountSheet(sheet, { additionalRows, stockCutoff, showPhysicalCount, targetLot, printedAt }),
+        [sheet, additionalRows, stockCutoff, showPhysicalCount, targetLot, printedAt],
+    );
 
-    useEffect(() => {
-        setMounted(true);
-    }, []);
+    if (typeof document === "undefined") return null;
 
-    const handlePrint = () => {
-        window.print();
-    };
-
-    const handleDownloadPDF = () => {
-        downloadManufacturingCountSheetPDF(sheet, { showPhysicalCount, targetLot });
-    };
-
-    const piNo = sheet.pi_no || `PI-${sheet.physical_inventory_id}`;
-
-    // Extract facility / branch name
-    const branchName = typeof sheet.branch_id === "object" && sheet.branch_id !== null
-        ? (sheet.branch_id.branch_name || sheet.branch_id.branchName || "Main Facility")
-        : "Main Facility";
-
-    // Extract product type name
-    let productTypeName = "All Product Types";
-    if (sheet.product_type_id) {
-        if (typeof sheet.product_type_id === "object" && sheet.product_type_id !== null) {
-            productTypeName = (sheet.product_type_id as { name?: string; type_name?: string }).name ||
-                (sheet.product_type_id as { name?: string; type_name?: string }).type_name || "All Product Types";
-        }
-    }
-
-    // Extract encoder name
-    let encoderName = "Plant Inventory Auditor";
-    if (sheet.encoder_id) {
-        if (typeof sheet.encoder_id === "object" && sheet.encoder_id !== null) {
-            const fname = sheet.encoder_id.user_fname || "";
-            const lname = sheet.encoder_id.user_lname || "";
-            encoderName = `${fname} ${lname}`.trim() || "Plant Inventory Auditor";
-        } else {
-            encoderName = String(sheet.encoder_id);
-        }
-    }
-
-    const details: MmPhysicalInventoryDetail[] = useMemo(() => {
-        const all = sheet.details || [];
-        if (!targetLot) return all;
-        return all.filter((item) => {
-            const lObj = typeof item.lot_id === "object" && item.lot_id !== null ? (item.lot_id as { lot_id?: number; id?: number; lot_name?: string }) : null;
-            const lId = lObj?.lot_id || lObj?.id || (typeof item.lot_id === "number" ? item.lot_id : null);
-            const lName = lObj?.lot_name || (item as unknown as { lot_name?: string }).lot_name || "";
-            if (typeof targetLot === "number") return lId === targetLot;
-            if (typeof targetLot === "string") return lName.toLowerCase() === targetLot.toLowerCase();
-            return true;
-        });
-    }, [sheet.details, targetLot]);
-
-    // Group items by Lot and then by Batch
-    const groupedLots: GroupedLot[] = useMemo(() => {
-        const lotMap = new Map<string, Map<string, { mfgDate: string; expDate: string; items: MmPhysicalInventoryDetail[] }>>();
-
-        for (const item of details) {
-            const lObj = typeof item.lot_id === "object" && item.lot_id !== null ? item.lot_id : null;
-            const lotName = lObj?.lot_name || (item as unknown as { lot_name?: string }).lot_name || "Main Storage / Unassigned Lot";
-
-            const bObj = typeof item.inventory_lot_id === "object" && item.inventory_lot_id !== null ? item.inventory_lot_id : null;
-            const batchNo = item.batch_no || bObj?.batch_no || "General Stock / No Batch";
-
-            const mfgDateRaw = item.manufacturing_date || bObj?.manufacturing_date || "—";
-            const expDateRaw = item.expiration_date || (item as unknown as { expiry_date?: string }).expiry_date || bObj?.expiry_date || bObj?.expiration_date || "—";
-
-            const mfgDate = mfgDateRaw !== "—" ? mfgDateRaw.split("T")[0] : "—";
-            const expDate = expDateRaw !== "—" ? expDateRaw.split("T")[0] : "—";
-
-            if (!lotMap.has(lotName)) {
-                lotMap.set(lotName, new Map());
-            }
-            const batchMap = lotMap.get(lotName)!;
-
-            if (!batchMap.has(batchNo)) {
-                batchMap.set(batchNo, { mfgDate, expDate, items: [] });
-            }
-            batchMap.get(batchNo)!.items.push(item);
-        }
-
-        const result: GroupedLot[] = [];
-        lotMap.forEach((batchMap, lotName) => {
-            const batches: GroupedBatch[] = [];
-            batchMap.forEach((batchData, batchNo) => {
-                batches.push({
-                    batchNo,
-                    mfgDate: batchData.mfgDate,
-                    expDate: batchData.expDate,
-                    items: batchData.items,
-                });
-            });
-            result.push({ lotName, batches });
-        });
-
-        return result;
-    }, [details]);
-
-    const countGroups = groupedLots.flatMap((lotGroup) => lotGroup.batches.map((batchGroup) => ({ ...batchGroup, lotName: lotGroup.lotName })));
-    let seqCounter = 1;
-
-    const modalContent = (
-        <div id="printable-countsheet-root" className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-background/90 backdrop-blur-xs overflow-y-auto print:p-0 print:m-0 print:bg-white print:static print:block print:overflow-visible">
-            <style jsx global>{`
+    return createPortal(
+        <div
+            id="printable-countsheet-root"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="manufacturing-countsheet-title"
+            className="fixed inset-0 z-[9999] flex flex-col items-center overflow-auto bg-background/90 p-4 backdrop-blur-xs"
+        >
+            <style>{`
+                #printable-paper-doc {
+                    width: 100%;
+                    max-width: 210mm;
+                    padding: ${COUNT_SHEET_MARGIN_MM}mm;
+                    font: ${COUNT_SHEET_FONT_PT.body}pt/1.25 Arial, Helvetica, sans-serif;
+                    overflow-wrap: anywhere;
+                }
+                #printable-paper-doc header {
+                    margin-bottom: 2mm;
+                    gap: 4mm;
+                }
+                #printable-paper-doc header > :first-child {
+                    padding-top: 2mm;
+                }
+                #printable-paper-doc h1 {
+                    font-size: ${COUNT_SHEET_FONT_PT.title}pt;
+                }
+                #printable-paper-doc header p {
+                    margin-top: 0.5mm;
+                }
+                #printable-paper-doc header p,
+                #printable-paper-doc .countsheet-reference,
+                #printable-paper-doc th,
+                #printable-paper-doc footer p {
+                    font-size: ${COUNT_SHEET_FONT_PT.small}pt;
+                }
+                #printable-paper-doc .countsheet-reference {
+                    flex: 0 0 24%;
+                }
+                #printable-paper-doc .countsheet-reference strong {
+                    display: block;
+                    font-size: ${COUNT_SHEET_FONT_PT.documentNumber}pt;
+                }
+                #printable-paper-doc dl {
+                    margin-bottom: 3mm;
+                    gap: 1.5mm 3mm;
+                    padding: 2.5mm 4mm;
+                }
+                #printable-paper-doc dt {
+                    font-size: ${COUNT_SHEET_FONT_PT.fieldLabel}pt;
+                }
+                #printable-paper-doc h2 {
+                    margin-bottom: 2mm;
+                    padding: 1mm 2mm;
+                }
+                #printable-paper-doc thead tr {
+                    height: 6mm;
+                }
+                #printable-paper-doc tbody tr {
+                    height: 9mm;
+                }
+                #printable-paper-doc th {
+                    padding: 1mm 1.5mm;
+                }
+                #printable-paper-doc td {
+                    padding: 1.5mm;
+                }
+                #printable-paper-doc footer {
+                    display: grid;
+                    grid-template-columns: repeat(3, minmax(0, 1fr));
+                    gap: ${COUNT_SHEET_SIGNATURE_GAP_MM}mm;
+                    margin-top: 4mm;
+                }
+                #printable-paper-doc .countsheet-count-line,
+                #printable-paper-doc .countsheet-signature-line {
+                    display: block;
+                    border-bottom: 0.25mm solid #444;
+                }
+                #printable-paper-doc .countsheet-count-line {
+                    height: 5mm;
+                }
+                #printable-paper-doc .countsheet-signature-line {
+                    margin: ${COUNT_SHEET_SIGNING_SPACE_MM}mm 0 1mm;
+                }
                 @media print {
                     @page {
                         size: A4 portrait;
-                        margin: 8mm;
+                        margin: ${COUNT_SHEET_MARGIN_MM}mm;
                     }
                     html, body {
                         background: white !important;
@@ -154,259 +133,185 @@ export default function PrintableManufacturingCountSheet({ sheet, targetLot, onC
                         height: auto !important;
                         overflow: visible !important;
                     }
-                    /* Hide all background siblings under body when printing */
-                    body > *:not(#printable-countsheet-root) {
+                    body > *:not(#printable-countsheet-root),
+                    #printable-countsheet-actions {
                         display: none !important;
                     }
-                    #printable-countsheet-root {
+                    #printable-countsheet-root, #printable-paper-doc {
                         position: static !important;
                         display: block !important;
                         width: 100% !important;
+                        max-width: none !important;
                         height: auto !important;
-                        margin: 0 !important;
+                        min-height: 0 !important;
                         padding: 0 !important;
-                        background: white !important;
+                        margin: 0 !important;
+                        border: 0 !important;
+                        border-radius: 0 !important;
                         overflow: visible !important;
+                        background: white !important;
+                        box-shadow: none !important;
                     }
                     #printable-paper-doc {
-                        position: static !important;
-                        display: block !important;
-                        width: 100% !important;
-                        max-width: 100% !important;
-                        margin: 0 !important;
-                        padding: 0 !important;
-                        box-shadow: none !important;
-                        border: none !important;
-                        background: white !important;
-                        color: black !important;
-                        overflow: visible !important;
+                        print-color-adjust: exact;
+                        -webkit-print-color-adjust: exact;
                     }
-                    .print\:hidden {
-                        display: none !important;
+                    #printable-paper-doc thead {
+                        display: table-header-group;
                     }
-                    thead {
-                        display: table-header-group !important;
+                    #printable-paper-doc tr,
+                    #printable-paper-doc header,
+                    #printable-paper-doc dl,
+                    #printable-paper-doc footer {
+                        break-inside: avoid;
                     }
-                    tfoot {
-                        display: table-footer-group !important;
-                    }
-                    table {
-                        break-inside: auto !important;
-                        page-break-inside: auto !important;
-                    }
-                    #printable-count-groups > section {
-                        break-inside: auto !important;
-                        page-break-inside: auto !important;
-                    }
-                    tr, .page-break-avoid {
-                        break-inside: avoid !important;
-                        page-break-inside: avoid !important;
+                    #printable-paper-doc h2,
+                    #printable-paper-doc > div {
+                        break-after: avoid;
                     }
                 }
             `}</style>
 
-            {/* Top Toolbar (Hidden during print) */}
-            <div className="fixed top-4 right-4 z-50 flex items-center gap-2 print:hidden">
-                {/* Type Switcher Toggle */}
-                <div className="flex items-center bg-card border border-border p-1 rounded-xl shadow-lg">
+            <div id="printable-countsheet-actions" className="sticky top-0 z-10 mb-3 flex w-full flex-wrap items-center justify-end gap-2">
+                <div className="flex items-center rounded-xl border border-border bg-card p-1 shadow-lg">
                     <button
+                        type="button"
+                        aria-pressed={!showPhysicalCount}
                         onClick={() => setShowPhysicalCount(false)}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                            !showPhysicalCount
-                                ? "bg-black text-white shadow-sm"
-                                : "text-muted-foreground hover:text-foreground"
-                        }`}
+                        className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-bold ${!showPhysicalCount ? "bg-black text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                     >
                         Without Physical Count (Blind)
                     </button>
                     <button
+                        type="button"
+                        aria-pressed={showPhysicalCount}
                         onClick={() => setShowPhysicalCount(true)}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                            showPhysicalCount
-                                ? "bg-black text-white shadow-sm"
-                                : "text-muted-foreground hover:text-foreground"
-                        }`}
+                        className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-bold ${showPhysicalCount ? "bg-black text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                     >
                         With Physical Count
                     </button>
                 </div>
-
                 <button
-                    onClick={handleDownloadPDF}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-lg hover:scale-105 transition-all cursor-pointer"
+                    type="button"
+                    onClick={() => downloadManufacturingCountSheetPDF(sheet, { additionalRows, stockCutoff, showPhysicalCount, targetLot, printedAt })}
+                    className="flex cursor-pointer items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground shadow-lg"
                 >
                     <Download className="h-4 w-4" />
                     Download PDF
                 </button>
                 <button
-                    onClick={handlePrint}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-secondary text-foreground font-bold text-xs rounded-xl shadow-lg hover:scale-105 transition-all border border-border cursor-pointer"
+                    type="button"
+                    onClick={() => window.print()}
+                    className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-secondary px-4 py-2.5 text-xs font-bold text-foreground shadow-lg"
                 >
                     <Printer className="h-4 w-4" />
                     Print Count Sheet
                 </button>
                 <button
+                    type="button"
                     onClick={onClose}
-                    className="p-2.5 rounded-xl bg-card border border-border text-muted-foreground hover:text-foreground shadow-lg transition-all cursor-pointer"
+                    className="cursor-pointer rounded-xl border border-border bg-card p-2.5 text-muted-foreground shadow-lg hover:text-foreground"
                     title="Close Printable Modal"
+                    aria-label="Close count sheet preview"
                 >
                     <X className="h-4 w-4" />
                 </button>
-            </div>
-
-            {/* Printable Paper Document (A4 Portrait Shape & Compact Paper-Saving Layout) */}
-            <div id="printable-paper-doc" className="bg-white text-black w-full max-w-4xl p-6 rounded-xl shadow-2xl print:shadow-none print:p-0 print:m-0 my-auto text-xs font-sans">
-                {/* Company & Document Header */}
-                <div className="border-b-2 border-black pb-3 mb-4 flex items-start justify-between">
-                    <div>
-                        <h1 className="text-lg font-black tracking-wider uppercase text-black">MAMA PINAS MANUFACTURING</h1>
-                        <h2 className="text-xs font-bold text-gray-800 tracking-tight mt-0.5 uppercase">
-                            MANUFACTURING PHYSICAL INVENTORY AUDIT COUNT SHEET
-                        </h2>
-                        <p className="text-[9px] text-gray-500 mt-0.5">
-                            {showPhysicalCount
-                                ? "Official Manufacturing Floor Audit & Physical Count Verification Document"
-                                : "Official Manufacturing Floor Blind Audit & Batch Verification Document"}
-                        </p>
-                    </div>
-                    <div className="text-right font-mono">
-                        <div className="text-sm font-black text-black">#{piNo}</div>
-                        <div className="text-[9px] text-gray-600 mt-0.5 font-sans">Status: <span className="font-bold">{sheet.status || "DRAFT"}</span></div>
-                        <div className="text-[8px] text-gray-400 font-sans">Printed: {formatDate(new Date().toISOString())}</div>
-                    </div>
-                </div>
-
-                {/* Compact Metadata Grid */}
-                <div className="grid grid-cols-3 gap-2 border border-gray-300 rounded-lg p-2.5 mb-4 text-[10px] bg-gray-50 print:bg-transparent">
-                    <div>
-                        <span className="font-bold text-gray-500 block uppercase text-[8px]">Branch / Facility</span>
-                        <span className="font-extrabold text-black">{branchName}</span>
-                    </div>
-                    <div>
-                        <span className="font-bold text-gray-500 block uppercase text-[8px]">Stock Classification</span>
-                        <span className="font-bold text-black">{sheet.stock_type || "REGULAR"} STOCK</span>
-                    </div>
-                    <div>
-                        <span className="font-bold text-gray-500 block uppercase text-[8px]">Product Type Scope</span>
-                        <span className="font-bold text-black">{productTypeName}</span>
-                    </div>
-                    <div>
-                        <span className="font-bold text-gray-500 block uppercase text-[8px]">Auditor In-Charge</span>
-                        <span className="font-bold text-black">{encoderName}</span>
-                    </div>
-                    <div>
-                        <span className="font-bold text-gray-500 block uppercase text-[8px]">Start Timestamp</span>
-                        <span className="font-mono text-black">{formatDate(sheet.starting_date)}</span>
-                    </div>
-                    <div>
-                        <span className="font-bold text-gray-500 block uppercase text-[8px]">Cut-Off Benchmark</span>
-                        <span className="font-mono text-black">{formatDate(sheet.cutoff_date)}</span>
-                    </div>
-                </div>
-
-                {/* Line Items - Grouped per Lot and Batch */}
-                {groupedLots.length === 0 ? (
-                    <div className="border border-gray-300 p-6 text-center text-gray-500 rounded-lg mb-4">
-                        No line items registered in this count sheet.
-                    </div>
-                ) : (
-                    <div id="printable-count-groups" className="grid grid-cols-2 items-start gap-x-3 gap-y-2">
-                        {countGroups.map((batchGroup) => (
-                            <section key={`${batchGroup.lotName}-${batchGroup.batchNo}`} className="border border-gray-300 rounded-lg">
-                                <table className="w-full table-fixed border-collapse text-[9px]">
-                                    <colgroup>
-                                        <col className="w-[64%]" />
-                                        <col className="w-[36%]" />
-                                    </colgroup>
-                                    <thead>
-                                        <tr>
-                                            <th colSpan={2} className="px-2 py-1 border-b border-gray-300 bg-gray-50 text-left text-gray-800 font-semibold leading-tight">
-                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 uppercase">
-                                                    <span className="inline-flex items-center gap-1">
-                                                        <MapPin className="h-3 w-3 text-gray-500 shrink-0" />
-                                                        STORAGE LOT: {batchGroup.lotName}
-                                                    </span>
-                                                    <span className="inline-flex items-center gap-1">
-                                                        <Package className="h-3 w-3 text-gray-500 shrink-0" />
-                                                        BATCH: <span className="font-mono normal-case">{batchGroup.batchNo}</span>
-                                                    </span>
-                                                </div>
-                                                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[8px] text-gray-600 font-mono font-normal normal-case">
-                                                    <span><Calendar className="inline h-2.5 w-2.5 text-gray-400" /> MFG: {batchGroup.mfgDate}</span>
-                                                    <span><Calendar className="inline h-2.5 w-2.5 text-gray-400" /> EXP: {batchGroup.expDate}</span>
-                                                    <span>{batchGroup.items.length} SKU(s)</span>
-                                                </div>
-                                            </th>
-                                        </tr>
-                                        <tr className="border-b border-gray-300 text-[7px] text-gray-600 uppercase">
-                                            <th className="px-2 py-0.5 text-left">Product / UOM / System Qty</th>
-                                            <th className="px-1 py-0.5 text-center">
-                                                {showPhysicalCount ? "Recorded Count" : "Physical Count"}
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {batchGroup.items.map((item) => {
-                                            const pObj = typeof item.product_id === "object" && item.product_id !== null ? item.product_id : null;
-                                            const pName = pObj?.product_name || (item as unknown as { product_name?: string }).product_name || "Product";
-                                            const pCode = pObj?.product_code || (item as unknown as { product_code?: string }).product_code || "";
-                                            const uObj = typeof item.unit_id === "object" && item.unit_id !== null ? item.unit_id : null;
-                                            const uom = uObj?.unit_shortcut || uObj?.unit_name || (item as unknown as { uom?: string }).uom || "PCS";
-                                            const currentSeq = seqCounter++;
-
-                                            return (
-                                                <tr key={item.physical_inventory_detail_id || item.id || currentSeq} className="border-b last:border-b-0 border-gray-200">
-                                                    <td className="px-2 py-1 align-top">
-                                                        <div className="font-bold text-black leading-tight">{currentSeq}. {pName}</div>
-                                                        <div className="mt-0.5 text-[7px] text-gray-600 font-mono leading-tight">
-                                                            {pCode ? `CODE: ${pCode} | ` : ""}{uom.toUpperCase()} | SYS: {formatQty(item.system_count)}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-1 py-1 align-middle text-center">
-                                                        {showPhysicalCount ? (
-                                                            item.physical_count !== null && item.physical_count !== undefined ? (
-                                                                <span className="font-mono font-bold text-black break-all">{formatQty(item.physical_count)}</span>
-                                                            ) : (
-                                                                <span className="text-gray-400 italic font-mono">-</span>
-                                                            )
-                                                        ) : (
-                                                            <div className="h-5 border-b border-dashed border-gray-500" />
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </section>
-                        ))}
-                    </div>
-
+                {excludedOtherBranchBalanceCount > 0 && (
+                    <p role="status" className="w-full rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:bg-amber-950 dark:text-amber-100">
+                        {excludedOtherBranchBalanceCount === 1
+                            ? "1 stock balance was excluded because its lot and batch belong to another branch."
+                            : `${excludedOtherBranchBalanceCount} stock balances were excluded because their lots and batches belong to other branches.`}
+                    </p>
                 )}
-                {/* Compact Sign-Off Authorization Block */}
-                <div className="grid grid-cols-3 gap-4 pt-4 border-t-2 border-black page-break-avoid">
-                    <div className="space-y-6">
-                        <span className="font-bold text-[9px] text-gray-600 block uppercase">Counted / Audited By:</span>
-                        <div className="border-b border-black w-full" />
-                        <span className="text-[8px] text-gray-500 block text-center">Plant Floor Auditor Signature & Date</span>
-                    </div>
-
-                    <div className="space-y-6">
-                        <span className="font-bold text-[9px] text-gray-600 block uppercase">Verified By:</span>
-                        <div className="border-b border-black w-full" />
-                        <span className="text-[8px] text-gray-500 block text-center">Warehouse Supervisor Signature & Date</span>
-                    </div>
-
-                    <div className="space-y-6">
-                        <span className="font-bold text-[9px] text-gray-600 block uppercase">Approved By:</span>
-                        <div className="border-b border-black w-full" />
-                        <span className="text-[8px] text-gray-500 block text-center">Plant Operations Manager Signature & Date</span>
-                    </div>
-                </div>
             </div>
-        </div>
-    );
 
-    if (!mounted) return null;
-    return createPortal(modalContent, document.body);
+            <article
+                id="printable-paper-doc"
+                className="rounded-xl bg-white text-black shadow-2xl"
+            >
+                <div style={{ minHeight: `${COUNT_SHEET_SIGNOFF_OFFSET_MM}mm` }}>
+                    <header className="flex items-start justify-between">
+                        <div className="min-w-0">
+                            <h1 id="manufacturing-countsheet-title" className="font-bold">{COUNT_SHEET_TITLE}</h1>
+                            <p>{data.subtitle}</p>
+                        </div>
+                        <div className="countsheet-reference text-right">
+                            <strong>#{data.number}</strong>
+                            <div>Status: {data.status}</div>
+                            <div>Printed: {data.printedAt}</div>
+                        </div>
+                    </header>
+
+                    <dl className="grid grid-cols-3 rounded-md border border-neutral-500">
+                        {data.metadata.map(({ label, value }) => (
+                            <div key={label}>
+                                <dt className="font-bold uppercase">{label}</dt>
+                                <dd>{value}</dd>
+                            </div>
+                        ))}
+                    </dl>
+
+                    <h2
+                        id="manufacturing-countsheet-table-title"
+                        className="border border-neutral-500 bg-neutral-200 font-bold"
+                    >
+                        {COUNT_SHEET_TABLE_TITLE}
+                    </h2>
+                    <table
+                        aria-labelledby="manufacturing-countsheet-table-title"
+                        className="w-full table-fixed border-collapse tabular-nums"
+                    >
+                        <colgroup>
+                            {COUNT_SHEET_COLUMNS.map(({ label, widthPercent }) => (
+                                <col key={label} style={{ width: `${widthPercent}%` }} />
+                            ))}
+                        </colgroup>
+                        <thead>
+                            <tr className="bg-neutral-100">
+                                {COUNT_SHEET_COLUMNS.map(({ label }) => (
+                                    <th key={label} scope="col" className="border border-neutral-500 text-center font-bold">
+                                        {label}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.rows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={COUNT_SHEET_COLUMNS.length} className="border border-neutral-500 text-center">
+                                        No inventory details for this count sheet.
+                                    </td>
+                                </tr>
+                            ) : data.rows.map((row, rowIndex) => (
+                                <tr key={rowIndex}>
+                                    {row.map((value, index) => (
+                                        <td
+                                            key={COUNT_SHEET_COLUMNS[index].label}
+                                            className="whitespace-pre-line border border-neutral-500 align-middle"
+                                            style={{ textAlign: COUNT_SHEET_COLUMNS[index].align }}
+                                        >
+                                            {!showPhysicalCount && index === COUNT_SHEET_COLUMNS.length - 1 ? (
+                                                <span aria-hidden="true" className="countsheet-count-line" />
+                                            ) : value}
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                <footer>
+                    {COUNT_SHEET_SIGNATURES.map(({ label, caption }) => (
+                        <div key={label}>
+                            <div className="font-bold">{label}</div>
+                            <div aria-hidden="true" className="countsheet-signature-line" />
+                            <p>{caption}</p>
+                        </div>
+                    ))}
+                </footer>
+            </article>
+        </div>,
+        document.body,
+    );
 }
