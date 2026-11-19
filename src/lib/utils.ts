@@ -27,14 +27,26 @@ export function formatDateLong(d: Date, locale: string = "en-PH"): string {
   }).format(d);
 }
 
-export function formatDateTime(d: Date, locale: string = "en-PH"): string {
-  return new Intl.DateTimeFormat(locale, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(d);
+export function formatDateTime(
+  val?: Date | string | null
+): string {
+  if (!val) return "-";
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
+    if (match) {
+      return `${match[1]} ${match[2]}`;
+    }
+  }
+  const d = val instanceof Date ? val : new Date(val);
+  if (Number.isNaN(d.getTime())) return String(val);
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function formatDateTime24h(val?: Date | string | null): string {
+  return formatDateTime(val);
 }
 
 export function isValidDate(val: unknown): val is Date {
