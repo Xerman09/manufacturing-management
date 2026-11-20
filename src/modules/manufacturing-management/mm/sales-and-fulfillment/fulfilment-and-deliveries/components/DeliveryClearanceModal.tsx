@@ -663,6 +663,7 @@ export default function DeliveryClearanceModal({
 
         const payload: ConsolidatedClearanceSubmissionPayload = {
             consolidator_id: record.consolidator_id,
+            dispatch_id: record.dispatch_id,
             is_draft: false,
             clearance_remarks: clearanceRemarks,
             orders: orders.map((ord) => ({
@@ -740,7 +741,8 @@ export default function DeliveryClearanceModal({
 
             // 2. Dispatch to server
             const payload: ConsolidatedClearanceSubmissionPayload = {
-                consolidator_id: record.consolidator_id,
+                consolidator_id: record.dispatch_id || record.consolidator_id,
+                dispatch_id: record.dispatch_id || record.consolidator_id,
                 is_draft: true,
                 clearance_remarks: clearanceRemarks,
                 orders: orders.map((ord) => ({
@@ -806,7 +808,7 @@ export default function DeliveryClearanceModal({
                 };
             })
         );
-        toast.info("Draft reset to original manifest values.");
+        toast.info("Draft reset to original route values.");
     };
 
     if (!isOpen || !record) return null;
@@ -834,7 +836,7 @@ export default function DeliveryClearanceModal({
                                 <div>
                                     <div className="flex items-center gap-2">
                                         <h2 className="text-lg sm:text-xl font-black text-foreground tracking-tight">
-                                            Consolidated Delivery Clearance
+                                            Dispatch Plan Delivery Clearance
                                         </h2>
                                         {isReadOnly ? (
                                             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400">
@@ -878,14 +880,14 @@ export default function DeliveryClearanceModal({
                         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-5">
                             {/* 5 Direct Summary KPI Cards */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                                {/* 1. Consolidator Run */}
+                                {/* 1. Dispatch Plan Run */}
                                 <div className="p-4 rounded-xl border bg-card/60 space-y-1 shadow-xs">
                                     <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                                         <Truck className="h-3.5 w-3.5 text-muted-foreground" />
-                                        Consolidator
+                                        Dispatch Plan
                                     </span>
-                                    <div className="font-black text-sm text-foreground truncate" title={record.consolidator_no}>
-                                        {record.consolidator_no}
+                                    <div className="font-black text-sm text-foreground truncate" title={record.dispatch_no || record.consolidator_no}>
+                                        {record.dispatch_no || record.consolidator_no}
                                     </div>
                                     <div className="text-[10px] text-muted-foreground font-mono truncate">
                                         {record.status}
@@ -902,7 +904,7 @@ export default function DeliveryClearanceModal({
                                         {record.branch_name}
                                     </div>
                                     <div className="text-[10px] text-muted-foreground">
-                                        Consolidated Run
+                                        Dispatch Trip
                                     </div>
                                 </div>
 
@@ -942,13 +944,13 @@ export default function DeliveryClearanceModal({
                                 <div className="p-4 rounded-xl border bg-card/60 space-y-1 shadow-xs">
                                     <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                                         <CircleDollarSign className="h-3.5 w-3.5 text-primary" />
-                                        Manifest Value
+                                        Route Value
                                     </span>
                                     <div className="font-black text-base text-primary flex items-center gap-1">
                                         ₱{record.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </div>
                                     <div className="text-[10px] text-muted-foreground font-medium">
-                                        Net Manifest Total
+                                        Net Route Total
                                     </div>
                                 </div>
                             </div>
@@ -1114,6 +1116,7 @@ export default function DeliveryClearanceModal({
                                             <thead>
                                                 <tr className="border-b bg-muted/40 text-[10px] uppercase font-black text-muted-foreground tracking-wider">
                                                     <th className="p-3.5 min-w-[210px] w-56">Status</th>
+                                                    <th className="p-3.5">Consolidation No.</th>
                                                     <th className="p-3.5">Order No.</th>
                                                     <th className="p-3.5">Invoice No.</th>
                                                     <th className="p-3.5">Invoice Date</th>
@@ -1125,7 +1128,7 @@ export default function DeliveryClearanceModal({
                                             <tbody className="divide-y">
                                                 {filteredOrdersWithIndex.length === 0 ? (
                                                     <tr>
-                                                        <td colSpan={7} className="p-8 text-center text-muted-foreground text-xs font-semibold">
+                                                        <td colSpan={8} className="p-8 text-center text-muted-foreground text-xs font-semibold">
                                                             No invoices matching &quot;{orderSearch}&quot; found.
                                                         </td>
                                                     </tr>
@@ -1211,6 +1214,17 @@ export default function DeliveryClearanceModal({
                                                                             <Lightbulb className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
                                                                             <span className="truncate">Tip: Linked to {ord.linked_sales_return.return_number}</span>
                                                                         </div>
+                                                                    )}
+                                                                </td>
+
+                                                                {/* Consolidation No */}
+                                                                <td className="p-3.5 align-middle font-mono text-[11px]">
+                                                                    {(ord.consolidator_no || (record.consolidator_no?.startsWith("CON-") ? record.consolidator_no : null)) ? (
+                                                                        <span className="font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
+                                                                            {ord.consolidator_no || record.consolidator_no}
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="text-muted-foreground font-mono">---</span>
                                                                     )}
                                                                 </td>
 

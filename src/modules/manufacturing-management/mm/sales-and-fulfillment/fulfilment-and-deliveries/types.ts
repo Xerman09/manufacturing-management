@@ -61,6 +61,8 @@ export interface ConsolidatedSalesOrderRecord {
     order_id: number;
     order_no: string;
     order_status: string;
+    dispatch_no?: string | null;
+    consolidator_no?: string | null;
     invoice_id: number;
     invoice_no: string;
     invoice_date: string;
@@ -82,6 +84,10 @@ export interface ConsolidatedSalesOrderRecord {
 export interface ConsolidatedDeliveryRecord {
     consolidator_id: number;
     consolidator_no: string;
+    dispatch_id?: number;
+    dispatch_no?: string;
+    driver_name?: string;
+    vehicle_name?: string;
     status: string;
     branch_id: number;
     branch_name: string;
@@ -89,6 +95,7 @@ export interface ConsolidatedDeliveryRecord {
     total_orders: number;
     total_items: number;
     total_amount: number;
+    route_value?: number;
     fulfillment_status: FulfillmentStatus;
     is_cleared: boolean;
     is_draft?: boolean;
@@ -111,6 +118,7 @@ export interface Branch {
 
 export interface ConsolidatedClearanceSubmissionPayload {
     consolidator_id: number;
+    dispatch_id?: number;
     is_draft?: boolean;
     clearance_remarks?: string;
     orders: {
