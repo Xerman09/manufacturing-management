@@ -14,6 +14,7 @@ interface NumericInputFieldProps {
     fallbackMin?: number;
     allowDecimals?: boolean;
     precision?: number;
+    formatFixed?: boolean;
     disabled?: boolean;
     className?: string;
     prefix?: string;
@@ -29,6 +30,7 @@ export const NumericInputField: React.FC<NumericInputFieldProps> = ({
     fallbackMin = 0,
     allowDecimals = true,
     precision = 4,
+    formatFixed = false,
     disabled = false,
     className,
     prefix,
@@ -43,6 +45,7 @@ export const NumericInputField: React.FC<NumericInputFieldProps> = ({
             fallbackMin,
             allowDecimals,
             precision,
+            formatFixed,
         });
 
     const prefixPadding = prefix

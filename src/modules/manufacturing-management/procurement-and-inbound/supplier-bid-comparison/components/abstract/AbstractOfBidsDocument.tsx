@@ -220,7 +220,7 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                 : new Date().toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" })}
                         </div>
                         <div>
-                            <strong className="text-foreground">Currency:</strong> {compCurr} (landed, incl. VAT, duty, freight, fees)
+                            <strong className="text-foreground">Currency:</strong> {compCurr} (landed, {currentProject.countVatAsCost ? "incl. VAT" : "excl. VAT"}, duty, freight, fees)
                         </div>
                         <div className="text-right">
                             <strong className="text-foreground">Status:</strong>{" "}
@@ -336,8 +336,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                                     <div>
                                                         {bid.quoteCurrency}{" "}
                                                         {breakdown.appliedUnitPriceForeign.toLocaleString(undefined, {
-                                                            minimumFractionDigits: 3,
-                                                            maximumFractionDigits: 3,
+                                                            minimumFractionDigits: 4,
+                                                            maximumFractionDigits: 4,
                                                         })}
                                                     </div>
                                                     {breakdown.discountPct > 0 && (
@@ -355,8 +355,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                                     )}
                                                 >
                                                     {breakdown.totalLandedCompCurr.toLocaleString(undefined, {
-                                                        minimumFractionDigits: 3,
-                                                        maximumFractionDigits: 3,
+                                                        minimumFractionDigits: 4,
+                                                        maximumFractionDigits: 4,
                                                     })}
                                                     {isAwarded && " ✓"}
                                                 </td>
@@ -380,8 +380,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                     >
                                         {summary.results[bid.id]?.goodsAfterDiscountCompCurr
                                             ? summary.results[bid.id].goodsAfterDiscountCompCurr.toLocaleString(undefined, {
-                                                  minimumFractionDigits: 3,
-                                                  maximumFractionDigits: 3,
+                                                  minimumFractionDigits: 4,
+                                                  maximumFractionDigits: 4,
                                               })
                                             : "0.000"}
                                     </td>
@@ -403,8 +403,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                             className="py-1 px-3 text-right font-mono text-slate-600 border-r border-slate-300 last:border-r-0"
                                         >
                                             {sum.toLocaleString(undefined, {
-                                                minimumFractionDigits: 3,
-                                                maximumFractionDigits: 3,
+                                                minimumFractionDigits: 4,
+                                                maximumFractionDigits: 4,
                                             })}
                                         </td>
                                     );
@@ -423,8 +423,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                         className="py-1 px-3 text-right font-mono text-slate-600 border-r border-slate-300 last:border-r-0"
                                     >
                                         {(summary.results[bid.id]?.dutyCompCurr || 0).toLocaleString(undefined, {
-                                            minimumFractionDigits: 3,
-                                            maximumFractionDigits: 3,
+                                            minimumFractionDigits: 4,
+                                            maximumFractionDigits: 4,
                                         })}
                                     </td>
                                 ))}
@@ -433,7 +433,7 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                             {/* 4. VAT */}
                             <tr>
                                 <td colSpan={3} className="py-1 px-3 text-slate-600 border-r border-slate-200">
-                                    VAT (Landed Base)
+                                    VAT (Landed Base) {!currentProject.countVatAsCost && <span className="text-[9px] text-slate-400 italic">(Excluded from cost)</span>}
                                 </td>
                                 {bids.map((bid) => (
                                     <td
@@ -441,9 +441,9 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                         colSpan={2}
                                         className="py-1 px-3 text-right font-mono text-slate-600 border-r border-slate-300 last:border-r-0"
                                     >
-                                        {(summary.results[bid.id]?.vatCompCurr || 0).toLocaleString(undefined, {
-                                            minimumFractionDigits: 3,
-                                            maximumFractionDigits: 3,
+                                        {(currentProject.countVatAsCost ? (summary.results[bid.id]?.vatCompCurr || 0) : 0).toLocaleString(undefined, {
+                                            minimumFractionDigits: 4,
+                                            maximumFractionDigits: 4,
                                         })}
                                     </td>
                                 ))}
@@ -466,8 +466,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                             className="py-1 px-3 text-right font-mono text-slate-600 border-r border-slate-300 last:border-r-0"
                                         >
                                             {sum.toLocaleString(undefined, {
-                                                minimumFractionDigits: 3,
-                                                maximumFractionDigits: 3,
+                                                minimumFractionDigits: 4,
+                                                maximumFractionDigits: 4,
                                             })}
                                         </td>
                                     );
@@ -491,8 +491,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                             className="py-1 px-3 text-right font-mono text-slate-600 border-r border-slate-300 last:border-r-0"
                                         >
                                             {net.toLocaleString(undefined, {
-                                                minimumFractionDigits: 3,
-                                                maximumFractionDigits: 3,
+                                                minimumFractionDigits: 4,
+                                                maximumFractionDigits: 4,
                                             })}
                                         </td>
                                     );
@@ -514,8 +514,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                         >
                                             {r
                                                 ? r.totalLandedCostCompCurr.toLocaleString(undefined, {
-                                                      minimumFractionDigits: 3,
-                                                      maximumFractionDigits: 3,
+                                                      minimumFractionDigits: 4,
+                                                      maximumFractionDigits: 4,
                                                   })
                                                 : "0.000"}
                                         </td>
@@ -762,8 +762,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                                         <span>
                                             {supplier.supplierName} · {compCurr}{" "}
                                             {award?.awardedLandedTotal.toLocaleString(undefined, {
-                                                minimumFractionDigits: 3,
-                                                maximumFractionDigits: 3,
+                                                minimumFractionDigits: 4,
+                                                maximumFractionDigits: 4,
                                             })}
                                         </span>
                                     ) : (
@@ -779,15 +779,15 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                     <div>
                         <strong>Total award amount:</strong> {compCurr}{" "}
                         {awardTotalLanded.toLocaleString(undefined, {
-                            minimumFractionDigits: 3,
-                            maximumFractionDigits: 3,
+                            minimumFractionDigits: 4,
+                            maximumFractionDigits: 4,
                         })}
                         <span className="ml-4 text-slate-600">
                             <strong>Budget:</strong>{" "}
                             {currentProject.budget
                                 ? `${compCurr} ${currentProject.budget.toLocaleString(undefined, {
-                                      minimumFractionDigits: 3,
-                                      maximumFractionDigits: 3,
+                                      minimumFractionDigits: 4,
+                                      maximumFractionDigits: 4,
                                   })}`
                                 : "—"}
                         </span>
@@ -800,8 +800,8 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
                             >
                                 ({budgetVariance <= 0 ? "Under budget by " : "Over budget by "}
                                 {compCurr} {Math.abs(budgetVariance).toLocaleString(undefined, {
-                                    minimumFractionDigits: 3,
-                                    maximumFractionDigits: 3,
+                                    minimumFractionDigits: 4,
+                                    maximumFractionDigits: 4,
                                 })})
                             </span>
                         )}

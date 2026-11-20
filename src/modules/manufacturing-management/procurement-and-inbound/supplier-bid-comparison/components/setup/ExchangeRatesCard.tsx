@@ -1,35 +1,86 @@
 "use client";
 
-import React, { useState } from "react";
-import { Plus, Trash2, DollarSign } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { Plus, Trash2, DollarSign, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { NumericInputField } from "../shared/NumericInputField";
+import { ComboboxSelect, ComboboxOption } from "../shared/ComboboxSelect";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { ExchangeRateEntry } from "../../types";
+import { FRANKFURTER_CURRENCIES, CURRENCY_MAP } from "../../constants/currencies";
 
 export const ExchangeRatesCard: React.FC = () => {
-    const { currentProject, updateProject } = useBidComparisonStore();
+    const {
+        currentProject,
+        updateProject,
+        forexCache,
+        isLoadingForex,
+        fetchForexRates,
+    } = useBidComparisonStore();
+
     const [newCurrency, setNewCurrency] = useState("");
     const [newRate, setNewRate] = useState<number>(1.0);
 
+    const compCurr = currentProject?.comparisonCurrency || "PHP";
+    const rates = useMemo(() => currentProject?.exchangeRates || [], [currentProject?.exchangeRates]);
+
+    // Pre-fetch latest exchange rates for current comparison currency on mount/change
+    useEffect(() => {
+        if (compCurr) {
+            fetchForexRates(compCurr, false);
+        }
+    }, [compCurr, fetchForexRates]);
+
+    // Available ISO 4217 currencies excluding base currency and already added currencies
+    const availableCurrencyOptions: ComboboxOption[] = useMemo(() => {
+        const addedCodes = new Set(rates.map((r) => r.currencyCode.toUpperCase()));
+        addedCodes.add(compCurr.toUpperCase());
+
+        return FRANKFURTER_CURRENCIES.filter((c) => !addedCodes.has(c.code.toUpperCase())).map((c) => ({
+            value: c.code,
+            label: `${c.code} — ${c.name}${c.symbol ? ` (${c.symbol})` : ""}`,
+ 
+        }));
+    }, [rates, compCurr]);
+
     if (!currentProject) return null;
 
-    const rates = currentProject.exchangeRates || [];
-    const compCurr = currentProject.comparisonCurrency || "PHP";
+    const handleCurrencySelect = (code: string) => {
+        setNewCurrency(code);
+        if (!code) {
+            setNewRate(1.0);
+            return;
+        }
+
+        // Instant in-memory resolution from cached Frankfurter rates (0 network latency)
+        const cachedRate = forexCache?.ratesToComparison?.[code];
+        if (typeof cachedRate === "number" && cachedRate > 0) {
+            setNewRate(cachedRate);
+        } else {
+            setNewRate(1.0);
+        }
+    };
 
     const handleAddCurrency = (e: React.FormEvent) => {
         e.preventDefault();
         const code = newCurrency.trim().toUpperCase();
         if (!code) return;
         if (rates.some((r) => r.currencyCode.toUpperCase() === code)) {
+            toast.error(`Currency ${code} is already added in exchange rates.`);
             return;
         }
 
+        const resolvedRate =
+            (forexCache?.ratesToComparison?.[code] && forexCache.ratesToComparison[code] > 0)
+                ? forexCache.ratesToComparison[code]
+                : (newRate || 1.0);
+
         const newEntry: ExchangeRateEntry = {
             currencyCode: code,
-            rateToComparison: newRate || 1.0,
+            rateToComparison: resolvedRate,
         };
 
         updateProject((prev) => ({
@@ -41,15 +92,6 @@ export const ExchangeRatesCard: React.FC = () => {
         setNewRate(1.0);
     };
 
-    const handleUpdateRate = (code: string, val: number) => {
-        updateProject((prev) => ({
-            ...prev,
-            exchangeRates: prev.exchangeRates.map((r) =>
-                r.currencyCode === code ? { ...r, rateToComparison: val } : r
-            ),
-        }));
-    };
-
     const handleRemoveRate = (code: string) => {
         updateProject((prev) => ({
             ...prev,
@@ -57,73 +99,125 @@ export const ExchangeRatesCard: React.FC = () => {
         }));
     };
 
+    const handleRefreshRates = async () => {
+        const result = await fetchForexRates(compCurr, true);
+        if (result.success) {
+            toast.success(`Exchange rates refreshed from ECB (effective ${result.date || "today"}).`);
+        } else {
+            toast.error(`Failed to refresh exchange rates: ${result.error || "Network error"}`);
+        }
+    };
+
     return (
         <Card className="shadow-xs border-border/80 h-full flex flex-col">
-            <CardHeader className="py-3 px-4 border-b bg-muted/20">
-                <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
-                    <DollarSign className="h-4 w-4 text-emerald-600" />
-                    1.6 Evaluation Exchange Rates
-                </CardTitle>
-                <CardDescription className="text-xs">
-                    Base rates against 1 foreign unit = ? {compCurr}. Figures recalculate instantly across all bids.
-                </CardDescription>
+            <CardHeader className="py-3 px-4 border-b bg-muted/20 flex flex-row items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+                        <DollarSign className="h-4 w-4 text-emerald-600" />
+                        <span>1.6 Evaluation Exchange Rates</span>
+                    </CardTitle>
+                    <CardDescription className="text-xs truncate">
+                        Official rates relative to 1 foreign unit = ? {compCurr}.
+                        {forexCache?.date && (
+                            <span className="ml-1.5 text-[10px] text-muted-foreground/80 font-mono">
+                                • ECB as of {forexCache.date}
+                            </span>
+                        )}
+                    </CardDescription>
+                </div>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRefreshRates}
+                    disabled={isLoadingForex}
+                    className="h-7 text-xs gap-1.5 shrink-0"
+                    title="Pull latest live exchange rates from Frankfurter (ECB)"
+                >
+                    <RefreshCw className={cn("h-3.5 w-3.5", isLoadingForex && "animate-spin")} />
+                    Refresh Rates
+                </Button>
             </CardHeader>
             <CardContent className="p-4 space-y-4 flex-1">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
-                    {/* Fixed Comparison Currency */}
+                    {/* Fixed Comparison Base Currency */}
                     <div className="p-2.5 rounded-lg border bg-muted/40 flex flex-col justify-between">
                         <div className="flex items-center justify-between">
                             <span className="font-bold text-xs font-mono">{compCurr}</span>
                             <span className="text-[10px] text-muted-foreground">Base Currency</span>
                         </div>
-                        <span className="text-xs font-mono font-semibold mt-1">1.000000</span>
+                        <span className="text-xs font-mono font-semibold mt-1">1.0000</span>
                     </div>
 
-                    {rates.map((r) => (
-                        <div
-                            key={r.currencyCode}
-                            className="p-2.5 rounded-lg border bg-card flex flex-col justify-between space-y-1.5"
-                        >
-                            <div className="flex items-center justify-between">
-                                <span className="font-bold text-xs font-mono">{r.currencyCode}</span>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleRemoveRate(r.currencyCode)}
-                                    className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
-                                >
-                                    <Trash2 className="h-3 w-3" />
-                                </Button>
+                    {rates.map((r) => {
+                        const info = CURRENCY_MAP.get(r.currencyCode);
+                        return (
+                            <div
+                                key={r.currencyCode}
+                                className="p-2.5 rounded-lg border bg-card flex flex-col justify-between space-y-1.5"
+                            >
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1">
+                                        <span className="font-bold text-xs font-mono">{r.currencyCode}</span>
+                                        {info?.symbol && (
+                                            <span className="text-[10px] text-muted-foreground font-mono">
+                                                {info.symbol}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleRemoveRate(r.currencyCode)}
+                                        className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
+                                        title={`Remove ${r.currencyCode} from canvass rates`}
+                                    >
+                                        <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                </div>
+                                <NumericInputField
+                                    value={r.rateToComparison}
+                                    onChange={() => {}}
+                                    precision={4}
+                                    formatFixed
+                                    disabled
+                                    className="h-7 text-xs font-mono opacity-80 cursor-not-allowed bg-muted/20"
+                                />
                             </div>
-                            <NumericInputField
-                                value={r.rateToComparison}
-                                onChange={(val) => handleUpdateRate(r.currencyCode, val)}
-                                precision={4}
-                                className="h-7 text-xs font-mono"
-                            />
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
 
                 {/* Add Currency Row */}
-                <form onSubmit={handleAddCurrency} className="flex flex-wrap items-center gap-2 pt-2 border-t max-w-md">
-                    <Input
-                        value={newCurrency}
-                        onChange={(e) => setNewCurrency(e.target.value.toUpperCase())}
-                        placeholder="Currency (e.g. KRW)"
-                        maxLength={5}
-                        className="h-7 text-xs font-mono uppercase w-32"
-                    />
+                <form onSubmit={handleAddCurrency} className="flex flex-wrap items-center gap-2 pt-2 border-t max-w-xl">
+                    <div className="w-64">
+                        <ComboboxSelect
+                            options={availableCurrencyOptions}
+                            value={newCurrency}
+                            onChange={(val) => handleCurrencySelect(val)}
+                            placeholder="Select currency..."
+                            searchPlaceholder="Search ISO currency..."
+                            allowAdHoc={false}
+                            className="h-7 text-xs bg-background"
+                        />
+                    </div>
                     <div className="w-28">
                         <NumericInputField
                             value={newRate}
-                            onChange={(v) => setNewRate(v)}
+                            onChange={(val) => setNewRate(val)}
                             placeholder="Rate"
                             precision={4}
-                            className="h-7 text-xs font-mono"
+                            formatFixed
+                            disabled
+                            className="h-7 text-xs font-mono opacity-80 cursor-not-allowed bg-muted/20"
                         />
                     </div>
-                    <Button type="submit" size="sm" variant="secondary" className="h-7 text-xs shrink-0">
+                    <Button
+                        type="submit"
+                        size="sm"
+                        variant="secondary"
+                        disabled={!newCurrency}
+                        className="h-7 text-xs shrink-0"
+                    >
                         <Plus className="h-3 w-3 mr-1" />
                         Add Rate
                     </Button>

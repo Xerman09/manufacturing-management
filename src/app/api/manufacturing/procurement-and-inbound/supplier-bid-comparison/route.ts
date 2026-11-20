@@ -213,7 +213,7 @@ function cleanUserReadableErrorMessage(err: unknown, section?: string): string {
         return `Quality score must be between 1 and 5.`;
     }
     if (raw.includes('Value in collection "mm_rfq" has to be unique') || raw.includes("uq_rfq_reference_round")) {
-        return `The Reference Number entered already exists in the system. Please update the "Reference no." field in Project Details.`;
+        return `The Reference Number entered already exists in the system.`;
     }
     if (raw.includes("Directus PATCH") || raw.includes("Directus POST")) {
         const cleaned = raw.replace(/^Directus (PATCH|POST) [a-zA-Z0-9_/-]+ failed:\s*/i, "");
@@ -548,7 +548,7 @@ export async function GET(request: NextRequest) {
                 scoringWeightPricePct: Number(h.scoring_weight_price_pct ?? 50),
                 scoringWeightQualityPct: Number(h.scoring_weight_quality_pct ?? 35),
                 scoringWeightLeadTimePct: Number(h.scoring_weight_lead_time_pct ?? 15),
-                status: (h.status as ProjectStatus) || "Draft",
+                status: h.status === "Approved" ? "Awarded" : ((h.status as ProjectStatus) || "Draft"),
                 version: Number(h.version || 1),
                 preparedBy: String(h.prepared_by || ""),
                 preparedByTitle: String(h.prepared_by_title || ""),
@@ -639,8 +639,17 @@ export async function POST(request: NextRequest) {
         }
         body.rfqReference = candidateRef;
 
+        const rawBodyTitle = body.rfqTitle ?? (body as unknown as { rfq_title?: string }).rfq_title;
+        const sanitizedBodyTitle = String(rawBodyTitle ?? "").trim();
+        if (!sanitizedBodyTitle) {
+            return NextResponse.json(
+                { success: false, error: "Project / RFQ title is required and cannot be empty." },
+                { status: 400 }
+            );
+        }
+
         const payload = {
-            rfq_title: body.rfqTitle || "New RFQ Project",
+            rfq_title: sanitizedBodyTitle,
             rfq_reference: candidateRef,
             parent_rfq_id: body.parentRfqId || null,
             round_no: roundNo,
@@ -655,7 +664,7 @@ export async function POST(request: NextRequest) {
             scoring_weight_price_pct: body.scoringWeightPricePct ?? 50.0,
             scoring_weight_quality_pct: body.scoringWeightQualityPct ?? 35.0,
             scoring_weight_lead_time_pct: body.scoringWeightLeadTimePct ?? 15.0,
-            status: body.status || "Draft",
+            status: body.status === "Awarded" ? "Approved" : (body.status || "Draft"),
             version: 1,
             prepared_by: body.preparedBy || "",
             prepared_by_title: body.preparedByTitle || "",
@@ -720,6 +729,15 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: "Missing project id" }, { status: 400 });
         }
 
+        const rawTitle = project.rfqTitle ?? (project as unknown as { rfq_title?: string }).rfq_title;
+        const sanitizedTitle = String(rawTitle ?? "").trim();
+        if (!sanitizedTitle) {
+            return NextResponse.json(
+                { success: false, error: "Project / RFQ title is required and cannot be empty." },
+                { status: 200 }
+            );
+        }
+
         const headers = getHeaders();
         let rfqDbId = parseDbId(project.id) || parseDbId(project.dbId);
 
@@ -749,7 +767,7 @@ export async function PUT(request: NextRequest) {
                 project.rfqReference = safeRef;
 
                 const initialPayload = {
-                    rfq_title: project.rfqTitle || "New RFQ Project",
+                    rfq_title: sanitizedTitle,
                     rfq_reference: safeRef,
                     parent_rfq_id: project.parentRfqId || null,
                     round_no: roundNo,
@@ -764,7 +782,7 @@ export async function PUT(request: NextRequest) {
                     scoring_weight_price_pct: project.scoringWeightPricePct ?? 50.0,
                     scoring_weight_quality_pct: project.scoringWeightQualityPct ?? 35.0,
                     scoring_weight_lead_time_pct: project.scoringWeightLeadTimePct ?? 15.0,
-                    status: project.status || "Draft",
+                    status: project.status === "Awarded" ? "Approved" : (project.status || "Draft"),
                     version: 1,
                     prepared_by: project.preparedBy || "",
                     prepared_by_title: project.preparedByTitle || "",
@@ -831,7 +849,7 @@ export async function PUT(request: NextRequest) {
 
         // 2. Update mm_rfq Header
         const headerPayload = {
-            rfq_title: project.rfqTitle,
+            rfq_title: sanitizedTitle,
             rfq_reference: project.rfqReference,
             parent_rfq_id: project.parentRfqId || null,
             round_no: project.roundNo || 1,
@@ -846,7 +864,7 @@ export async function PUT(request: NextRequest) {
             scoring_weight_price_pct: project.scoringWeightPricePct ?? 50.0,
             scoring_weight_quality_pct: project.scoringWeightQualityPct ?? 35.0,
             scoring_weight_lead_time_pct: project.scoringWeightLeadTimePct ?? 15.0,
-            status: project.status || "Draft",
+            status: project.status === "Awarded" ? "Approved" : (project.status || "Draft"),
             version: (project.version || 1) + 1,
             prepared_by: project.preparedBy || "",
             prepared_by_title: project.preparedByTitle || "",
@@ -883,19 +901,15 @@ export async function PUT(request: NextRequest) {
 
         // 3. Status Change Audit Log
         if (project.status && project.status !== existingStatus) {
+            const isAwardedOrApproved = project.status === "Awarded" || project.status === "Approved";
             const action =
-                project.status === "Approved"
+                isAwardedOrApproved
                     ? "APPROVE"
                     : project.status === "Rejected"
                     ? "REJECT"
                     : project.status === "Submitted"
                     ? "SUBMIT"
                     : "REOPEN";
-
-            const comment =
-                project.status === "Rejected"
-                    ? (project.rejectionReason || project.justification || "Award rejected")
-                    : (project.approvalRemarks || project.justification || "");
 
             const latestHistoryEntry = Array.isArray(project.approvalHistory) && project.approvalHistory.length > 0
                 ? project.approvalHistory[project.approvalHistory.length - 1]
@@ -904,11 +918,15 @@ export async function PUT(request: NextRequest) {
                 ? latestHistoryEntry.actorName
                 : getUserNameFromReq(request);
 
+            const comment =
+                latestHistoryEntry?.comment ||
+                (isAwardedOrApproved ? (project.approvalRemarks || project.justification || "-") : (project.approvalRemarks || project.rejectionReason || "-"));
+
             await postItem("mm_rfq_approval_history", {
                 rfq_id: rfqDbId,
                 action,
-                from_status: existingStatus,
-                to_status: project.status,
+                from_status: existingStatus === "Awarded" ? "Approved" : existingStatus,
+                to_status: isAwardedOrApproved ? "Approved" : project.status,
                 actor_id: userId,
                 actor_name: actorName || "-",
                 comment,

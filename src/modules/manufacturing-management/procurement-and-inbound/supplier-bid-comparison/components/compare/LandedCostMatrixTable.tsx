@@ -131,7 +131,7 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                         {item.quantity.toLocaleString()} {item.uom}
                                     </td>
                                     <td className="py-2.5 px-3 font-mono text-right font-medium text-foreground">
-                                        ₱{item.targetUnitPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                        ₱{item.targetUnitPrice.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                     </td>
 
                                     {bids.map((bid) => {
@@ -162,11 +162,11 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                                         <div className="flex items-center justify-end gap-1">
                                                             {isCheapest && <Check className="h-3.5 w-3.5 text-emerald-600 inline" />}
                                                             <span className={cn("text-xs font-semibold", isOverTarget ? "text-rose-600" : "text-foreground")}>
-                                                                ₱{breakdown.landedUnitCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                                                ₱{breakdown.landedUnitCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                                             </span>
                                                         </div>
                                                         <span className="text-[10px] text-muted-foreground block">
-                                                            {bid.quoteCurrency} {breakdown.appliedUnitPriceForeign.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}{" "}
+                                                            {bid.quoteCurrency} {breakdown.appliedUnitPriceForeign.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}{" "}
                                                             {breakdown.discountPct > 0 ? `(-${breakdown.discountPct}%)` : ""}
                                                         </span>
                                                         {isOverTarget && (
@@ -191,7 +191,7 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                 Total Landed Cost
                             </td>
                             <td className="py-3 px-3 text-right font-mono text-muted-foreground">
-                                ₱{items.reduce((s, it) => s + (it.quantity * it.targetUnitPrice), 0).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                ₱{items.reduce((s, it) => s + (it.quantity * it.targetUnitPrice), 0).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                             </td>
                             {bids.map((bid) => {
                                 const res = summary.results[bid.id];
@@ -200,7 +200,7 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                         {res && res.totalLandedCostCompCurr > 0 ? (
                                             <div>
                                                 <span className="text-xs font-bold block text-foreground">
-                                                    ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                                    ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                                 </span>
                                                 {!res.isFullBid && (
                                                     <span className="text-[10px] text-amber-600 block font-normal">

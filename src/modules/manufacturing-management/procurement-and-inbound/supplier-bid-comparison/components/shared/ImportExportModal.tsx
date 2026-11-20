@@ -2076,7 +2076,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
         <DialogContent
           style={
             parsedRows.length === 0
-              ? { width: "min(720px, 94vw)", maxWidth: "720px" }
+              ? { width: "min(780px, 94vw)", maxWidth: "780px" }
               : { width: "min(1280px, 95vw)", maxWidth: "95vw", height: "88vh" }
           }
           className={
@@ -2535,7 +2535,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = React.memo(
                           <td className="py-1.5 px-2 text-muted-foreground">{r.item}</td>
                           <td className="py-1.5 px-2 font-mono text-[11px]">{r.incoterm || "FOB"}</td>
                           <td className="py-1.5 px-2 text-right font-mono font-medium text-foreground">
-                            {r.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                            {r.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                           </td>
                           <td className="py-1.5 px-2 font-mono text-muted-foreground">{r.currency}</td>
                           <td className="py-1.5 px-2 text-center text-muted-foreground">

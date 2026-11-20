@@ -22,7 +22,7 @@ export type DutyMode = "PER_ITEM" | "FTA" | "ONE_RATE";
 
 export type ShipmentType = "AUTO" | "FCL" | "LCL" | "AIR";
 
-export type ProjectStatus = "Draft" | "Submitted" | "Approved" | "Rejected";
+export type ProjectStatus = "Draft" | "Awarded" | "Submitted" | "Approved" | "Rejected";
 
 export type CriterionType = "SCORED" | "PASS_FAIL";
 
@@ -189,7 +189,7 @@ export interface ItemAward {
 export interface ApprovalHistoryEntry {
     id?: string;
     dbId?: number;
-    action: "SUBMIT" | "APPROVE" | "REJECT" | "WITHDRAW" | "REOPEN";
+    action: "SUBMIT" | "APPROVE" | "REJECT" | "WITHDRAW" | "REOPEN" | "FINALIZE";
     fromStatus: ProjectStatus;
     toStatus: ProjectStatus;
     actorId?: number | null;
