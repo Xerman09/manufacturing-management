@@ -62,6 +62,7 @@ export interface ConsolidatedSalesOrderRecord {
     order_no: string;
     order_status: string;
     dispatch_no?: string | null;
+    consolidator_no?: string | null;
     invoice_id: number;
     invoice_no: string;
     invoice_date: string;

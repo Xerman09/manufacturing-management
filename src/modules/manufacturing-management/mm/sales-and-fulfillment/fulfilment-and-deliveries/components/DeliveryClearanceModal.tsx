@@ -1116,7 +1116,7 @@ export default function DeliveryClearanceModal({
                                             <thead>
                                                 <tr className="border-b bg-muted/40 text-[10px] uppercase font-black text-muted-foreground tracking-wider">
                                                     <th className="p-3.5 min-w-[210px] w-56">Status</th>
-                                                    <th className="p-3.5">Dispatch No.</th>
+                                                    <th className="p-3.5">Consolidation No.</th>
                                                     <th className="p-3.5">Order No.</th>
                                                     <th className="p-3.5">Invoice No.</th>
                                                     <th className="p-3.5">Invoice Date</th>
@@ -1217,11 +1217,11 @@ export default function DeliveryClearanceModal({
                                                                     )}
                                                                 </td>
 
-                                                                {/* Dispatch No */}
+                                                                {/* Consolidation No */}
                                                                 <td className="p-3.5 align-middle font-mono text-[11px]">
-                                                                    {ord.dispatch_no ? (
+                                                                    {(ord.consolidator_no || (record.consolidator_no?.startsWith("CON-") ? record.consolidator_no : null)) ? (
                                                                         <span className="font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
-                                                                            {ord.dispatch_no}
+                                                                            {ord.consolidator_no || record.consolidator_no}
                                                                         </span>
                                                                     ) : (
                                                                         <span className="text-muted-foreground font-mono">---</span>

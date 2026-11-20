@@ -611,7 +611,7 @@ export default function DeliveriesModule() {
                                                                                     <thead>
                                                                                         <tr className="border-b bg-muted/30">
                                                                                             <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Status</th>
-                                                                                            <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Dispatch No</th>
+                                                                                            <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Consolidation No</th>
                                                                                             <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Order No</th>
                                                                                             <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Invoice No</th>
                                                                                             <th className="p-2.5 font-bold text-muted-foreground uppercase text-[9px]">Invoice Date</th>
@@ -634,9 +634,9 @@ export default function DeliveriesModule() {
                                                                                                     </span>
                                                                                                 </td>
                                                                                                 <td className="p-2.5 font-mono text-[10px]">
-                                                                                                    {ord.dispatch_no ? (
+                                                                                                    {(ord.consolidator_no || (record.consolidator_no?.startsWith("CON-") ? record.consolidator_no : null)) ? (
                                                                                                         <span className="font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
-                                                                                                            {ord.dispatch_no}
+                                                                                                            {ord.consolidator_no || record.consolidator_no}
                                                                                                         </span>
                                                                                                     ) : (
                                                                                                         <span className="text-muted-foreground">---</span>

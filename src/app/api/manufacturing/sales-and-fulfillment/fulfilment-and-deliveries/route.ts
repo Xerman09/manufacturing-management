@@ -382,6 +382,56 @@ export async function GET(req: NextRequest) {
             salesOrderDetails.map((s) => [Number(s.detail_id), s])
         );
 
+        // Map consolidator_no by consolidator_id, order_id, invoice_id, and dispatch_no
+        const consolidatorNoById = new Map<number, string>(
+            allConsolidators.map((c) => [Number(c.id), c.consolidator_no || `CON-${c.id}`])
+        );
+
+        const orderIdToConsolidatorNoMap = new Map<number, string>();
+        for (const cd of consolidatorDetails) {
+            const conId = Number(cd.consolidator_id);
+            const sodId = Number(cd.sales_order_detail_id);
+            const cNo = consolidatorNoById.get(conId);
+            if (cNo && sodId) {
+                const sod = sodDetailMap.get(sodId);
+                if (sod?.order_id) {
+                    orderIdToConsolidatorNoMap.set(Number(sod.order_id), cNo);
+                }
+            }
+        }
+
+        const invoiceIdToConsolidatorNoMap = new Map<number, string>();
+        for (const ci of consolidatorInvoices) {
+            const conId = Number(ci.consolidator_id);
+            const invId = Number(ci.invoice_id);
+            const cNo = consolidatorNoById.get(conId);
+            if (cNo && invId) {
+                invoiceIdToConsolidatorNoMap.set(Number(invId), cNo);
+            }
+        }
+
+        const dispatchNoToConsolidatorNoMap = new Map<string, string>();
+        const allDispatchNos = allDispatchPlans.map((dp) => dp.dispatch_no).filter(Boolean);
+        if (allDispatchNos.length > 0) {
+            try {
+                const cdRes = await fetch(
+                    `${DIRECTUS_URL}/items/consolidator_dispatches?filter[dispatch_no][_in]=${allDispatchNos.map(encodeURIComponent).join(",")}&limit=-1&fields=consolidator_id,dispatch_no`,
+                    { headers: directusHeaders, cache: "no-store" }
+                );
+                if (cdRes.ok) {
+                    const cdData: Array<{ consolidator_id: number; dispatch_no: string }> = (await cdRes.json()).data || [];
+                    for (const item of cdData) {
+                        const cNo = consolidatorNoById.get(Number(item.consolidator_id));
+                        if (cNo && item.dispatch_no) {
+                            dispatchNoToConsolidatorNoMap.set(item.dispatch_no.trim(), cNo);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn("[fulfilment-and-deliveries GET] Error fetching consolidator_dispatches:", e);
+            }
+        }
+
         // Collect all distinct order_ids & invoice_ids from BOTH dispatch_plan_details and consolidator
         const dpOrderIds = dispatchDetails.map((dd) => Number(dd.sales_order_id)).filter(Boolean);
         const sodOrderIds = salesOrderDetails.map((s) => Number(s.order_id)).filter(Boolean);
@@ -1877,11 +1927,21 @@ export async function GET(req: NextRequest) {
                                     null;
                                 const salesmanCode = smFromMap?.salesman_code || (typeof curInv?.salesman_code === "string" ? curInv.salesman_code : null) || null;
 
+                                const tripConsolidatorNo = conId
+                                    ? consolidatorNoById.get(conId)
+                                    : (tripDispatchNo ? dispatchNoToConsolidatorNoMap.get(tripDispatchNo) : null);
+                                const resolvedConNo =
+                                    (effectiveInvId ? invoiceIdToConsolidatorNoMap.get(Number(effectiveInvId)) : null) ||
+                                    orderIdToConsolidatorNoMap.get(Number(so?.order_id || orderId)) ||
+                                    tripConsolidatorNo ||
+                                    null;
+
                                 childOrders.push({
                                     order_id: Number(so?.order_id || orderId),
                                     order_no: so?.order_no || `SO-${orderId}`,
                                     order_status: so?.order_status || fallbackStatus || "Dispatched",
                                     dispatch_no: tripDispatchNo || dispatchNoByOrderId.get(Number(so?.order_id || orderId)) || null,
+                                    consolidator_no: resolvedConNo,
                                     invoice_id: invoiceId || 0,
                                     invoice_no: invoiceNo,
                                     invoice_date: invoiceDate ? String(invoiceDate) : "",
@@ -1951,6 +2011,7 @@ export async function GET(req: NextRequest) {
                             order_no: dp.dispatch_no || `DP-${dpId}`,
                             order_status: dp.status || "Dispatched",
                             dispatch_no: dp.dispatch_no || `DP-${dpId}`,
+                            consolidator_no: null,
                             invoice_id: 0,
                             invoice_no: "---",
                             invoice_date: dp.dispatch_date || dp.departure_date || dp.created_at || new Date().toISOString(),

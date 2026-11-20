@@ -1,5 +1,5 @@
 import type { DispatchPlanStatus, SalesOrderStatus } from "./shared.types";
-import { formatDateTime, formatDateTime24h } from "@/lib/utils";
+import { formatDateTime, formatDateTime24h } from "./utils/date";
 
 export { formatDateTime, formatDateTime24h };
 
