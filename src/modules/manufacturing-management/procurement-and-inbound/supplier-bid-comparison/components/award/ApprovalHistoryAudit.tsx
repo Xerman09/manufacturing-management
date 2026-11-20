@@ -17,16 +17,17 @@ export const ApprovalHistoryAudit: React.FC = () => {
 
     const getActionBadge = (action: string) => {
         switch (action) {
+            case "FINALIZE":
+            case "APPROVE":
+                return (
+                    <Badge variant="outline" className="text-[10px] text-emerald-700 bg-emerald-50 dark:bg-emerald-950 border-emerald-300 gap-1">
+                        <CheckCircle2 className="h-2.5 w-2.5" /> AWARD FINALIZED
+                    </Badge>
+                );
             case "SUBMIT":
                 return (
                     <Badge variant="outline" className="text-[10px] text-amber-700 bg-amber-50 dark:bg-amber-950 border-amber-300 gap-1">
                         <Send className="h-2.5 w-2.5" /> SUBMITTED
-                    </Badge>
-                );
-            case "APPROVE":
-                return (
-                    <Badge variant="outline" className="text-[10px] text-emerald-700 bg-emerald-50 dark:bg-emerald-950 border-emerald-300 gap-1">
-                        <CheckCircle2 className="h-2.5 w-2.5" /> APPROVED
                     </Badge>
                 );
             case "REJECT":
@@ -60,7 +61,7 @@ export const ApprovalHistoryAudit: React.FC = () => {
                     4.3 Approval History &amp; Audit Trail ({history.length})
                 </CardTitle>
                 <CardDescription className="text-xs">
-                    Immutable chronological record of submissions, approvals, rejections, and reopenings.
+                    Immutable chronological audit trail of award finalizations and draft reopenings.
                 </CardDescription>
             </CardHeader>
             <CardContent className="p-4 overflow-y-auto max-h-[80vh]">

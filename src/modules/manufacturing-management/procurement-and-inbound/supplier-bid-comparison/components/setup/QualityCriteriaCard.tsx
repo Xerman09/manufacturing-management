@@ -1,10 +1,11 @@
 "use client";
 
 import React from "react";
-import { Plus, Trash2, Award, ShieldAlert } from "lucide-react";
+import { Plus, Trash2, Award, ShieldAlert, CheckCircle2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { NumericInputField } from "../shared/NumericInputField";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { QualityCriterion } from "../../types";
@@ -136,6 +137,40 @@ export const QualityCriteriaCard: React.FC = () => {
                                 );
                             })}
                         </tbody>
+                        <tfoot className="bg-muted/40 border-t font-semibold">
+                            <tr>
+                                <td className="py-2 px-3 text-xs">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span>Total Weight:</span>
+                                        {totalWeight === 100 ? (
+                                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm">
+                                                <CheckCircle2 className="w-3 h-3" /> 100% Balanced
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-100 dark:bg-amber-950/60 dark:text-amber-300 px-1.5 py-0.5 rounded-sm">
+                                                <AlertCircle className="w-3 h-3" /> Sum is {totalWeight}% (Must equal 100%)
+                                            </span>
+                                        )}
+                                    </div>
+                                </td>
+                                <td className="py-2 px-3 text-right">
+                                    <span
+                                        className={cn(
+                                            "font-mono text-xs px-1.5 py-0.5 rounded font-bold",
+                                            totalWeight === 100
+                                                ? "text-emerald-700 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                                : "text-amber-700 bg-amber-100 dark:bg-amber-950/60 dark:text-amber-300"
+                                        )}
+                                    >
+                                        {totalWeight}%
+                                    </span>
+                                </td>
+                                <td className="py-2 px-3 text-right text-muted-foreground font-mono">
+                                    {totalWeight > 0 ? "100.0%" : "0.0%"}
+                                </td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </CardContent>
             </Card>

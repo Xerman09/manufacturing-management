@@ -187,7 +187,7 @@ export function optimizeSplitAward(
     }
 
     return {
-        optimizedTotalCompCurr: Number(bestTotalCost.toFixed(3)),
+        optimizedTotalCompCurr: Number(bestTotalCost.toFixed(4)),
         supplierAwardMap,
         participatingBidIds: Array.from(participatingBidIds),
         costPerSupplier,

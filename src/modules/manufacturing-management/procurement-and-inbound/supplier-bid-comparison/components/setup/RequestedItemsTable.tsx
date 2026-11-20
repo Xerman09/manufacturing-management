@@ -120,7 +120,7 @@ export const RequestedItemsTable: React.FC = () => {
                             <th className="py-2 px-2.5 min-w-[160px]">Specifications</th>
                             <th className="py-2 px-2.5 w-24">Qty</th>
                             <th className="py-2 px-2.5 w-22">UOM</th>
-                            <th className="py-2 px-2.5 w-28">Target Price ({compCurr})</th>
+                            <th className="py-2 px-2.5 w-28">Target Unit Price ({compCurr})</th>
                             <th className="py-2 px-2.5 w-32 text-right">Total Target ({compCurr})</th>
                             <th className="py-2 px-2.5 w-26">HS Code</th>
                             <th className="py-2 px-2.5 w-18">Duty %</th>
@@ -184,13 +184,14 @@ export const RequestedItemsTable: React.FC = () => {
                                                 value={item.targetUnitPrice}
                                                 onChange={(val) => handleUpdateItem(item.id, { targetUnitPrice: val })}
                                                 min={0}
+                                                precision={4}
                                                 className="h-7 text-xs font-mono font-medium bg-background"
                                             />
                                         </td>
                                         <td className="py-2 px-2.5 text-right font-mono font-semibold text-xs text-foreground whitespace-nowrap">
                                             {rowTotalTarget.toLocaleString(undefined, {
-                                                minimumFractionDigits: 3,
-                                                maximumFractionDigits: 3,
+                                                minimumFractionDigits: 4,
+                                                maximumFractionDigits: 4,
                                             })}
                                         </td>
                                         <td className="py-2 px-2.5">
@@ -257,14 +258,14 @@ export const RequestedItemsTable: React.FC = () => {
                     <div>
                         <span className="text-muted-foreground">Total Target Price: </span>
                         <span className="font-bold text-foreground font-mono">
-                            {compCurr} {totalTargetPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                            {compCurr} {totalTargetPrice.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                         </span>
                     </div>
                     <div>
                         <span className="text-muted-foreground">Approved Budget: </span>
                         <span className="font-bold text-foreground font-mono">
                             {budget > 0
-                                ? `${compCurr} ${budget.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
+                                ? `${compCurr} ${budget.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
                                 : "Not set"}
                         </span>
                     </div>
@@ -275,12 +276,12 @@ export const RequestedItemsTable: React.FC = () => {
                         isWithinBudget ? (
                             <Badge variant="outline" className="bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 gap-1.5 py-1 px-2.5 text-xs">
                                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>Under Budget by {compCurr} {budgetVariance.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ({variancePct.toFixed(1)}% buffer)</span>
+                                <span>Under Budget by {compCurr} {budgetVariance.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ({variancePct.toFixed(1)}% buffer)</span>
                             </Badge>
                         ) : (
                             <Badge variant="destructive" className="gap-1.5 py-1 px-2.5 text-xs">
                                 <AlertTriangle className="w-3.5 h-3.5" />
-                                <span>Over Budget by {compCurr} {Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ({Math.abs(variancePct).toFixed(1)}% deficit)</span>
+                                <span>Over Budget by {compCurr} {Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ({Math.abs(variancePct).toFixed(1)}% deficit)</span>
                             </Badge>
                         )
                     ) : (

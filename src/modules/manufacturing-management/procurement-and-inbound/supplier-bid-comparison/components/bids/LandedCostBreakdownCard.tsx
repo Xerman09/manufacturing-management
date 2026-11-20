@@ -37,13 +37,13 @@ export const LandedCostBreakdownCard: React.FC<LandedCostBreakdownCardProps> = (
             label: "Customs & Port Charges (Total)",
             amount: res.customsAndPortTotalCompCurr,
             subDetails: [
-                `Brokerage: ₱${res.brokerageCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`,
-                `IPC: ₱${res.ipcCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`,
-                `CDS & DST: ₱${(res.cdsCompCurr + res.birDstCompCurr).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`,
-                `Arrastre & Wharfage: ₱${(res.arrastreCompCurr + res.wharfageCompCurr).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`,
-                res.containerSecurityCompCurr > 0 ? `Security: ₱${res.containerSecurityCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "",
-                res.lcBankChargeCompCurr > 0 ? `LC Fee: ₱${res.lcBankChargeCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "",
-                res.otherPortChargesCompCurr > 0 ? `Other: ₱${res.otherPortChargesCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "",
+                `Brokerage: ₱${res.brokerageCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`,
+                `IPC: ₱${res.ipcCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`,
+                `CDS & DST: ₱${(res.cdsCompCurr + res.birDstCompCurr).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`,
+                `Arrastre & Wharfage: ₱${(res.arrastreCompCurr + res.wharfageCompCurr).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`,
+                res.containerSecurityCompCurr > 0 ? `Security: ₱${res.containerSecurityCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}` : "",
+                res.lcBankChargeCompCurr > 0 ? `LC Fee: ₱${res.lcBankChargeCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}` : "",
+                res.otherPortChargesCompCurr > 0 ? `Other: ₱${res.otherPortChargesCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}` : "",
             ].filter(Boolean).join(" · "),
         },
         { label: `Value Added Tax (${bid.vatPct}% VAT)`, amount: currentProject.countVatAsCost ? res.vatCompCurr : 0, note: !currentProject.countVatAsCost ? "(Excluded from cost)" : undefined },
@@ -95,8 +95,10 @@ export const LandedCostBreakdownCard: React.FC<LandedCostBreakdownCardProps> = (
                             <span className="font-mono font-medium">
                                 {line.paidBySupplier ? (
                                     <span className="text-muted-foreground italic text-[11px]">Included by supplier</span>
+                                ) : line.amount < 0 ? (
+                                    `-₱${Math.abs(line.amount).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
                                 ) : (
-                                    `₱${line.amount.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
+                                    `₱${line.amount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
                                 )}
                             </span>
                         </div>
@@ -111,7 +113,7 @@ export const LandedCostBreakdownCard: React.FC<LandedCostBreakdownCardProps> = (
                             </span>
                         </div>
                         <span className="font-mono text-base text-primary">
-                            ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                            ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                         </span>
                     </div>
                 </div>

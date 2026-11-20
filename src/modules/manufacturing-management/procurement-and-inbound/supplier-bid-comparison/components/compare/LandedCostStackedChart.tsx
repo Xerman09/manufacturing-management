@@ -37,32 +37,42 @@ const CustomChartTooltip: React.FC<CustomChartTooltipProps> = ({ active, payload
     if (!active || !payload || !payload.length) return null;
 
     const total = payload.reduce((sum: number, p) => sum + (Number(p.value) || 0), 0);
+    const formatCurrency = (val: number) => {
+        const absStr = Math.abs(val).toLocaleString(undefined, {
+            minimumFractionDigits: 4,
+            maximumFractionDigits: 4,
+        });
+        return val < 0 ? `-₱${absStr}` : `₱${absStr}`;
+    };
 
     return (
-        <div className="bg-popover text-popover-foreground border border-border rounded-lg shadow-xl p-3 text-xs min-w-[240px] z-50">
-            <p className="font-bold text-foreground text-xs mb-2 pb-1.5 border-b border-border flex items-center justify-between">
-                <span>{label}</span>
-                <span className="font-mono text-primary font-bold">₱{Math.round(total).toLocaleString()}</span>
+        <div className="bg-popover text-popover-foreground border border-border rounded-lg shadow-xl p-3.5 text-xs min-w-[320px] z-50">
+            <p className="font-bold text-foreground text-xs mb-2 pb-1.5 border-b border-border flex items-center justify-between gap-3">
+                <span className="truncate">{label}</span>
+                <span className="font-mono text-primary font-bold shrink-0">{formatCurrency(total)}</span>
             </p>
             <div className="space-y-1.5">
-                {payload.map((entry, index) => (
-                    <div key={`entry-${index}`} className="flex items-center justify-between gap-4">
-                        <span className="flex items-center gap-2 text-muted-foreground text-[11px]">
-                            <span
-                                className="w-2.5 h-2.5 rounded-xs shrink-0"
-                                style={{ backgroundColor: entry.color }}
-                            />
-                            <span>{entry.name}</span>
-                        </span>
-                        <span className="font-mono font-medium text-foreground text-[11px]">
-                            ₱{Number(entry.value).toLocaleString()}
-                        </span>
-                    </div>
-                ))}
+                {payload.map((entry, index) => {
+                    const val = Number(entry.value) || 0;
+                    return (
+                        <div key={`entry-${index}`} className="flex items-center justify-between gap-4">
+                            <span className="flex items-center gap-2 text-muted-foreground text-[11px] truncate">
+                                <span
+                                    className="w-2.5 h-2.5 rounded-xs shrink-0"
+                                    style={{ backgroundColor: entry.color }}
+                                />
+                                <span className="truncate">{entry.name}</span>
+                            </span>
+                            <span className="font-mono font-medium text-foreground text-[11px] shrink-0">
+                                {formatCurrency(val)}
+                            </span>
+                        </div>
+                    );
+                })}
             </div>
-            <div className="mt-2.5 pt-2 border-t border-border flex items-center justify-between text-xs font-bold">
-                <span className="text-muted-foreground uppercase text-[10px] tracking-wider">Total Landed:</span>
-                <span className="font-mono text-primary text-xs">₱{Math.round(total).toLocaleString()}</span>
+            <div className="mt-2.5 pt-2 border-t border-border flex items-center justify-between text-xs font-bold gap-3">
+                <span className="text-muted-foreground uppercase text-[10px] tracking-wider shrink-0">Total Landed:</span>
+                <span className="font-mono text-primary text-xs shrink-0">{formatCurrency(total)}</span>
             </div>
         </div>
     );
@@ -93,6 +103,8 @@ export const LandedCostStackedChart: React.FC<LandedCostStackedChartProps> = ({ 
             });
     }, [currentProject, supplierFilter, summary]);
 
+    const countVatAsCost = currentProject?.countVatAsCost;
+
     const chartData = React.useMemo(() => {
         if (!summary) return [];
         return fullBids.map((b) => {
@@ -103,7 +115,7 @@ export const LandedCostStackedChart: React.FC<LandedCostStackedChartProps> = ({ 
                 freightAndInsurance: res.freightCompCurr + res.insuranceCompCurr,
                 fxBuffer: res.fxBufferCompCurr,
                 duty: res.dutyCompCurr,
-                vat: res.vatCompCurr,
+                vat: countVatAsCost ? res.vatCompCurr : 0,
                 brokerageAndCustoms: res.customsAndPortTotalCompCurr,
                 inlandAndTerms:
                     res.inlandTruckingCompCurr +
@@ -113,7 +125,7 @@ export const LandedCostStackedChart: React.FC<LandedCostStackedChartProps> = ({ 
                 total: res.totalLandedCostCompCurr,
             };
         });
-    }, [fullBids, summary]);
+    }, [fullBids, summary, countVatAsCost]);
 
     if (!currentProject || !summary) return null;
 

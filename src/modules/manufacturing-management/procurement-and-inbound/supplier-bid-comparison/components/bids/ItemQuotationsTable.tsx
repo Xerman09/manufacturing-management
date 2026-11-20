@@ -1,14 +1,15 @@
 "use client";
 
 import React, { useState } from "react";
-import { Plus, Trash2, Tag, AlertCircle, Calculator, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, Tag, AlertCircle, AlertTriangle, Calculator, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 import { NumericInputField } from "../shared/NumericInputField";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { SupplierBid, ItemQuotation, PriceBreak } from "../../types";
-import { calculateSupplierLandedCost } from "../../engine/landed-cost-calculator";
+import { calculateSupplierLandedCost, getExchangeRate } from "../../engine/landed-cost-calculator";
 
 function generateQuoteId(): string {
     return "quote-" + Date.now().toString(36);
@@ -26,16 +27,28 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
     const { currentProject, updateProject } = useBidComparisonStore();
     const [showFormula, setShowFormula] = useState(true);
 
+    const compCurr = currentProject?.comparisonCurrency || "PHP";
+    const items = React.useMemo(() => currentProject?.items || [], [currentProject?.items]);
+
+    const fxRatesMap = React.useMemo(() => {
+        const map: Record<string, number> = {};
+        (currentProject?.exchangeRates || []).forEach((r) => {
+            map[r.currencyCode.toUpperCase()] = r.rateToComparison;
+        });
+        return map;
+    }, [currentProject?.exchangeRates]);
+
+    const quoteFxRate = React.useMemo(
+        () => getExchangeRate(bid.quoteCurrency, compCurr, fxRatesMap),
+        [bid.quoteCurrency, compCurr, fxRatesMap]
+    );
+
     const landedResult = React.useMemo(() => {
         if (!currentProject) return null;
-        const itemsList = currentProject.items || [];
-        return calculateSupplierLandedCost(currentProject, itemsList, bid);
-    }, [currentProject, bid]);
+        return calculateSupplierLandedCost(currentProject, items, bid);
+    }, [currentProject, items, bid]);
 
     if (!currentProject || !landedResult) return null;
-
-    const items = currentProject.items || [];
-    const compCurr = currentProject.comparisonCurrency || "PHP";
 
     const handleAddPrice = (itemId: string) => {
         const item = items.find((i) => i.id === itemId);
@@ -176,7 +189,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                     <div>
                         <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                             <Tag className="h-4 w-4 text-primary" />
-                            2.2 Item Quotations &amp; Tiered Price Breaks ({compCurr})
+                            2.2 Item Quotations &amp; Tiered Price Breaks ({bid.quoteCurrency})
                         </CardTitle>
                         <CardDescription className="text-xs mt-0.5">
                             Enter unit prices and discounts in {bid.quoteCurrency}. Best price tier is automatically applied and converted to {compCurr} landed costs.
@@ -205,7 +218,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                             </span>
                             <span className="text-[11px] text-muted-foreground font-mono">
                                 {bid.quoteCurrency !== compCurr
-                                    ? `FX Conversion: 1 ${bid.quoteCurrency} = ${currentProject.exchangeRates?.find((r) => r.currencyCode === bid.quoteCurrency)?.rateToComparison || 1} ${compCurr}`
+                                    ? `FX Conversion: 1 ${bid.quoteCurrency} = ${(currentProject.exchangeRates?.find((r) => r.currencyCode === bid.quoteCurrency)?.rateToComparison || 1).toFixed(4)} ${compCurr}`
                                     : `Local Currency: ${compCurr}`}
                             </span>
                         </div>
@@ -278,7 +291,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                             <span className="font-semibold block">{item.itemName}</span>
                                             <span className="text-[10px] text-muted-foreground block truncate max-w-xs">
                                                 {item.specifications || "No specs"} · Target: {compCurr}{" "}
-                                                {item.targetUnitPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                                {item.targetUnitPrice.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                             </span>
                                         </td>
                                         <td className="py-2.5 px-3 font-mono font-medium">
@@ -299,58 +312,81 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                                 </Button>
                                             ) : (
                                                 <div className="space-y-1.5 py-1">
-                                                    {quote.priceBreaks.map((br) => (
-                                                        <div key={br.id} className="flex items-center gap-1.5">
-                                                            <span className="text-[10px] text-muted-foreground w-14 shrink-0">
-                                                                &ge; {br.minQuantity} {item.uom}:
-                                                            </span>
-                                                            <div className="w-24">
-                                                                <NumericInputField
-                                                                    value={br.minQuantity}
-                                                                    onChange={(val) =>
-                                                                        handleUpdatePriceBreak(
-                                                                            item.id,
-                                                                            br.id,
-                                                                            "minQuantity",
-                                                                            val
-                                                                        )
-                                                                    }
-                                                                    min={1}
-                                                                    className="h-6 text-[11px]"
-                                                                    placeholder="Min Qty"
-                                                                />
+                                                    {quote.priceBreaks.map((br) => {
+                                                        const tierUnitCompCurr = br.unitPrice * quoteFxRate;
+                                                        const isTierOverTarget = item.targetUnitPrice > 0 && tierUnitCompCurr > item.targetUnitPrice;
+                                                        const tierVariancePct = item.targetUnitPrice > 0
+                                                            ? ((tierUnitCompCurr - item.targetUnitPrice) / item.targetUnitPrice) * 100
+                                                            : 0;
+
+                                                        return (
+                                                            <div key={br.id} className="space-y-1">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <span className="text-[10px] text-muted-foreground w-14 shrink-0">
+                                                                        &ge; {br.minQuantity} {item.uom}:
+                                                                    </span>
+                                                                    <div className="w-24">
+                                                                        <NumericInputField
+                                                                            value={br.minQuantity}
+                                                                            onChange={(val) =>
+                                                                                handleUpdatePriceBreak(
+                                                                                    item.id,
+                                                                                    br.id,
+                                                                                    "minQuantity",
+                                                                                    val
+                                                                                )
+                                                                            }
+                                                                            min={1}
+                                                                            className="h-6 text-[11px]"
+                                                                            placeholder="Min Qty"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="w-28">
+                                                                        <NumericInputField
+                                                                            value={br.unitPrice}
+                                                                            onChange={(val) =>
+                                                                                handleUpdatePriceBreak(
+                                                                                    item.id,
+                                                                                    br.id,
+                                                                                    "unitPrice",
+                                                                                    val
+                                                                                )
+                                                                            }
+                                                                            min={0}
+                                                                            precision={4}
+                                                                            prefix={bid.quoteCurrency}
+                                                                            className={cn(
+                                                                                "h-6 text-[11px] font-bold",
+                                                                                isTierOverTarget && "border-amber-500/80 text-amber-950 dark:text-amber-200 focus-visible:ring-amber-500 bg-amber-500/5"
+                                                                            )}
+                                                                            placeholder="Price"
+                                                                        />
+                                                                    </div>
+                                                                    {quote.priceBreaks.length > 1 && (
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            onClick={() =>
+                                                                                handleRemovePriceBreak(item.id, br.id)
+                                                                            }
+                                                                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                                                        >
+                                                                            <Trash2 className="h-3 w-3" />
+                                                                        </Button>
+                                                                    )}
+                                                                </div>
+                                                                {isTierOverTarget && (
+                                                                    <div className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 font-medium pl-14 animate-in fade-in duration-150">
+                                                                        <AlertTriangle className="h-3 w-3 shrink-0" />
+                                                                        <span>
+                                                                            Over target by +{tierVariancePct.toFixed(4)}%
+                                                                            {` (+${compCurr} ${(tierUnitCompCurr - item.targetUnitPrice).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}/unit)`}
+                                                                        </span>
+                                                                    </div>
+                                                                )}
                                                             </div>
-                                                            <div className="w-28">
-                                                                <NumericInputField
-                                                                    value={br.unitPrice}
-                                                                    onChange={(val) =>
-                                                                        handleUpdatePriceBreak(
-                                                                            item.id,
-                                                                            br.id,
-                                                                            "unitPrice",
-                                                                            val
-                                                                        )
-                                                                    }
-                                                                    min={0}
-                                                                    prefix={bid.quoteCurrency}
-                                                                    className="h-6 text-[11px] font-bold"
-                                                                    placeholder="Price"
-                                                                />
-                                                            </div>
-                                                            {quote.priceBreaks.length > 1 && (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    onClick={() =>
-                                                                        handleRemovePriceBreak(item.id, br.id)
-                                                                    }
-                                                                    className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                                                                >
-                                                                    <Trash2 className="h-3 w-3" />
-                                                                </Button>
-                                                            )}
-                                                        </div>
-                                                    ))}
+                                                        );
+                                                    })}
 
                                                     <div className="flex items-center gap-2 pt-1">
                                                         <Button
@@ -392,13 +428,18 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                             {breakdown && breakdown.hasQuote ? (
                                                 <div>
                                                     <span className="font-bold text-xs block text-foreground">
-                                                        ₱{breakdown.totalLandedCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                                        ₱{breakdown.totalLandedCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                                     </span>
                                                     <span className="text-[10.5px] text-muted-foreground block truncate">
-                                                        ₱{breakdown.landedUnitCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}/unit
+                                                        ₱{breakdown.landedUnitCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}/unit
                                                         {bid.supplierType === "INTERNATIONAL" && ` · duty ${breakdown.dutyRatePct}%`}
                                                         {breakdown.isBelowMoq && (
                                                             <span className="text-destructive font-medium ml-1">· below MOQ</span>
+                                                        )}
+                                                        {item.targetUnitPrice > 0 && breakdown.landedUnitCostCompCurr > item.targetUnitPrice && (
+                                                            <span className="text-rose-600 dark:text-rose-400 font-medium ml-1">
+                                                                · over target (+{breakdown.varianceVsTargetPct.toFixed(4)}%)
+                                                            </span>
                                                         )}
                                                     </span>
                                                 </div>

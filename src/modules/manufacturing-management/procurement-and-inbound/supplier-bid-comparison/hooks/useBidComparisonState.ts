@@ -94,6 +94,11 @@ interface BidComparisonState {
     lookups: MasterLookupData;
     isLoadingLookups: boolean;
 
+    // Frankfurter Forex Cache
+    forexCache: { base: string; date: string; ratesToComparison: Record<string, number> } | null;
+    isLoadingForex: boolean;
+    fetchForexRates: (baseCurrency?: string, force?: boolean) => Promise<{ success: boolean; date?: string; error?: string }>;
+
     // User session
     currentUser: { name?: string; email?: string } | null;
     setCurrentUser: (user: { name?: string; email?: string } | null) => void;
@@ -297,6 +302,65 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
     lookups: { suppliers: [], products: [], units: [], forex: [], evaluations: [] },
     isLoadingLookups: false,
 
+    forexCache: null,
+    isLoadingForex: false,
+
+    fetchForexRates: async (baseCurrency?: string, force = false) => {
+        const currentComp = baseCurrency || get().currentProject?.comparisonCurrency || "PHP";
+        const existing = get().forexCache;
+        if (!force && existing && existing.base === currentComp) {
+            return { success: true, date: existing.date };
+        }
+
+        set({ isLoadingForex: true });
+        try {
+            const url = `/api/manufacturing/procurement-and-inbound/supplier-bid-comparison/forex?base=${encodeURIComponent(currentComp)}${force ? "&force=true" : ""}`;
+            const res = await fetch(url);
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || `HTTP ${res.status}`);
+            }
+            const data = await res.json();
+            if (!data.success || !data.ratesToComparison) {
+                throw new Error(data.error || "Invalid response from forex service");
+            }
+
+            const ratesMap: Record<string, number> = data.ratesToComparison;
+            const rateDate = data.date || new Date().toISOString().split("T")[0];
+
+            set({
+                forexCache: {
+                    base: currentComp,
+                    date: rateDate,
+                    ratesToComparison: ratesMap,
+                },
+            });
+
+            // If forced refresh (manual user click), update existing project exchange rates to live values
+            if (force) {
+                const project = get().currentProject;
+                if (project && project.exchangeRates && project.exchangeRates.length > 0) {
+                    get().updateProject((prev) => ({
+                        ...prev,
+                        exchangeRates: prev.exchangeRates.map((r) => {
+                            const liveRate = ratesMap[r.currencyCode];
+                            return typeof liveRate === "number" && liveRate > 0
+                                ? { ...r, rateToComparison: Number(Number(liveRate).toFixed(4)) }
+                                : r;
+                        }),
+                    }));
+                }
+            }
+
+            return { success: true, date: rateDate };
+        } catch (err) {
+            const msg = (err as Error)?.message || "Failed to fetch foreign exchange rates.";
+            return { success: false, error: msg };
+        } finally {
+            set({ isLoadingForex: false });
+        }
+    },
+
     currentUser: null,
     setCurrentUser: (user) => set({ currentUser: user }),
 
@@ -334,7 +398,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                 if (data.projects && data.projects.length > 0) {
                     const formatted = data.projects.map((p: Record<string, unknown>) => ({
                         id: String(p.id ?? ""),
-                        rfqTitle: String(p.rfq_title || "Untitled"),
+                        rfqTitle: String(p.rfq_title ?? p.rfqTitle ?? "").trim() || "-",
                         rfqReference: String(p.rfq_reference || "-"),
                         status: (p.status as ProjectStatus) || "Draft",
                         roundNo: Number(p.round_no) || 1,
@@ -403,10 +467,13 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                 if (saved) {
                     try {
                         const parsed: RfqProject = JSON.parse(saved);
+                        if (!parsed.rfqTitle && (parsed as unknown as { rfq_title?: string }).rfq_title) {
+                            parsed.rfqTitle = String((parsed as unknown as { rfq_title?: string }).rfq_title || "");
+                        }
                         set({
                             currentProject: parsed,
                             activeBidId: Array.isArray(parsed.bids) && parsed.bids.length > 0 ? parsed.bids[0].id : null,
-                            storageStatus: parsed.status === "Approved" || parsed.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
+                            storageStatus: parsed.status === "Awarded" || parsed.status === "Approved" || parsed.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
                             lastSavedTimestamp: getPhilippineTimestamp(),
                         });
                         loadedFromLocal = true;
@@ -434,7 +501,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                         set({
                             currentProject: proj,
                             activeBidId: proj.bids && proj.bids.length > 0 ? proj.bids[0].id : null,
-                            storageStatus: proj.status === "Approved" || proj.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
+                            storageStatus: proj.status === "Awarded" || proj.status === "Approved" || proj.status === "Submitted" ? "SHARED_VIEW_ONLY" : "SHARED_LIVE",
                             lastSavedTimestamp: getPhilippineTimestamp(),
                         });
 
@@ -697,8 +764,8 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         const { currentProject } = get();
         if (!currentProject) return;
 
-        // View only check (locked when Submitted or Approved, unless transitioning status or explicitly allowed)
-        if (!allowWhenLocked && (currentProject.status === "Submitted" || currentProject.status === "Approved")) {
+        // View only check (locked when Awarded, Submitted or Approved, unless transitioning status or explicitly allowed)
+        if (!allowWhenLocked && (currentProject.status === "Awarded" || currentProject.status === "Submitted" || currentProject.status === "Approved")) {
             const preview = updater({ ...currentProject });
             if (preview.status === currentProject.status) {
                 toast.error("Project is locked and cannot be edited in this status.");
@@ -716,7 +783,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             saveError: null,
             lastSavedTimestamp: getPhilippineTimestamp(),
             storageStatus:
-                updated.status === "Approved" || updated.status === "Submitted"
+                updated.status === "Awarded" || updated.status === "Approved" || updated.status === "Submitted"
                     ? "SHARED_VIEW_ONLY"
                     : "SHARED_LIVE",
         });
@@ -920,6 +987,24 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         const { currentProject } = get();
         if (!currentProject) return;
 
+        // Map rfqTitle if stored in legacy snake_case
+        const rawTitle = currentProject.rfqTitle ?? (currentProject as unknown as { rfq_title?: string }).rfq_title;
+        const title = String(rawTitle ?? "").trim();
+        if (!title) {
+            toast.error("Project / RFQ title is required. Please enter a title before saving.");
+            set({
+                isSaving: false,
+                saveError: "Project / RFQ title is required.",
+                storageStatus: "SAVED_LOCAL",
+                isDirty: true,
+            });
+            return;
+        }
+
+        const projectToSave = currentProject.rfqTitle !== title
+            ? { ...currentProject, rfqTitle: title }
+            : currentProject;
+
         // Cancel scheduled debounce/maxWait timers as we are saving immediately
         if (debounceTimer) {
             clearTimeout(debounceTimer);
@@ -931,7 +1016,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         }
 
         // Fast-path: Skip redundant network PUT if data content hasn't changed
-        const currentFingerprint = computeProjectFingerprint(currentProject);
+        const currentFingerprint = computeProjectFingerprint(projectToSave);
         if (lastSavedContentHash === currentFingerprint && !get().isDirty) {
             return;
         }
@@ -945,10 +1030,10 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         // Ensure local persistence is up-to-date
         if (typeof window !== "undefined") {
             try {
-                localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + currentProject.id, JSON.stringify(currentProject));
+                localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + projectToSave.id, JSON.stringify(projectToSave));
                 const list = get().projectsList.map((p) =>
-                    p.id === currentProject.id
-                        ? { ...p, rfqTitle: currentProject.rfqTitle, rfqReference: currentProject.rfqReference, status: currentProject.status, updatedAt: currentProject.updatedAt }
+                    p.id === projectToSave.id
+                        ? { ...p, rfqTitle: projectToSave.rfqTitle, rfqReference: projectToSave.rfqReference, status: projectToSave.status, updatedAt: projectToSave.updatedAt }
                         : p
                 );
                 localStorage.setItem(LOCAL_STORAGE_INDEX_KEY, JSON.stringify(list));
@@ -957,15 +1042,15 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             }
         }
 
-        const sentProjectId = currentProject.id;
-        set({ isSaving: true, saveError: null });
+        const sentProjectId = projectToSave.id;
+        set({ currentProject: projectToSave, isSaving: true, saveError: null });
 
         inFlightSave = (async () => {
             try {
                 const res = await fetch("/api/manufacturing/procurement-and-inbound/supplier-bid-comparison", {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(currentProject),
+                    body: JSON.stringify(projectToSave),
                 });
 
                 if (res.ok) {
@@ -1081,7 +1166,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
                         saveError: null,
                         lastSyncedTimestamp: getPhilippineTimestamp(),
                         storageStatus:
-                            liveProject.status === "Approved" || liveProject.status === "Submitted"
+                            liveProject.status === "Awarded" || liveProject.status === "Approved" || liveProject.status === "Submitted"
                                 ? "SHARED_VIEW_ONLY"
                                 : "SHARED_LIVE",
                     });

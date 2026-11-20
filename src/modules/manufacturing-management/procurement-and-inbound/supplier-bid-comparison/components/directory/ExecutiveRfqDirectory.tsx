@@ -54,8 +54,8 @@ interface StageConfig {
     filled: number; // lit segments in the 3-step track
 }
 
-const STAGES: ProjectStatus[] = ["Draft", "Submitted", "Approved", "Rejected"];
-const PIPELINE: ProjectStatus[] = ["Draft", "Submitted", "Approved"];
+const STAGES: ProjectStatus[] = ["Draft", "Awarded"];
+const PIPELINE: ProjectStatus[] = ["Draft", "Awarded"];
 
 const STAGE_CONFIG: Record<string, StageConfig> = {
     Draft: {
@@ -67,37 +67,31 @@ const STAGE_CONFIG: Record<string, StageConfig> = {
         text: "text-slate-600 dark:text-slate-300",
         filled: 1,
     },
-    Submitted: {
-        label: "Pending review",
-        hint: "Awaiting approval",
-        dot: "bg-amber-500",
-        ring: "border-amber-500",
-        soft: "bg-amber-500/10",
-        text: "text-amber-700 dark:text-amber-300",
-        filled: 2,
-    },
-    Approved: {
-        label: "Approved & awarded",
-        hint: "Closed out",
+    Awarded: {
+        label: "Awarded",
+        hint: "Award finalized",
         dot: "bg-emerald-500",
         ring: "border-emerald-500",
         soft: "bg-emerald-500/10",
         text: "text-emerald-700 dark:text-emerald-300",
-        filled: 3,
+        filled: 2,
     },
-    Rejected: {
-        label: "Rejected",
-        hint: "Sent back",
-        dot: "bg-rose-500",
-        ring: "border-rose-500",
-        soft: "bg-rose-500/10",
-        text: "text-rose-700 dark:text-rose-300",
+    Approved: {
+        label: "Awarded",
+        hint: "Award finalized",
+        dot: "bg-emerald-500",
+        ring: "border-emerald-500",
+        soft: "bg-emerald-500/10",
+        text: "text-emerald-700 dark:text-emerald-300",
         filled: 2,
     },
 };
 
 const getStage = (status: ProjectStatus): StageConfig => STAGE_CONFIG[status] || STAGE_CONFIG.Draft;
-const normalizeStatus = (status: ProjectStatus): ProjectStatus => (STAGE_CONFIG[status] ? status : "Draft");
+const normalizeStatus = (status: ProjectStatus): ProjectStatus => {
+    if (status === "Awarded" || status === "Approved") return "Awarded";
+    return "Draft";
+};
 
 const VIEW_KEY = "mm_rfq_directory_view";
 
@@ -170,10 +164,10 @@ const StageTrack: React.FC<{ status: ProjectStatus }> = ({ status }) => {
     const cfg = getStage(status);
     return (
         <div className="flex items-center gap-1" title={`${cfg.label}`} aria-hidden="true">
-            {[0, 1, 2].map((i) => (
+            {[0, 1].map((i) => (
                 <span
                     key={i}
-                    className={cn("h-1.5 w-5 rounded-full", i < cfg.filled ? cfg.dot : "bg-muted-foreground/15")}
+                    className={cn("h-1.5 w-6 rounded-full", i < cfg.filled ? cfg.dot : "bg-muted-foreground/15")}
                 />
             ))}
         </div>
@@ -349,9 +343,10 @@ export const ExecutiveRfqDirectory: React.FC<ExecutiveRfqDirectoryProps> = ({
     };
 
     const counts = useMemo(() => {
-        const c: Record<string, number> = { Draft: 0, Submitted: 0, Approved: 0, Rejected: 0 };
+        const c: Record<string, number> = { Draft: 0, Awarded: 0 };
         projects.forEach((p) => {
-            c[normalizeStatus(p.status)] += 1;
+            const st = normalizeStatus(p.status);
+            c[st] = (c[st] || 0) + 1;
         });
         return c;
     }, [projects]);
@@ -383,8 +378,12 @@ export const ExecutiveRfqDirectory: React.FC<ExecutiveRfqDirectoryProps> = ({
     const endItem = Math.min(safeListPage * listPageSize, filteredProjects.length);
 
     const byStage = useMemo(() => {
-        const g: Record<string, ProjectItem[]> = { Draft: [], Submitted: [], Approved: [], Rejected: [] };
-        filteredProjects.forEach((p) => g[normalizeStatus(p.status)].push(p));
+        const g: Record<string, ProjectItem[]> = { Draft: [], Awarded: [] };
+        filteredProjects.forEach((p) => {
+            const st = normalizeStatus(p.status);
+            if (!g[st]) g[st] = [];
+            g[st].push(p);
+        });
         return g;
     }, [filteredProjects]);
 
@@ -461,22 +460,14 @@ export const ExecutiveRfqDirectory: React.FC<ExecutiveRfqDirectoryProps> = ({
                                 <React.Fragment key={s}>
                                     <PipelineNode
                                         status={s}
-                                        count={counts[s]}
+                                        count={counts[s] || 0}
                                         active={statusFilter === s}
                                         dimmed={statusFilter !== "ALL" && statusFilter !== s}
                                         onClick={() => toggleStage(s)}
                                     />
-                                    {i < PIPELINE.length - 1 && <Connector active={counts[s] > 0} />}
+                                    {i < PIPELINE.length - 1 && <Connector active={(counts[s] || 0) > 0} />}
                                 </React.Fragment>
                             ))}
-                            <div aria-hidden="true" className="mx-2 mt-1 h-14 w-px self-start bg-border" />
-                            <PipelineNode
-                                status="Rejected"
-                                count={counts.Rejected}
-                                active={statusFilter === "Rejected"}
-                                dimmed={statusFilter !== "ALL" && statusFilter !== "Rejected"}
-                                onClick={() => toggleStage("Rejected")}
-                            />
                         </div>
                     </div>
                 </div>
@@ -563,7 +554,7 @@ export const ExecutiveRfqDirectory: React.FC<ExecutiveRfqDirectoryProps> = ({
                 />
             ) : view === "board" ? (
                 /* ------------------------------ Board ------------------------------ */
-                <div className={cn("grid items-start gap-4", !singleColumn && "md:grid-cols-2 xl:grid-cols-4")}>
+                <div className={cn("grid items-start gap-4", !singleColumn && "md:grid-cols-2")}>
                     {columnsToShow.map((s) => {
                         const cfg = getStage(s);
                         const items = byStage[s];

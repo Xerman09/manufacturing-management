@@ -5,21 +5,28 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 import { NumericInputField } from "../shared/NumericInputField";
+import { ComboboxSelect, ComboboxOption } from "../shared/ComboboxSelect";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { FRANKFURTER_CURRENCIES } from "../../constants/currencies";
 import { AlertCircle } from "lucide-react";
 
-const CURRENCIES = ["PHP", "USD", "CNY", "EUR", "JPY", "SGD", "GBP", "AUD"];
-
 export const ProjectDetailsCard: React.FC = () => {
-    const { currentProject, updateProject, projectsList, saveError } = useBidComparisonStore();
+    const {
+        currentProject,
+        updateProject,
+        projectsList,
+        saveError,
+        fetchForexRates,
+    } = useBidComparisonStore();
+
+    const currencyOptions: ComboboxOption[] = React.useMemo(() => {
+        return FRANKFURTER_CURRENCIES.map((c) => ({
+            value: c.code,
+            label: `${c.code} — ${c.name}${c.symbol ? ` (${c.symbol})` : ""}`,
+
+        }));
+    }, []);
 
     const isReferenceDuplicate = React.useMemo(() => {
         if (!currentProject?.rfqReference?.trim()) return false;
@@ -78,6 +85,7 @@ export const ProjectDetailsCard: React.FC = () => {
                             value={currentProject.rfqReference}
                             onChange={(e) => updateProject((prev) => ({ ...prev, rfqReference: e.target.value }))}
                             placeholder="RFQ-2026-118"
+                            disabled
                             className={`h-8 text-xs font-mono bg-background transition-colors ${
                                 hasRefError
                                     ? "border-destructive text-destructive focus-visible:ring-destructive bg-destructive/5"
@@ -106,23 +114,19 @@ export const ProjectDetailsCard: React.FC = () => {
 
                     <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground font-medium">Compare in</Label>
-                        <Select
+                        <ComboboxSelect
+                            options={currencyOptions}
                             value={compCurr}
-                            onValueChange={(val) =>
-                                updateProject((prev) => ({ ...prev, comparisonCurrency: val }))
-                            }
-                        >
-                            <SelectTrigger className="h-8 text-xs font-semibold bg-background">
-                                <SelectValue placeholder="PHP" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {CURRENCIES.map((c) => (
-                                    <SelectItem key={c} value={c} className="text-xs font-mono font-medium">
-                                        {c}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                            onChange={(val) => {
+                                if (!val || val === compCurr) return;
+                                updateProject((prev) => ({ ...prev, comparisonCurrency: val }));
+                                fetchForexRates(val, true);
+                            }}
+                            placeholder="Select currency..."
+                            searchPlaceholder="Search currency..."
+                            allowAdHoc={false}
+                            className="h-8 text-xs font-semibold bg-background"
+                        />
                     </div>
 
                     <div className="space-y-1">
@@ -132,7 +136,9 @@ export const ProjectDetailsCard: React.FC = () => {
                         <NumericInputField
                             value={currentProject.budget}
                             onChange={(val) => updateProject((prev) => ({ ...prev, budget: val }))}
-                            placeholder="0.00"
+                            min={0}
+                            precision={4}
+                            placeholder="0.0000"
                             className="h-8 text-xs font-mono font-semibold bg-background"
                         />
                     </div>

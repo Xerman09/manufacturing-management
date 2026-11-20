@@ -62,8 +62,9 @@ export const ProjectSelectCombobox: React.FC<ProjectSelectComboboxProps> = ({
     const getStatusBadge = (status: ProjectStatus) => {
         const variants: Record<string, string> = {
             Draft: "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border-slate-300",
-            Submitted: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-amber-300",
+            Awarded: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-300",
             Approved: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-300",
+            Submitted: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-amber-300",
             Rejected: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300 border-rose-300",
         };
         const colorClass = variants[status] || variants.Draft;

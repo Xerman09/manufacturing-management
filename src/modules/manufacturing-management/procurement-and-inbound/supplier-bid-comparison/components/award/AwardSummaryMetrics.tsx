@@ -78,7 +78,7 @@ export const AwardSummaryMetrics: React.FC = () => {
                             AWARDED TOTAL (LANDED)
                         </span>
                         <div className="text-base font-bold font-mono text-foreground">
-                            {compCurr} {awardTotalLanded.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                            {compCurr} {awardTotalLanded.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                         </div>
                         <span className="text-[10px] text-muted-foreground block truncate">
                             Allocated across {winningSupplierIds.size} supplier(s) · {awards.length}/{items.length} items
@@ -97,7 +97,7 @@ export const AwardSummaryMetrics: React.FC = () => {
                             {savingsVsAverage !== null ? (
                                 <span className={savingsVsAverage >= 0 ? "text-emerald-600" : "text-rose-600"}>
                                     {savingsVsAverage >= 0 ? "Saves " : "Over by "}
-                                    ₱{Math.abs(savingsVsAverage).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                    ₱{Math.abs(savingsVsAverage).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                 </span>
                             ) : (
                                 "-"
@@ -119,14 +119,14 @@ export const AwardSummaryMetrics: React.FC = () => {
                         <div className="text-base font-bold font-mono">
                             {totalTarget > 0 ? (
                                 <span className={varianceVsTarget <= 0 ? "text-emerald-600" : "text-rose-600"}>
-                                    {varianceVsTarget <= 0 ? "-" : "+"}₱{Math.abs(varianceVsTarget).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                    {varianceVsTarget <= 0 ? "-" : "+"}₱{Math.abs(varianceVsTarget).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                 </span>
                             ) : (
                                 "-"
                             )}
                         </div>
                         <span className="text-[10px] text-muted-foreground block truncate">
-                            Ceiling: ₱{totalTarget.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                            Ceiling: ₱{totalTarget.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                         </span>
                     </CardContent>
                 </Card>
@@ -142,14 +142,14 @@ export const AwardSummaryMetrics: React.FC = () => {
                             {budgetVariance !== null ? (
                                 <span className={isOverBudget ? "text-rose-600 font-bold" : "text-emerald-600 font-bold"}>
                                     {isOverBudget ? "Over by " : "Under by "}
-                                    ₱{Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                    ₱{Math.abs(budgetVariance).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                 </span>
                             ) : (
                                 <span className="text-muted-foreground text-xs">No budget set</span>
                             )}
                         </div>
                         <span className="text-[10px] text-muted-foreground block truncate">
-                            Budget: {currentProject.budget ? `₱${currentProject.budget.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}` : "-"}
+                            Budget: {currentProject.budget ? `₱${currentProject.budget.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}` : "-"}
                         </span>
                     </CardContent>
                 </Card>
@@ -161,7 +161,7 @@ export const AwardSummaryMetrics: React.FC = () => {
                     <div className="flex items-center gap-2">
                         <Lightbulb className="h-4 w-4 text-blue-600 shrink-0" />
                         <span>
-                            <strong>Cheaper combination available:</strong> The optimized split award across {opt.participatingBidIds.length} suppliers achieves <strong>₱{opt.optimizedTotalCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</strong>, saving an additional <strong>₱{(awardTotalLanded - opt.optimizedTotalCompCurr).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</strong>.
+                            <strong>Cheaper combination available:</strong> The optimized split award across {opt.participatingBidIds.length} suppliers achieves <strong>₱{opt.optimizedTotalCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</strong>, saving an additional <strong>₱{(awardTotalLanded - opt.optimizedTotalCompCurr).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</strong>.
                         </span>
                     </div>
                 </div>

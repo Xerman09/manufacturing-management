@@ -188,7 +188,7 @@ export function evaluateAndCompareSuppliers(
     let bestLocalVsIntPct: number | null = null;
     if (bestLocalTotalCompCurr !== null && bestInternationalTotalCompCurr !== null) {
         bestLocalVsIntDifferenceCompCurr = Number(
-            Math.abs(bestLocalTotalCompCurr - bestInternationalTotalCompCurr).toFixed(3)
+            Math.abs(bestLocalTotalCompCurr - bestInternationalTotalCompCurr).toFixed(4)
         );
         const baseline = Math.min(bestLocalTotalCompCurr, bestInternationalTotalCompCurr);
         if (baseline > 0) {
@@ -203,7 +203,7 @@ export function evaluateAndCompareSuppliers(
     let isBudgetOver = false;
     if (project.budget && recommendedBidId) {
         const recTotal = results[recommendedBidId].totalLandedCostCompCurr;
-        budgetVarianceCompCurr = Number((recTotal - project.budget).toFixed(3));
+        budgetVarianceCompCurr = Number((recTotal - project.budget).toFixed(4));
         isBudgetOver = budgetVarianceCompCurr > 0;
     }
 

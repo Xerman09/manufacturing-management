@@ -87,6 +87,7 @@ export const SupplierSummaryTable: React.FC<SupplierSummaryTableProps> = ({ supp
                                 if (!res) return null;
 
                                 const isLocal = bid.supplierType === "LOCAL";
+                                const effectiveVat = currentProject.countVatAsCost ? res.vatCompCurr : 0;
                                 const feesAndInland =
                                     res.customsAndPortTotalCompCurr +
                                     res.inlandTruckingCompCurr +
@@ -162,35 +163,46 @@ export const SupplierSummaryTable: React.FC<SupplierSummaryTableProps> = ({ supp
                                             </span>
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{res.goodsAfterDiscountCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                            ₱{res.goodsAfterDiscountCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
                                             {res.discountTotalCompCurr > 0 ? (
                                                 <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                                                    -₱{res.discountTotalCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                                    -₱{res.discountTotalCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                                 </span>
                                             ) : (
                                                 <span className="text-muted-foreground">-</span>
                                             )}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{(res.freightCompCurr + res.insuranceCompCurr).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                            ₱{(res.freightCompCurr + res.insuranceCompCurr).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{res.dutyCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                            ₱{res.dutyCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                                        </td>
+                                        <td className="py-3 px-3 text-right font-mono" title={!currentProject.countVatAsCost ? "VAT excluded from cost (company claims input VAT)" : undefined}>
+                                            <span>
+                                                ₱{effectiveVat.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                                            </span>
+                                            {!currentProject.countVatAsCost && res.vatCompCurr > 0 && (
+                                                <span className="block text-[9px] text-muted-foreground/70 font-sans">(excluded)</span>
+                                            )}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{res.vatCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                            ₱{feesAndInland.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono">
-                                            ₱{feesAndInland.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
-                                        </td>
-                                        <td className="py-3 px-3 text-right font-mono">
-                                            ₱{fxAndTerms.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                            {fxAndTerms < 0 ? (
+                                                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                                                    -₱{Math.abs(fxAndTerms).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                                                </span>
+                                            ) : (
+                                                `₱${fxAndTerms.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
+                                            )}
                                         </td>
                                         <td className="py-3 px-3 text-right font-mono bg-primary/5">
                                             <span className="font-bold text-xs block text-foreground">
-                                                ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                                ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                             </span>
                                             {pctAboveLowest && (
                                                 <span className="text-[9px] text-muted-foreground block">

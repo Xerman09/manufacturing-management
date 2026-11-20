@@ -18,7 +18,6 @@ import { RequestedItemsTable } from "./components/setup/RequestedItemsTable";
 import { QualityCriteriaCard } from "./components/setup/QualityCriteriaCard";
 import { CustomsAndPortChargesCard } from "./components/setup/CustomsAndPortChargesCard";
 import { ExchangeRatesCard } from "./components/setup/ExchangeRatesCard";
-import { SignatoriesCard } from "./components/setup/SignatoriesCard";
 
 // Step 2: Bids Components
 import { SupplierSidebar } from "./components/bids/SupplierSidebar";
@@ -63,7 +62,22 @@ interface SupplierBidComparisonModuleProps {
   };
 }
 
-export const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = ({ currentUser }) => {
+export function generateNextQuotationRef(existingBids: SupplierBid[]): string {
+  const currentYear = new Date().getFullYear();
+  const prefix = `QT-${currentYear}-`;
+  let maxSeq = 0;
+  for (const b of existingBids) {
+    if (b.quotationRef && b.quotationRef.startsWith(prefix)) {
+      const numPart = parseInt(b.quotationRef.slice(prefix.length), 10);
+      if (!isNaN(numPart) && numPart > maxSeq) {
+        maxSeq = numPart;
+      }
+    }
+  }
+  return `${prefix}${String(maxSeq + 1).padStart(3, "0")}`;
+}
+
+const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = ({ currentUser }) => {
   const setCurrentUser = useBidComparisonStore((s) => s.setCurrentUser);
 
   useEffect(() => {
@@ -172,7 +186,6 @@ export const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModulePr
   const handleAddSupplier = (type: "LOCAL" | "INTERNATIONAL") => {
     if (!currentProject) return;
     const newBidId = `bid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    const compCurr = currentProject.comparisonCurrency || "PHP";
 
     const initialQuotes: Record<string, ItemQuotation> = {};
     (currentProject.items || []).forEach((it) => {
@@ -199,16 +212,18 @@ export const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModulePr
       };
     });
 
+    const nextQuoteRef = generateNextQuotationRef(currentProject.bids || []);
+
     const newBid: SupplierBid = {
       id: newBidId,
       supplierName: type === "LOCAL" ? "New Local Supplier" : "New Overseas Supplier",
       supplierType: type,
-      country: type === "LOCAL" ? "PH" : "CN",
+      country: type === "LOCAL" ? "Philippines" : "CN",
       contactPerson: "",
       contactEmail: "",
       contactPhone: "",
-      quoteCurrency: type === "LOCAL" ? compCurr : "USD",
-      quotationRef: "",
+      quoteCurrency: type === "LOCAL" ? "PHP" : "USD",
+      quotationRef: nextQuoteRef,
       quoteDate: new Date().toISOString().split("T")[0],
       validUntil: "",
       leadTimeDays: type === "LOCAL" ? 14 : 35,
@@ -220,10 +235,10 @@ export const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModulePr
       freightBasis: "PER_CBM",
       freightRate: 0,
       freightMinimum: 0,
-      freightCurrency: type === "LOCAL" ? compCurr : "",
+      freightCurrency: type === "LOCAL" ? "PHP" : "",
       insuranceBasis: "PCT_GOODS_AND_FREIGHT",
       insuranceRateOrAmount: 0.3,
-      insuranceCurrency: type === "LOCAL" ? compCurr : "",
+      insuranceCurrency: type === "LOCAL" ? "PHP" : "",
       dutyMode: "PER_ITEM",
       brokerageCompCurr: 0,
       otherPortChargesCompCurr: 0,
@@ -248,7 +263,7 @@ export const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModulePr
       bids: [...prev.bids, newBid],
     }));
     setActiveBidId(newBid.id);
-    toast.success(`Added new ${type.toLowerCase()} supplier quotation`);
+    toast.success(`Added new ${type.toLowerCase()} supplier quotation (${nextQuoteRef})`);
   };
 
   const handleDuplicateBid = (bidId: string) => {
@@ -256,9 +271,11 @@ export const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModulePr
     const bidToDup = currentProject.bids.find((b) => b.id === bidId);
     if (!bidToDup) return;
     const newBidId = `bid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const nextQuoteRef = generateNextQuotationRef(currentProject.bids || []);
     const duplicatedBid: SupplierBid = {
       ...bidToDup,
       id: newBidId,
+      quotationRef: nextQuoteRef,
       supplierName: `${bidToDup.supplierName} (Copy)`,
       quotations: JSON.parse(JSON.stringify(bidToDup.quotations || {})),
       scores: JSON.parse(JSON.stringify(bidToDup.scores || {})),
@@ -384,14 +401,9 @@ export const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModulePr
                 <QualityCriteriaCard />
               </div>
 
-              {/* Row 5: 1.6 Evaluation Exchange Rates (6 cols) & 1.8 Evaluation Signatories (6 cols) in one row */}
-              <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-stretch">
-                <div className="xl:col-span-6">
-                  <ExchangeRatesCard />
-                </div>
-                <div className="xl:col-span-6">
-                  <SignatoriesCard />
-                </div>
+              {/* Row 5: 1.6 Evaluation Exchange Rates (Full Width) */}
+              <div className="w-full">
+                <ExchangeRatesCard />
               </div>
             </motion.div>
           )}
@@ -520,7 +532,7 @@ export const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModulePr
             </motion.div>
           )}
 
-          {/* STEP 5: ABSTRACT OF BIDS */}
+          {/* STEP 5: ABSTRACT OF BIDS (Interactive Screen View) */}
           {currentStep === 5 && (
             <motion.div
               key="step-5"
@@ -528,12 +540,17 @@ export const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModulePr
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.18 }}
-              className="space-y-6 w-full"
+              className="space-y-6 w-full print:hidden"
             >
               <AbstractOfBidsDocument onPrint={handlePrint} />
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Dedicated Print Tree for Abstract of Bids — Always mounted to guarantee instant, reliable printing from any step or export modal */}
+        <div className="hidden print:block w-full print:p-0 print:m-0 print:opacity-100">
+          <AbstractOfBidsDocument onPrint={handlePrint} />
+        </div>
       </main>
 
       {/* CSV / Excel Import Modal - Conditionally mounted to eliminate Radix dialog backdrop latency */}

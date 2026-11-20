@@ -7,7 +7,7 @@ const PH_TIMEZONE = "Asia/Manila";
  */
 
 export function getPhilippineTimestamp(): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Manila",
     year: "numeric",
     month: "2-digit",
@@ -15,14 +15,15 @@ export function getPhilippineTimestamp(): string {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-    hourCycle: "h23",
+    hour12: true,
   }).formatToParts(new Date());
 
   const values = Object.fromEntries(
     parts.map(({ type, value }) => [type, value])
   );
 
-  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+  const dayPeriod = values.dayPeriod?.toUpperCase() || "AM";
+  return `${values.month}/${values.day}/${values.year}, ${values.hour}:${values.minute}:${values.second} ${dayPeriod} (PHT)`;
 }
 
 

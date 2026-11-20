@@ -96,7 +96,7 @@ export const SupplierSidebar: React.FC<SupplierSidebarProps> = ({ onAddSupplier 
                                     </span>
                                     {res && res.totalLandedCostCompCurr > 0 && (
                                         <span className="font-mono font-bold text-foreground">
-                                            ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                                            ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                                         </span>
                                     )}
                                 </div>

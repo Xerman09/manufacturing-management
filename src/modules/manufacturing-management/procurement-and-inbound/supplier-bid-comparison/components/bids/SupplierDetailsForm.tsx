@@ -1,16 +1,22 @@
+// note to ai agent do not uncomment the commented code
+
 "use client";
 
 import React from "react";
-import { Copy, Trash2, Building2, Globe } from "lucide-react";
+import { 
+    Copy, 
+    Trash2, 
+    Building2, 
+    Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
  
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ComboboxSelect, ComboboxOption } from "../shared/ComboboxSelect";
 import { NumericInputField } from "../shared/NumericInputField";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
-import { SupplierBid, SupplierType } from "../../types";
+import { SupplierBid } from "../../types";
 
 interface SupplierDetailsFormProps {
     bid: SupplierBid;
@@ -23,7 +29,37 @@ export const SupplierDetailsForm: React.FC<SupplierDetailsFormProps> = ({
     onDuplicate,
     onRemove,
 }) => {
-    const { updateProject, lookups } = useBidComparisonStore();
+    const { currentProject, updateProject, lookups } = useBidComparisonStore();
+
+    const isLocal = bid.supplierType === "LOCAL";
+
+    // Auto-generate quotation ref if missing, and sync local country/currency
+    React.useEffect(() => {
+        const patch: Partial<SupplierBid> = {};
+        if (isLocal) {
+            if (!bid.country || bid.country === "PH") patch.country = "Philippines";
+            if (!bid.quoteCurrency || bid.quoteCurrency !== "PHP") patch.quoteCurrency = "PHP";
+        }
+        if (!bid.quotationRef) {
+            const currentYear = new Date().getFullYear();
+            const prefix = `QT-${currentYear}-`;
+            const otherBids = currentProject?.bids.filter((b) => b.id !== bid.id) || [];
+            let maxSeq = 0;
+            for (const b of otherBids) {
+                if (b.quotationRef && b.quotationRef.startsWith(prefix)) {
+                    const num = parseInt(b.quotationRef.slice(prefix.length), 10);
+                    if (!isNaN(num) && num > maxSeq) maxSeq = num;
+                }
+            }
+            patch.quotationRef = `${prefix}${String(maxSeq + 1).padStart(3, "0")}`;
+        }
+        if (Object.keys(patch).length > 0) {
+            updateProject((prev) => ({
+                ...prev,
+                bids: prev.bids.map((b) => (b.id === bid.id ? { ...b, ...patch } : b)),
+            }));
+        }
+    }, [bid.id, bid.country, bid.quoteCurrency, bid.quotationRef, isLocal, currentProject?.bids, updateProject]);
 
     const supplierOptions: ComboboxOption[] = React.useMemo(() => {
         return (lookups.suppliers || []).map((s) => ({
@@ -68,14 +104,6 @@ export const SupplierDetailsForm: React.FC<SupplierDetailsFormProps> = ({
         }
     };
 
-    const handleTypeChange = (newType: SupplierType) => {
-        handleUpdate({
-            supplierType: newType,
-            incoterm: newType === "LOCAL" ? "DELIVERED" : "FOB",
-            country: newType === "LOCAL" ? "Philippines" : bid.country === "Philippines" ? "China" : bid.country,
-        });
-    };
-
     return (
         <div className="p-4 border rounded-xl bg-card space-y-4 shadow-xs">
             {/* Top Toolbar: Supplier Name, Type & Actions */}
@@ -92,14 +120,14 @@ export const SupplierDetailsForm: React.FC<SupplierDetailsFormProps> = ({
                             options={supplierOptions}
                             value={bid.supplierName}
                             onChange={(val, opt) => handleSelectExistingSupplier(val, opt)}
-                            placeholder="Select or enter supplier..."
+                            searchPlaceholder="Search, Select or Enter supplier..."
                             className="h-8 text-xs font-semibold"
                         />
                     </div>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
-                    <Select
+                    {/* <Select
                         value={bid.supplierType}
                         onValueChange={(v: SupplierType) => handleTypeChange(v)}
                     >
@@ -110,7 +138,7 @@ export const SupplierDetailsForm: React.FC<SupplierDetailsFormProps> = ({
                             <SelectItem value="LOCAL" className="text-xs">Local (Philippines)</SelectItem>
                             <SelectItem value="INTERNATIONAL" className="text-xs">International (Overseas)</SelectItem>
                         </SelectContent>
-                    </Select>
+                    </Select> */}
 
                     <Button variant="outline" size="sm" onClick={onDuplicate} className="h-8 text-xs gap-1.5">
                         <Copy className="h-3.5 w-3.5" />
@@ -132,33 +160,44 @@ export const SupplierDetailsForm: React.FC<SupplierDetailsFormProps> = ({
             {/* Form Fields Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 <div className="space-y-1">
-                    <Label className="text-[11px]">Country</Label>
+                    <Label className="text-[11px] flex items-center justify-between">
+                        <span>Country</span>
+                        {isLocal && <span className="text-[9px] text-muted-foreground font-mono">PH (Locked)</span>}
+                    </Label>
                     <Input
-                        value={bid.country}
+                        value={isLocal ? (bid.country || "Philippines") : bid.country}
                         onChange={(e) => handleUpdate({ country: e.target.value })}
                         placeholder="e.g. Philippines / China"
-                        className="h-7 text-xs"
+                        disabled={isLocal}
+                        className="h-7 text-xs disabled:opacity-80 disabled:bg-muted/40 disabled:cursor-not-allowed"
                     />
                 </div>
 
                 <div className="space-y-1">
-                    <Label className="text-[11px]">Quote Currency</Label>
+                    <Label className="text-[11px] flex items-center justify-between">
+                        <span>Quote Currency</span>
+                        {isLocal && <span className="text-[9px] text-muted-foreground font-mono">PHP (Locked)</span>}
+                    </Label>
                     <Input
-                        value={bid.quoteCurrency}
+                        value={isLocal ? "PHP" : bid.quoteCurrency}
                         onChange={(e) => handleUpdate({ quoteCurrency: e.target.value.toUpperCase() })}
                         placeholder="PHP"
                         maxLength={5}
-                        className="h-7 text-xs font-mono uppercase"
+                        disabled={isLocal}
+                        className="h-7 text-xs font-mono uppercase disabled:opacity-80 disabled:bg-muted/40 disabled:cursor-not-allowed"
                     />
                 </div>
 
                 <div className="space-y-1">
-                    <Label className="text-[11px]">Quotation Reference</Label>
+                    <Label className="text-[11px] flex items-center justify-between">
+                        <span>Quotation Reference</span>
+                        <span className="text-[9px] text-muted-foreground font-mono">Auto (Locked)</span>
+                    </Label>
                     <Input
-                        value={bid.quotationRef}
-                        onChange={(e) => handleUpdate({ quotationRef: e.target.value })}
-                        placeholder="e.g. QT-2026-904"
-                        className="h-7 text-xs font-mono"
+                        value={bid.quotationRef || ""}
+                        disabled
+                        placeholder="QT-2026-001"
+                        className="h-7 text-xs font-mono disabled:opacity-80 disabled:bg-muted/40 disabled:cursor-not-allowed"
                     />
                 </div>
 
