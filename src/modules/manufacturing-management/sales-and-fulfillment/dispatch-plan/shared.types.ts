@@ -110,6 +110,12 @@ export interface DispatchPlanBudgetRow {
   remarks: string | null;
 }
 
+export interface DispatchPlanProductSummary {
+  product_id?: number;
+  product_name: string;
+  total_quantity: number;
+}
+
 export interface DispatchPlanDetail extends DispatchPlanListItem {
   vehicle_id?: number | null;
   rejection_reason: string | null;
@@ -122,6 +128,7 @@ export interface DispatchPlanDetail extends DispatchPlanListItem {
   sales_orders: DispatchPlanSalesOrderRef[];
   budget_rows: DispatchPlanBudgetRow[];
   stops?: UnifiedRouteStop[];
+  products?: DispatchPlanProductSummary[];
 }
 
 export interface EligibleInvoice {

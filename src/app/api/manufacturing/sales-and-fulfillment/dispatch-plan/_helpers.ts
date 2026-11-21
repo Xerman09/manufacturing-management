@@ -481,14 +481,37 @@ export async function fetchFullDispatchPlanDetail(
   ]);
 
   const base = enrichedList[0];
+  const toId = (val: unknown): number => {
+    if (typeof val === "number") return val;
+    if (typeof val === "string") {
+      const n = parseInt(val, 10);
+      return Number.isNaN(n) ? 0 : n;
+    }
+    if (typeof val === "object" && val !== null) {
+      const o = val as Record<string, unknown>;
+      return (
+        toId(o.order_id) ||
+        toId(o.sales_order_id) ||
+        toId(o.product_id) ||
+        toId(o.id) ||
+        0
+      );
+    }
+    return 0;
+  };
+
   const orderIds = Array.from(
-    new Set(details.map((d) => Number(d.sales_order_id)).filter(Boolean))
+    new Set(
+      details
+        .map((d) => toId(d.sales_order_id))
+        .filter((n) => n > 0)
+    )
   );
   const coaIds = Array.from(
-    new Set(rawBudgets.map((b) => Number(b.coa_id)).filter((n) => !Number.isNaN(n) && n > 0))
+    new Set(rawBudgets.map((b) => toId(b.coa_id)).filter((n) => n > 0))
   );
 
-  const [orders, coaRows] = await Promise.all([
+  const [orders, coaRows, rawOrderDetails] = await Promise.all([
     orderIds.length > 0
       ? directusGet<RawSalesOrderRow>(
           `/items/sales_order?filter[order_id][_in]=${orderIds.join(
@@ -503,11 +526,28 @@ export async function fetchFullDispatchPlanDetail(
           )}&limit=-1&fields=coa_id,account_title,gl_code`
         )
       : Promise.resolve([]),
+    orderIds.length > 0
+      ? directusGet<Record<string, unknown>>(
+          `/items/sales_order_details?filter[order_id][_in]=${orderIds.join(
+            ","
+          )}&limit=-1`
+        ).catch(async (err) => {
+          console.error("[Dispatch Plan Detail] sales_order_details error, retrying with fields:", err);
+          return directusGet<Record<string, unknown>>(
+            `/items/sales_order_details?filter[order_id][_in]=${orderIds.join(
+              ","
+            )}&fields=detail_id,order_id,product_id,ordered_quantity&limit=-1`
+          ).catch(() => []);
+        })
+      : Promise.resolve([]),
   ]);
 
   const customerCodes = Array.from(new Set(orders.map((o) => o.customer_code).filter(Boolean)));
+  const productIds = Array.from(
+    new Set(rawOrderDetails.map((d) => toId(d.product_id)).filter((id) => id > 0))
+  );
 
-  const [customers, invoiceMap] = await Promise.all([
+  const [customers, invoiceMap, productRows] = await Promise.all([
     customerCodes.length > 0
       ? directusGet<RawCustomerRow>(
           `/items/customer?filter[customer_code][_in]=${customerCodes
@@ -516,14 +556,74 @@ export async function fetchFullDispatchPlanDetail(
         )
       : Promise.resolve([]),
     fetchInvoicesForOrders(orders),
+    productIds.length > 0
+      ? directusGet<Record<string, unknown>>(
+          `/items/products?filter[product_id][_in]=${productIds.join(
+            ","
+          )}&fields=product_id,product_name,product_code&limit=-1`
+        ).catch(async (err) => {
+          console.error("[Dispatch Plan Detail] products error, retrying without fields:", err);
+          return directusGet<Record<string, unknown>>(
+            `/items/products?filter[product_id][_in]=${productIds.join(",")}&limit=-1`
+          ).catch(() => []);
+        })
+      : Promise.resolve([]),
   ]);
+
+  const prodNameMap = new Map<number, string>();
+  for (const p of productRows) {
+    const pId = toId(p.product_id || p.id);
+    const pName = String(
+      p.product_name ||
+        p.description ||
+        p.name ||
+        p.product_code ||
+        `Product #${pId}`
+    ).trim();
+    if (pId) prodNameMap.set(pId, pName);
+  }
+
+  const productAggMap = new Map<string, { product_id?: number; product_name: string; total_quantity: number }>();
+  for (const sod of rawOrderDetails) {
+    const pId = toId(sod.product_id);
+    let pName = "";
+    if (typeof sod.product_id === "object" && sod.product_id !== null) {
+      const rel = sod.product_id as Record<string, unknown>;
+      pName = String(rel.product_name || rel.description || rel.name || rel.product_code || "").trim();
+    }
+    if (!pName && pId) {
+      pName = prodNameMap.get(pId) || `Product #${pId}`;
+    }
+    if (!pName) {
+      pName = `Item #${toId(sod.detail_id) || "Unknown"}`;
+    }
+
+    const qty = Number(
+      sod.ordered_quantity ??
+        sod.quantity ??
+        sod.allocated_quantity ??
+        sod.served_quantity ??
+        0
+    );
+    const existing = productAggMap.get(pName);
+    if (existing) {
+      existing.total_quantity += qty;
+    } else {
+      productAggMap.set(pName, { product_id: pId || undefined, product_name: pName, total_quantity: qty });
+    }
+  }
+
+  const productsSummary = Array.from(productAggMap.values()).sort((a, b) =>
+    a.product_name.localeCompare(b.product_name)
+  );
 
   const orderMap = new Map(orders.map((o) => [Number(o.order_id), o]));
   const customerMap = new Map(customers.map((c) => [c.customer_code, c]));
   const coaMap = new Map(coaRows.map((c) => [Number(c.coa_id), c]));
 
   const salesOrders: DispatchPlanSalesOrderRef[] = details.map((d) => {
-    const so = orderMap.get(Number(d.sales_order_id));
+    const soId = toId(d.sales_order_id);
+    const so = orderMap.get(soId);
     const cust = so?.customer_code ? customerMap.get(so.customer_code) : undefined;
     const invs = so ? getInvoicesForOrder(invoiceMap, Number(so.order_id), so.order_no) : [];
     const primaryInv = invs[0] || null;
@@ -534,8 +634,8 @@ export async function fetchFullDispatchPlanDetail(
 
     return {
       detail_id: Number(d.detail_id),
-      sales_order_id: Number(d.sales_order_id),
-      order_no: so?.order_no || `SO-${d.sales_order_id}`,
+      sales_order_id: soId,
+      order_no: so?.order_no || `SO-${soId}`,
       order_status: so?.order_status || "-",
       customer_code: so?.customer_code || "-",
       customer_name: cust?.customer_name || so?.customer_code || "-",
@@ -598,5 +698,6 @@ export async function fetchFullDispatchPlanDetail(
     sales_orders: salesOrders,
     budget_rows: budgetRows,
     stops,
+    products: productsSummary,
   };
 }
