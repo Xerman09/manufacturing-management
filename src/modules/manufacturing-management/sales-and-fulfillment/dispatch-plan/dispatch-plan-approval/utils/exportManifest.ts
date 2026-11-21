@@ -228,12 +228,40 @@ export const exportDispatchManifestPDF = (plan: DispatchPlanDetail | null) => {
     currentY = 20;
   }
 
-  // A. Supplier Cargo Summary (Left Column)
+  // A. Product Summary (Left Column)
+  const productBody: AutoTableRow[] =
+    plan.products && plan.products.length > 0
+      ? plan.products.map((p) => [
+          { content: p.product_name, styles: { cellPadding: 1 } },
+          {
+            content: (p.total_quantity || 0).toLocaleString(),
+            styles: { halign: "right", cellPadding: 1 },
+          },
+        ])
+      : [
+          [
+            { content: "No product data.", styles: { fontStyle: "italic", cellPadding: 1 } },
+            { content: "-", styles: { halign: "right", cellPadding: 1 } },
+          ],
+        ];
+
+  const totalProductQty =
+    plan.products?.reduce((sum, p) => sum + Number(p.total_quantity || 0), 0) || 0;
+  if (totalProductQty > 0) {
+    productBody.push([
+      { content: "TOTAL", styles: { fontStyle: "bold", cellPadding: 1 } },
+      {
+        content: totalProductQty.toLocaleString(),
+        styles: { fontStyle: "bold", halign: "right", cellPadding: 1 },
+      },
+    ]);
+  }
+
   autoTable(doc, {
     startY: currentY,
     margin: { left: 14, right: pageWidth / 2 + 5 },
-    head: [["Supplier Cargo Summary", "Qty"]],
-    body: [["No supplier data.", ""]],
+    head: [["Product Name", "Total Quantity"]],
+    body: productBody,
     theme: "plain",
     headStyles: {
       fillColor: false,
@@ -243,10 +271,14 @@ export const exportDispatchManifestPDF = (plan: DispatchPlanDetail | null) => {
       lineWidth: { bottom: 0.5 },
       cellPadding: 2,
     },
+    columnStyles: {
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 28, halign: "right" },
+    },
     styles: { fontSize: 7, textColor: 0 },
   });
 
-  const suppTableY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+  const productTableY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
   // B. Budget Summary (Right Column)
   autoTable(doc, {
@@ -269,7 +301,7 @@ export const exportDispatchManifestPDF = (plan: DispatchPlanDetail | null) => {
   const budgetTableY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
   // C. Invoice/Deliveries Summary (Full Width)
-  currentY = Math.max(suppTableY, budgetTableY) + 6;
+  currentY = Math.max(productTableY, budgetTableY) + 6;
 
   if (currentY > pageHeight - 40) {
     doc.addPage();
