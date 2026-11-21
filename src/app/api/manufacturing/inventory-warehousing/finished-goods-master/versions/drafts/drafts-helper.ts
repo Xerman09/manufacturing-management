@@ -1,5 +1,5 @@
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
-import { getBOMDetailsForVersion } from "../versions-helper";
+import { getBOMDetailsForVersion, ensureIsAutoBaseQtyFieldSchema } from "../versions-helper";
 import { syncRoutesAndBOM, syncVersionOverheadItems } from "../../bom-details/bom-details-helper";
 import { materialTypeFromProduct, isMaterialTypeCompatible, type MaterialType } from "@/modules/manufacturing-management/inventory-warehousing/finished-goods-master/material-types";
 
@@ -25,6 +25,7 @@ export interface VersionDraftHeader {
     uom_id: number;
     expected_yield_percentage: number;
     custom_overhead: number;
+    is_auto_base_qty?: boolean | number | null;
     status: "Draft" | "Pending Approval" | "Applied" | "Rejected" | "Cancelled";
     created_by?: number | null;
     created_at?: string;
@@ -379,6 +380,7 @@ export async function createDraft(options: {
     uomId?: number;
     expectedYieldPercentage?: number;
     customOverhead?: number;
+    isAutoBaseQty?: boolean | number | null;
     userId?: number | null;
 }): Promise<VersionDraftFull> {
     const { productId, sourceVersionId, versionName, userId } = options;
@@ -449,6 +451,11 @@ export async function createDraft(options: {
     const customOverhead = Number(options.customOverhead ?? sourceVer?.custom_overhead ?? 0);
 
     // 5. Insert Draft Header Record
+    await ensureIsAutoBaseQtyFieldSchema();
+    const isAutoBaseQty = options.isAutoBaseQty !== undefined
+        ? Boolean(options.isAutoBaseQty)
+        : Boolean(sourceVer?.is_auto_base_qty);
+
     const draftHeaderPayload = {
         product_id: productId,
         source_version_id: sourceVersionId || null,
@@ -457,6 +464,7 @@ export async function createDraft(options: {
         uom_id: uomId,
         expected_yield_percentage: expectedYieldPercentage,
         custom_overhead: customOverhead,
+        is_auto_base_qty: isAutoBaseQty ? 1 : 0,
         status: "Draft",
         created_by: userId || null,
         created_at: getNowInPhtISO()
@@ -703,6 +711,7 @@ export async function saveDraftDetails(
 
     // 1. Update draft header metadata
     if (data.details) {
+        await ensureIsAutoBaseQtyFieldSchema();
         const headerUpdate: Record<string, unknown> = {
             updated_by: userId || null,
             updated_at: nowIso
@@ -710,6 +719,7 @@ export async function saveDraftDetails(
         if (data.details.base_quantity !== undefined) headerUpdate.base_quantity = Number(data.details.base_quantity);
         if (data.details.expected_yield_percentage !== undefined) headerUpdate.expected_yield_percentage = Number(data.details.expected_yield_percentage);
         if (data.details.custom_overhead !== undefined) headerUpdate.custom_overhead = Number(data.details.custom_overhead);
+        if (data.details.is_auto_base_qty !== undefined) headerUpdate.is_auto_base_qty = data.details.is_auto_base_qty ? 1 : 0;
 
         await fetch(`${DIRECTUS_URL}/items/product_manufacturing_version_draft/${draftId}`, {
             method: "PATCH",
@@ -1379,6 +1389,7 @@ export async function applyApprovedDraft(
             uom_id: draft.uom_id,
             expected_yield_percentage: draft.expected_yield_percentage,
             custom_overhead: draft.custom_overhead,
+            is_auto_base_qty: draft.is_auto_base_qty ? 1 : 0,
             status: "Active",
             is_primary: 1,
             created_by: draft.created_by || userId || null,

@@ -2,7 +2,7 @@ import React from "react";
 import { Sliders, RefreshCw, Download, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { BOMItem, Product, VersionOverheadItem } from "../types";
-import { CostingBreakdown, OverheadSummary } from "../costing";
+import { CostingBreakdown, OverheadSummary, calculateMaterialCost } from "../costing";
 import { generateFinishedGoodCostRollupPDF } from "../utils/exportFinishedGoodCostRollupPDF";
 
 interface ProductOverhead {
@@ -94,16 +94,24 @@ export const CostRollupTab: React.FC<CostRollupTabProps> = ({
             ["Net Profit", standardNetProfit.toFixed(2)],
             ["Net Margin %", `${standardNetMarginPercent.toFixed(1)}%`],
             [""],
-            ["BOM Component Breakdown", "Quantity", "UOM", "Unit Cost (PHP)", "Extended Cost (PHP)"],
+            ["BOM Component Breakdown", "Quantity", "UOM", "Wastage %", "Unit Cost (PHP)", "Extended Cost (pre-yield, PHP)"],
             ...editedBOM.map(b => {
                 const qty = Number(b.quantity || 0);
                 const itemObj = b as unknown as Record<string, unknown>;
                 const landed = Number(b.landedCost ?? itemObj.unitCost ?? itemObj.costPerUnit ?? 0);
-                const ext = qty * landed;
+                const wastage = Number(b.wastagePercent ?? itemObj.wastageFactor ?? 0);
+                const isByProduct = b.type === "by_product" || itemObj.is_by_product === true;
+                const ext = calculateMaterialCost({
+                    quantity: qty,
+                    unitCost: landed,
+                    wastagePercent: wastage,
+                    isByProduct
+                });
                 return [
                     b.name || "Ingredient",
                     qty.toString(),
                     b.uom || "PCS",
+                    `${wastage}%`,
                     landed.toFixed(2),
                     ext.toFixed(2)
                 ];

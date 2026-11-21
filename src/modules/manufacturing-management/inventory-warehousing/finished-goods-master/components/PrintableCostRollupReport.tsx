@@ -4,7 +4,7 @@
 import React from "react";
 import { Printer, X } from "lucide-react";
 import { Product, BOMItem } from "../types";
-import { CostingBreakdown, OverheadSummary } from "../costing";
+import { CostingBreakdown, OverheadSummary, calculateMaterialCost } from "../costing";
 
 interface PrintableCostRollupReportProps {
     isOpen: boolean;
@@ -247,7 +247,13 @@ export const PrintableCostRollupReport: React.FC<PrintableCostRollupReportProps>
                                                 const qty = Number(item.quantity || 0);
                                                 const wastage = Number(item.wastagePercent ?? (item as any).wastageFactor ?? 0);
                                                 const landed = Number(item.landedCost ?? (item as any).unitCost ?? (item as any).costPerUnit ?? 0);
-                                                const extCost = qty * (1 + (wastage / 100)) * landed;
+                                                const isByProduct = item.type === "by_product" || (item as any).is_by_product === true;
+                                                const extCost = calculateMaterialCost({
+                                                    quantity: qty,
+                                                    unitCost: landed,
+                                                    wastagePercent: wastage,
+                                                    isByProduct
+                                                });
                                                 return (
                                                     <tr key={idx} className="hover:bg-slate-50">
                                                         <td className="py-1.5 px-2 font-semibold text-slate-900">{item.name}</td>

@@ -387,6 +387,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                     product_id: d.product_id,
                     version_name: `${d.version_name}`,
                     base_quantity: Number(d.base_quantity || 1),
+                    is_auto_base_qty: Boolean(d.is_auto_base_qty),
                     expected_yield_percentage: Number(d.expected_yield_percentage || 100),
                     custom_overhead: Number(d.custom_overhead || 0),
                     status: d.status || "Draft",
@@ -544,6 +545,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                         product_id: draftObj.product_id,
                         version_name: draftObj.version_name,
                         base_quantity: draftObj.base_quantity,
+                        is_auto_base_qty: Boolean(draftObj.is_auto_base_qty),
                         expected_yield_percentage: draftObj.expected_yield_percentage,
                         custom_overhead: draftObj.custom_overhead,
                         status: draftObj.status,
@@ -559,6 +561,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                         draft_id: draftObj.draft_id,
                         version_name: draftObj.version_name,
                         base_quantity: draftObj.base_quantity,
+                        is_auto_base_qty: Boolean(draftObj.is_auto_base_qty),
                         expected_yield_percentage: draftObj.expected_yield_percentage,
                         custom_overhead: draftObj.custom_overhead ?? 0,
                         overhead_items: (draftObj.overheads || []).map((ov: any) => ({
@@ -608,11 +611,15 @@ export function useFinishedGoods(initialTab: string = "details") {
                 const versionObj = await fetchBOMDetails(numericId, selectedVersionId!, debouncedForexRate);
                 if (cancelled) return;
                 if (versionObj) {
-                    setSelectedVersion(versionObj);
+                    setSelectedVersion({
+                        ...versionObj,
+                        is_auto_base_qty: Boolean(versionObj.is_auto_base_qty)
+                    });
                     setEditedVersionDetails({
                         version_id: versionObj.version_id,
                         version_name: versionObj.version_name,
                         base_quantity: versionObj.base_quantity,
+                        is_auto_base_qty: Boolean(versionObj.is_auto_base_qty),
                         expected_yield_percentage: versionObj.expected_yield_percentage,
                         custom_overhead: versionObj.custom_overhead ?? 0,
                         overhead_items: (versionObj as any).overhead_items || [],
@@ -1175,6 +1182,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                 const saveRes = await saveVersionDraft(activeDraft.draft_id, {
                     details: {
                         base_quantity: Number(editedVersionDetails.base_quantity ?? 1),
+                        is_auto_base_qty: Boolean(editedVersionDetails.is_auto_base_qty),
                         expected_yield_percentage: Number(editedVersionDetails.expected_yield_percentage ?? 100),
                         custom_overhead: Number(editedVersionDetails.custom_overhead ?? 0)
                     },
@@ -1200,7 +1208,9 @@ export function useFinishedGoods(initialTab: string = "details") {
                         setEditedVersionDetails((prev: any) => ({
                             ...prev,
                             custom_overhead: Number(saveRes.draft.custom_overhead ?? prev?.custom_overhead ?? 0),
-                            overhead_items: mappedOvh
+                            overhead_items: mappedOvh,
+                            is_auto_base_qty: Boolean(saveRes.draft.is_auto_base_qty ?? prev?.is_auto_base_qty),
+                            base_quantity: Number(saveRes.draft.base_quantity ?? prev?.base_quantity ?? 1)
                         }));
                         setEditedOverheads(mappedOvh);
                     }
@@ -1245,6 +1255,7 @@ export function useFinishedGoods(initialTab: string = "details") {
             const detailsPayload = {
                 version_name: editedVersionDetails.version_name || "",
                 base_quantity: Number(editedVersionDetails.base_quantity ?? 1),
+                is_auto_base_qty: Boolean(editedVersionDetails.is_auto_base_qty),
                 uom_id: editedVersionDetails.uom_id || null,
                 expected_yield_percentage: validatedDetails.expectedYield,
                 custom_overhead: Number(editedVersionDetails.custom_overhead ?? 0),
@@ -1291,6 +1302,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                 await saveVersionDraft(targetDraftId, {
                     details: {
                         base_quantity: Number(editedVersionDetails?.base_quantity ?? 1),
+                        is_auto_base_qty: Boolean(editedVersionDetails?.is_auto_base_qty),
                         expected_yield_percentage: Number(editedVersionDetails?.expected_yield_percentage ?? 100),
                         custom_overhead: Number(editedVersionDetails?.custom_overhead ?? 0)
                     },
@@ -1328,6 +1340,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                     productId: numericProductId,
                     versionName: (editedVersionDetails?.version_name || selectedVersion?.version_name || "v1.0").trim(),
                     baseQuantity: Number(editedVersionDetails?.base_quantity ?? selectedVersion?.base_quantity ?? 1),
+                    is_auto_base_qty: Boolean(editedVersionDetails?.is_auto_base_qty),
                     uomId: Number(editedVersionDetails?.uom_id ?? selectedVersion?.uom_id) || undefined,
                     expectedYield: Number(editedVersionDetails?.expected_yield_percentage ?? selectedVersion?.expected_yield_percentage ?? 100),
                     status: "Draft",
@@ -1411,6 +1424,18 @@ export function useFinishedGoods(initialTab: string = "details") {
             }
 
             if (saveSucceeded) {
+                setSelectedVersion((prev: any) => prev ? {
+                    ...prev,
+                    base_quantity: detailsPayload.base_quantity,
+                    is_auto_base_qty: detailsPayload.is_auto_base_qty,
+                    version_name: detailsPayload.version_name
+                } : prev);
+                setEditedVersionDetails((prev: any) => prev ? {
+                    ...prev,
+                    base_quantity: detailsPayload.base_quantity,
+                    is_auto_base_qty: detailsPayload.is_auto_base_qty,
+                    version_name: detailsPayload.version_name
+                } : prev);
                 clearInterval(interval);
                 setSaveProgress(100);
                 setSaveStatus("Saved successfully!");
@@ -1511,6 +1536,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                         product_id: d.product_id,
                         version_name: `${d.version_name}`,
                         base_quantity: Number(d.base_quantity || 1),
+                        is_auto_base_qty: Boolean(d.is_auto_base_qty),
                         expected_yield_percentage: Number(d.expected_yield_percentage || 100),
                         custom_overhead: Number(d.custom_overhead || 0),
                         status: d.status || "Draft",
@@ -1708,6 +1734,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                 const saveRes = await saveVersionDraft(activeDraft.draft_id, {
                     details: {
                         base_quantity: Number(editedVersionDetails?.base_quantity ?? 1),
+                        is_auto_base_qty: Boolean(editedVersionDetails?.is_auto_base_qty),
                         expected_yield_percentage: Number(editedVersionDetails?.expected_yield_percentage ?? 100),
                         custom_overhead: Number(editedVersionDetails?.custom_overhead ?? 0)
                     },
@@ -1733,7 +1760,9 @@ export function useFinishedGoods(initialTab: string = "details") {
                         setEditedVersionDetails((prev: any) => ({
                             ...prev,
                             custom_overhead: Number(saveRes.draft.custom_overhead ?? prev?.custom_overhead ?? 0),
-                            overhead_items: mappedOvh
+                            overhead_items: mappedOvh,
+                            is_auto_base_qty: Boolean(saveRes.draft.is_auto_base_qty ?? prev?.is_auto_base_qty),
+                            base_quantity: Number(saveRes.draft.base_quantity ?? prev?.base_quantity ?? 1)
                         }));
                         setEditedOverheads(mappedOvh);
                     }
@@ -1754,6 +1783,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                     productId: numericProductId,
                     versionName: (editedVersionDetails?.version_name || currentVer?.version_name || "v1.0").trim(),
                     baseQuantity: Number(editedVersionDetails?.base_quantity ?? currentVer?.base_quantity ?? 1),
+                    is_auto_base_qty: Boolean(editedVersionDetails?.is_auto_base_qty ?? currentVer?.is_auto_base_qty),
                     uomId: Number(editedVersionDetails?.uom_id ?? currentVer?.uom_id) || undefined,
                     expectedYield: Number(editedVersionDetails?.expected_yield_percentage ?? currentVer?.expected_yield_percentage ?? 100),
                     status: "Pending Approval",
@@ -1807,6 +1837,8 @@ export function useFinishedGoods(initialTab: string = "details") {
             uomId?: number;
             expectedYieldPercentage?: number;
             customOverhead?: number;
+            isAutoBaseQty?: boolean;
+            is_auto_base_qty?: boolean;
         }
     ) => {
         const skuCode = selectedProduct?.sku?.trim() || `FG-${selectedProductId}`;
@@ -1850,11 +1882,20 @@ export function useFinishedGoods(initialTab: string = "details") {
                 toast.error("Please select an approved version to revise.");
                 return;
             }
+            const sourceVer = versions.find(v => String(v.version_id) === String(vId) || String(v.draft_id) === String(vId));
             params = {
                 productId: Number(selectedProductId),
                 sourceVersionId: vId,
-                versionName: autoVersionName
+                versionName: autoVersionName,
+                isAutoBaseQty: Boolean(sourceVer?.is_auto_base_qty)
             };
+        }
+
+        if (params.isAutoBaseQty === undefined && params.sourceVersionId) {
+            const sourceVer = versions.find(v => String(v.version_id) === String(params.sourceVersionId) || String(v.draft_id) === String(params.sourceVersionId));
+            if (sourceVer?.is_auto_base_qty !== undefined) {
+                params.isAutoBaseQty = Boolean(sourceVer.is_auto_base_qty);
+            }
         }
 
         setSavingBOM(true);
@@ -1881,6 +1922,10 @@ export function useFinishedGoods(initialTab: string = "details") {
         try {
             const res = await initiateVersionDraft(params);
             if (res.draft) {
+                const draftIsAuto = res.draft.is_auto_base_qty !== undefined
+                    ? Boolean(res.draft.is_auto_base_qty)
+                    : (params.isAutoBaseQty !== undefined ? Boolean(params.isAutoBaseQty) : false);
+
                 setActiveDraft(res.draft);
                 setSelectedVersion({
                     version_id: res.draft.draft_id,
@@ -1890,6 +1935,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                     base_quantity: res.draft.base_quantity,
                     expected_yield_percentage: res.draft.expected_yield_percentage,
                     custom_overhead: res.draft.custom_overhead,
+                    is_auto_base_qty: draftIsAuto,
                     status: "Draft",
                     uom_id: res.draft.uom_id,
                     is_active: false,
@@ -1907,6 +1953,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                     custom_overhead: res.draft.custom_overhead ?? 0,
                     overhead_items: res.draft.overheads || [],
                     labor_positions: res.draft.labor_positions || [],
+                    is_auto_base_qty: draftIsAuto,
                     status: "Draft",
                     uom_id: res.draft.uom_id
                 });
@@ -1933,6 +1980,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                         product_id: d.product_id,
                         version_name: `${d.version_name}`,
                         base_quantity: Number(d.base_quantity || 1),
+                        is_auto_base_qty: Boolean(d.is_auto_base_qty),
                         expected_yield_percentage: Number(d.expected_yield_percentage || 100),
                         custom_overhead: Number(d.custom_overhead || 0),
                         status: d.status || "Draft",
@@ -1997,6 +2045,7 @@ export function useFinishedGoods(initialTab: string = "details") {
                     product_id: d.product_id,
                     version_name: `${d.version_name}`,
                     base_quantity: Number(d.base_quantity || 1),
+                    is_auto_base_qty: Boolean(d.is_auto_base_qty),
                     expected_yield_percentage: Number(d.expected_yield_percentage || 100),
                     custom_overhead: Number(d.custom_overhead || 0),
                     status: d.status || "Draft",

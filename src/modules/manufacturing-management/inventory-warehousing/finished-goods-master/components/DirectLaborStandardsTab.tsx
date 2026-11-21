@@ -2,11 +2,11 @@
 "use client";
 
 import React from "react";
-import { Plus, Trash2, Users, Briefcase, Calculator, ShieldCheck, Clock, CheckCircle2 } from "lucide-react";
+import { Plus, Trash2, Users, Briefcase} from "lucide-react";
 import { VersionLaborPosition } from "../types";
 import { CreatableSelect } from "./CreatableSelect";
 import { Button } from "@/components/ui/button";
-import { calculatePositionBatchCost } from "../costing";
+import { calculatePositionBatchCost, calculatePositionCostBreakdown } from "../costing";
 
 interface DirectLaborStandardsTabProps {
     editedVersionDetails: any;
@@ -67,15 +67,8 @@ export const DirectLaborStandardsTab: React.FC<DirectLaborStandardsTabProps> = (
     }, [versionLaborPositions]);
 
     const totalStatutoryMandatesCost = React.useMemo(() => {
-        return versionLaborPositions.reduce((sum, pos) => {
-            if (pos.include_mandates === false || pos.category === "maintenance") return sum;
-            const count = Math.max(0, Number(pos.manpower_count) || 0);
-            const dailyRate = Math.max(0, Number(pos.daily_rate) || (Number(pos.hourly_rate) * 8) || 0);
-            const sss = Number(pos.sss_amount) || (dailyRate * 0.0954);
-            const phic = Number(pos.phic_amount) || (200 / 26);
-            const hdmf = Number(pos.hdmf_amount) || (100 / 26);
-            return sum + ((sss + phic + hdmf) * count);
-        }, 0);
+        // Same function as the position cost, so the card can never disagree with the total.
+        return versionLaborPositions.reduce((sum, pos) => sum + calculatePositionCostBreakdown(pos).benefits, 0);
     }, [versionLaborPositions]);
 
     const laborCostPerUnit = React.useMemo(() => {
@@ -159,7 +152,7 @@ export const DirectLaborStandardsTab: React.FC<DirectLaborStandardsTabProps> = (
                         <Briefcase className="h-4 w-4 text-primary" /> Direct Labor Standards &amp; Benefits (MPB454G Model)
                     </h3>
                     <p className="text-xs text-muted-foreground">
-                        Configure version-level headcount, daily wages, overtime, and statutory benefit allowances (SSS 9.54%, PHIC, Pag-IBIG) for batch output ({baseQuantity.toLocaleString()} units).
+                        Configure version-level headcount, daily wages, overtime, and employer statutory contributions (SSS, PhilHealth, Pag-IBIG) for batch output ({baseQuantity.toLocaleString()} units).
                     </p>
                 </div>
                 {!isVersionLocked && (
@@ -238,7 +231,10 @@ export const DirectLaborStandardsTab: React.FC<DirectLaborStandardsTabProps> = (
                                 <th className="py-2.5 px-2 text-center w-28">Category</th>
                                 <th className="py-2.5 px-2 text-center w-16">Headcount</th>
                                 <th className="py-2.5 px-3 text-right w-28">Daily Wage (₱)</th>
-                                <th className="py-2.5 px-2 text-center w-16">OT (Hrs)</th>
+                                <th className="py-2.5 px-2 text-center w-20" title="Overtime hours (paid at 1.25x / 125% regular hourly rate)">
+                                    <div>OT (Hrs)</div>
+                                    <div className="text-[8px] font-normal text-muted-foreground lowercase tracking-normal">@ 1.25x</div>
+                                </th>
                                 <th className="py-2.5 px-3 text-center w-36">Gov Benefits</th>
                                 <th className="py-2.5 px-3 text-right w-32">Position Cost</th>
                                 {!isVersionLocked && <th className="py-2.5 px-2 text-center w-12">Action</th>}
@@ -247,14 +243,14 @@ export const DirectLaborStandardsTab: React.FC<DirectLaborStandardsTabProps> = (
                         <tbody className="divide-y divide-border/50">
                             {versionLaborPositions.map((pos, pIdx) => {
                                 const headcount = Math.max(0, Number(pos.manpower_count) || 0);
-                                const dailyWage = Math.max(0, Number(pos.daily_rate) || (Number(pos.hourly_rate) * 8) || 0);
+                                const breakdown = calculatePositionCostBreakdown(pos);
+                                const perWorker = (amount: number) => (headcount > 0 ? amount / headcount : 0);
+                                const sss = perWorker(breakdown.sss);
+                                const phic = perWorker(breakdown.phic);
+                                const hdmf = perWorker(breakdown.hdmf);
+                                const mandateTotalPerWorker = perWorker(breakdown.benefits);
 
-                                const sss = pos.include_mandates !== false ? (Number(pos.sss_amount) || (dailyWage * 0.0954)) : 0;
-                                const phic = pos.include_mandates !== false ? (Number(pos.phic_amount) || (200 / 26)) : 0;
-                                const hdmf = pos.include_mandates !== false ? (Number(pos.hdmf_amount) || (100 / 26)) : 0;
-                                const mandateTotalPerWorker = sss + phic + hdmf;
-
-                                const batchPositionCost = calculatePositionBatchCost(pos);
+                                const batchPositionCost = breakdown.total;
 
                                 return (
                                     <tr key={pos.id || pIdx} className="hover:bg-muted/15 transition-colors">
@@ -341,7 +337,8 @@ export const DirectLaborStandardsTab: React.FC<DirectLaborStandardsTabProps> = (
                                         <td className="py-2 px-2 text-center">
                                             <input
                                                 id={`version-labor-ot-${pIdx}`}
-                                                aria-label={`Overtime hours for position ${pIdx + 1}`}
+                                                aria-label={`Overtime hours for position ${pIdx + 1} (paid at 1.25x hourly rate)`}
+                                                title="Overtime hours (paid at 1.25x / 125% regular hourly rate)"
                                                 type="number"
                                                 step="0.5"
                                                 min="0"
@@ -378,7 +375,10 @@ export const DirectLaborStandardsTab: React.FC<DirectLaborStandardsTabProps> = (
                                         </td>
 
                                         {/* Position Cost Display */}
-                                        <td className="py-2 px-3 text-right font-mono font-bold text-foreground">
+                                        <td
+                                            className="py-2 px-3 text-right font-mono font-bold text-foreground cursor-default"
+                                            title={`Base Wage: ₱${breakdown.regularWage.toFixed(2)} | OT (1.25x): ₱${breakdown.otWage.toFixed(2)}${breakdown.benefits > 0 ? ` | Mandates: ₱${breakdown.benefits.toFixed(2)}` : ""}`}
+                                        >
                                             ₱{batchPositionCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </td>
 

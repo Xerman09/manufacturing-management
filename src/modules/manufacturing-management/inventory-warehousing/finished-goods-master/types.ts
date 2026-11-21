@@ -239,6 +239,7 @@ export interface ProductVersion {
     valid_to?: string | null;
     is_active?: boolean; // legacy/compatibility
     is_primary?: boolean; // Primary Default for Master Standard Cost Rollup & JO Defaults
+    is_auto_base_qty?: boolean;
     is_draft?: boolean;
     draft_id?: number;
     source_version_id?: number | null;

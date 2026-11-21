@@ -47,8 +47,6 @@ export const ProductDetailsTab: React.FC<ProductDetailsTabProps> = ({
     editedDetails,
     editFieldErrors,
     handleDetailChange,
-    customOverhead,
-    handleCustomOverheadChange,
     selectedProduct,
     units,
     brands,
@@ -738,20 +736,6 @@ export const ProductDetailsTab: React.FC<ProductDetailsTabProps> = ({
                                         className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary transition-all"
                                     />
                                 </div>
-
-                                {!isNoBom && (
-                                    <div className="space-y-1">
-                                        <label className="text-[11px] font-bold text-muted-foreground uppercase">Custom Overhead (₱)</label>
-                                        <input 
-                                            type="number" 
-                                            step="0.01" 
-                                            value={customOverhead}
-                                            min="0"
-                                            onChange={e => handleCustomOverheadChange(e.target.value === "" ? 0 : parseFloat(e.target.value))}
-                                            className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary transition-all"
-                                        />
-                                    </div>
-                                )}
                             </div>
 
                             {/* Product Image Media section */}

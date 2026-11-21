@@ -4,7 +4,7 @@ import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
 import { productUpdateAuditFields } from "@/app/api/manufacturing/product-audit";
 import { getUserIdFromToken } from "@/app/api/manufacturing/item-management/auth-helper";
 import { getTodayDateString } from "@/app/api/manufacturing/directus-api";
-import { getBOMDetailsForVersion } from "./versions-helper";
+import { getBOMDetailsForVersion, ensureIsAutoBaseQtyFieldSchema } from "./versions-helper";
 
 interface VersionRecord {
     version_id: number;
@@ -53,6 +53,7 @@ async function ensureIsPrimaryFieldSchema() {
 export async function GET(request: Request) {
     try {
         await ensureIsPrimaryFieldSchema();
+        await ensureIsAutoBaseQtyFieldSchema();
         const { searchParams } = new URL(request.url);
         const productIdStr = searchParams.get("productId");
         if (!productIdStr) {
@@ -84,7 +85,7 @@ export async function GET(request: Request) {
         const json = await res.json();
         const rawData = json.data || [];
 
-        const versionsList = rawData.map((v: Record<string, unknown> & { version_id: number; version_name?: string; status?: string; is_primary?: boolean | number | string; expected_yield_percentage?: number; base_quantity?: number; uom_id?: number | null; valid_from?: string | null; valid_to?: string | null; rejection_reason?: string | null; approval_remarks?: string | null; created_at?: string | null; updated_at?: string | null; created_by?: number | string | null; approved_by?: number | string | null; approved_at?: string | null }) => {
+        const versionsList = rawData.map((v: Record<string, unknown> & { version_id: number; version_name?: string; status?: string; is_primary?: boolean | number | string; is_auto_base_qty?: boolean | number | string; expected_yield_percentage?: number; base_quantity?: number; uom_id?: number | null; valid_from?: string | null; valid_to?: string | null; rejection_reason?: string | null; approval_remarks?: string | null; created_at?: string | null; updated_at?: string | null; created_by?: number | string | null; approved_by?: number | string | null; approved_at?: string | null }) => {
             const isActive = v.status === "Active";
             return {
                 version_id: v.version_id,
@@ -99,6 +100,7 @@ export async function GET(request: Request) {
                 valid_to: v.valid_to || null,
                 is_active: isActive,
                 is_primary: v.is_primary === true || v.is_primary === 1 || String(v.is_primary) === "1" || Number(v.is_primary) === 1,
+                is_auto_base_qty: v.is_auto_base_qty === true || v.is_auto_base_qty === 1 || String(v.is_auto_base_qty) === "1" || Number(v.is_auto_base_qty) === 1,
                 rejection_reason: v.rejection_reason ?? (v.remarks as string) ?? null,
                 approval_remarks: v.approval_remarks ?? (v.remarks as string) ?? null,
                 created_at: v.created_at ?? null,
@@ -280,6 +282,10 @@ export async function POST(request: Request) {
                 }
             }
 
+            const isAutoBaseQty = body.is_auto_base_qty !== undefined
+                ? Boolean(body.is_auto_base_qty)
+                : (body.isAutoBaseQty !== undefined ? Boolean(body.isAutoBaseQty) : false);
+
             // 1. Create product manufacturing version matching MySQL table schema
             const versionPayload: Record<string, unknown> = {
                 product_id: numericProductId,
@@ -289,6 +295,7 @@ export async function POST(request: Request) {
                 expected_yield_percentage: formattedYield,
                 status: requestedStatus,
                 is_primary: requestedStatus === "Active" && Boolean(body.is_primary) ? true : false,
+                is_auto_base_qty: isAutoBaseQty ? 1 : 0,
                 valid_from: today,
                 created_by: userId || null
             };

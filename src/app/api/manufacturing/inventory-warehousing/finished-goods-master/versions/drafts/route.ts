@@ -63,7 +63,9 @@ export async function POST(request: Request) {
             baseQuantity,
             uomId,
             expectedYieldPercentage,
-            customOverhead
+            customOverhead,
+            isAutoBaseQty,
+            is_auto_base_qty
         } = body;
 
         if (!productId) {
@@ -82,6 +84,7 @@ export async function POST(request: Request) {
             uomId: uomId !== undefined ? Number(uomId) : undefined,
             expectedYieldPercentage: expectedYieldPercentage !== undefined ? Number(expectedYieldPercentage) : undefined,
             customOverhead: customOverhead !== undefined ? Number(customOverhead) : undefined,
+            isAutoBaseQty: is_auto_base_qty !== undefined ? Boolean(is_auto_base_qty) : (isAutoBaseQty !== undefined ? Boolean(isAutoBaseQty) : undefined),
             userId
         });
 

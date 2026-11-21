@@ -2,15 +2,15 @@
 "use client";
 
 import React from "react";
-import { Plus, Trash2, Shield, Settings, Clock, Layers,   Sliders, ChevronDown, ChevronUp, Calculator,   AlertCircle } from "lucide-react";
+import { Plus, Trash2, Shield, Settings, Clock, Layers, Sliders, ChevronDown, ChevronUp, Calculator, AlertCircle } from "lucide-react";
 import { RouteStep, RouteBOMItem, OperationType, WorkCenter, QATemplate, Unit, VersionLaborPosition, BFFCatalogProduct } from "../types";
 import { BOMMaterialSelect } from "./BOMMaterialSelect";
 import { MaterialTypeSelect } from "./MaterialTypeSelect";
 import { CreatableSelect } from "./CreatableSelect";
 import { Button } from "@/components/ui/button";
-import { calculateMaterialCost, calculateBottleneckBaseQuantity,   BottleneckCalculationResult, calculatePositionBatchCost } from "../costing";
+import { calculateMaterialCost, calculateBottleneckBaseQuantity, BottleneckCalculationResult, calculatePositionBatchCost } from "../costing";
 import { getProductFamilyUOMOptions, extractProductUomShortcut } from "../utils/uom-rules";
- 
+
 import {
     // MATERIAL_TYPE_OPTIONS,
     MaterialType,
@@ -224,9 +224,18 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
     const handleUpdateRoute = (routeId: number, field: keyof RouteStep, value: unknown) => {
         setEditedRoutes(prev => prev.map(r => {
             if (r.route_id !== routeId) return r;
-            const updated = { ...r, [field]: value };
-            if (field === "step_batch_size") {
-                (updated as any).batch_capacity = value;
+            const updated: any = { ...r, [field]: value };
+            if (field === "step_batch_size") updated.batch_capacity = value;
+
+            if ((field === "setup_time_hours" || field === "run_time_hours") && (!updated.step_batch_size || Number(updated.step_batch_size) <= 0)) {
+                const wc = workCenters.find(w => w.work_center_id === updated.work_center_id);
+                const cap = Number(wc?.capacity_per_hour);
+                // Capacity applies to RUN time only: setup produces nothing.
+                const hours = Number(updated.run_time_hours) || 0;
+                if (cap > 0 && hours > 0) {
+                    updated.step_batch_size = parseFloat((cap * hours).toFixed(4));
+                    updated.batch_capacity = updated.step_batch_size;
+                }
             }
             return updated;
         }));
@@ -343,16 +352,25 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
     const laborCostPerUnit = baseQuantity > 0 ? totalLaborBatchCost / baseQuantity : 0;
 
     // Dynamic Bottleneck Runtime Model State
-    const [isAutoBaseQty, setIsAutoBaseQty] = React.useState<boolean>(true);
+    const [isAutoBaseQty, setIsAutoBaseQty] = React.useState<boolean>(
+        Boolean(editedVersionDetails?.is_auto_base_qty)
+    );
     const [showRuntimeSettings, setShowRuntimeSettings] = React.useState<boolean>(false);
-    const [shiftHours, setShiftHours] = React.useState<number>(18);
+    const [shiftHours, setShiftHours] = React.useState<number>(8);
     const [shiftMinutes, setShiftMinutes] = React.useState<number>(0);
-    const [downtimeMinutes, setDowntimeMinutes] = React.useState<number>(16);
-    const [downtimeSeconds, setDowntimeSeconds] = React.useState<number>(7);
+    const [downtimeMinutes, setDowntimeMinutes] = React.useState<number>(0);
+    const [downtimeSeconds, setDowntimeSeconds] = React.useState<number>(0);
 
     const [rawBaseQty, setRawBaseQty] = React.useState<string>(
         String(editedVersionDetails?.base_quantity !== undefined ? editedVersionDetails.base_quantity : 1)
     );
+
+    // Sync isAutoBaseQty state when editedVersionDetails loads or switches
+    React.useEffect(() => {
+        if (editedVersionDetails?.is_auto_base_qty !== undefined) {
+            setIsAutoBaseQty(Boolean(editedVersionDetails.is_auto_base_qty));
+        }
+    }, [editedVersionDetails?.is_auto_base_qty, editedVersionDetails?.version_id, editedVersionDetails?.draft_id]);
 
     // Sync raw string when base_quantity updates externally
     React.useEffect(() => {
@@ -396,7 +414,7 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
         console.log(`  • Planned Downtime       : ${downtimeMinutes} mins ${downtimeSeconds} secs (${((downtimeMinutes / 60) + (downtimeSeconds / 3600)).toFixed(6)} Decimal Hours)`);
         console.log(`  • T_run Equation         : Shift Hours - Downtime Hours`);
         console.log(`  • T_run Result           : ${(shiftHours + shiftMinutes / 60).toFixed(6)} - ${((downtimeMinutes / 60) + (downtimeSeconds / 3600)).toFixed(6)} = %c${bottleneckCalc.netProductionHours.toFixed(6)} Decimal Hours%c (Display: ${bottleneckCalc.netProductionHours.toFixed(4)} hrs)`, "color: #059669; font-weight: bold;", "color: inherit;");
-        
+
         console.log("%cStep 2: Calculate Step Throughput Rates & Find Bottleneck (CAP_bottleneck)", "font-weight: bold; color: #0284c7;");
         console.table(bottleneckCalc.stepCapacities.map(s => ({
             Step: `Step #${s.stepNum}`,
@@ -446,7 +464,11 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
             const computed = parseFloat(bottleneckCalc.grossOutput.toFixed(4));
             if (Math.abs(Number(editedVersionDetails?.base_quantity || 0) - computed) > 0.0001) {
                 setRawBaseQty(String(computed));
-                setEditedVersionDetails((prev: any) => ({ ...prev, base_quantity: computed }));
+                setEditedVersionDetails((prev: any) => ({
+                    ...prev,
+                    base_quantity: computed,
+                    is_auto_base_qty: true
+                }));
                 setHasUnsavedChanges(true);
             }
         }
@@ -456,7 +478,12 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
         if (isVersionLocked || bottleneckCalc.grossOutput <= 0) return;
         const computed = parseFloat(bottleneckCalc.grossOutput.toFixed(4));
         setRawBaseQty(String(computed));
-        setEditedVersionDetails((prev: any) => ({ ...prev, base_quantity: computed }));
+        setEditedVersionDetails((prev: any) => ({
+            ...prev,
+            base_quantity: computed,
+            is_auto_base_qty: true
+        }));
+        setIsAutoBaseQty(true);
         setHasUnsavedChanges(true);
     };
 
@@ -466,7 +493,11 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
     const handleSyncWithStep1 = () => {
         if (isVersionLocked || !primaryStepBatchSize) return;
         setRawBaseQty(String(primaryStepBatchSize));
-        setEditedVersionDetails((prev: any) => ({ ...prev, base_quantity: primaryStepBatchSize }));
+        setEditedVersionDetails((prev: any) => ({
+            ...prev,
+            base_quantity: primaryStepBatchSize,
+            is_auto_base_qty: false
+        }));
         setIsAutoBaseQty(false);
         setHasUnsavedChanges(true);
     };
@@ -553,23 +584,38 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
                                             onClick={() => {
                                                 const nextMode = !isAutoBaseQty;
                                                 setIsAutoBaseQty(nextMode);
-                                                if (nextMode && bottleneckCalc.grossOutput > 0) {
-                                                    const computed = parseFloat(bottleneckCalc.grossOutput.toFixed(4));
-                                                    setRawBaseQty(String(computed));
-                                                    setEditedVersionDetails((prev: any) => ({ ...prev, base_quantity: computed }));
-                                                    setHasUnsavedChanges(true);
+                                                if (nextMode) {
+                                                    if (bottleneckCalc.grossOutput > 0) {
+                                                        const computed = parseFloat(bottleneckCalc.grossOutput.toFixed(4));
+                                                        setRawBaseQty(String(computed));
+                                                        setEditedVersionDetails((prev: any) => ({
+                                                            ...prev,
+                                                            base_quantity: computed,
+                                                            is_auto_base_qty: true
+                                                        }));
+                                                    } else {
+                                                        setEditedVersionDetails((prev: any) => ({
+                                                            ...prev,
+                                                            is_auto_base_qty: true
+                                                        }));
+                                                    }
+                                                } else {
+                                                    setEditedVersionDetails((prev: any) => ({
+                                                        ...prev,
+                                                        is_auto_base_qty: false
+                                                    }));
                                                 }
+                                                setHasUnsavedChanges(true);
                                             }}
-                                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 cursor-pointer ${
-                                                isAutoBaseQty
-                                                    ? "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20"
-                                                    : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
-                                            }`}
+                                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 cursor-pointer ${isAutoBaseQty
+                                                ? "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20"
+                                                : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
+                                                }`}
                                             title={isAutoBaseQty ? "Auto-synced with Bottleneck Runtime Model" : "Click to enable Automatic Bottleneck Synchronization"}
                                         >
                                             {isAutoBaseQty ? (
                                                 <>
-                                                     Auto (Bottleneck)
+                                                    Auto (Bottleneck)
                                                 </>
                                             ) : (
                                                 <>
@@ -594,7 +640,17 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
                                             setIsAutoBaseQty(false); // User manual override
                                             const parsed = parseFloat(e.target.value);
                                             if (!isNaN(parsed) && parsed > 0) {
-                                                setEditedVersionDetails((prev: any) => ({ ...prev, base_quantity: parsed }));
+                                                setEditedVersionDetails((prev: any) => ({
+                                                    ...prev,
+                                                    base_quantity: parsed,
+                                                    is_auto_base_qty: false
+                                                }));
+                                                setHasUnsavedChanges(true);
+                                            } else {
+                                                setEditedVersionDetails((prev: any) => ({
+                                                    ...prev,
+                                                    is_auto_base_qty: false
+                                                }));
                                                 setHasUnsavedChanges(true);
                                             }
                                         }}
@@ -603,11 +659,19 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
                                             if (isNaN(parsed) || parsed <= 0) {
                                                 const fallback = 1;
                                                 setRawBaseQty(String(fallback));
-                                                setEditedVersionDetails((prev: any) => ({ ...prev, base_quantity: fallback }));
+                                                setEditedVersionDetails((prev: any) => ({
+                                                    ...prev,
+                                                    base_quantity: fallback,
+                                                    is_auto_base_qty: false
+                                                }));
                                                 setHasUnsavedChanges(true);
                                             } else {
                                                 setRawBaseQty(String(parsed));
-                                                setEditedVersionDetails((prev: any) => ({ ...prev, base_quantity: parsed }));
+                                                setEditedVersionDetails((prev: any) => ({
+                                                    ...prev,
+                                                    base_quantity: parsed,
+                                                    is_auto_base_qty: false
+                                                }));
                                                 setHasUnsavedChanges(true);
                                             }
                                         }}
@@ -811,13 +875,14 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
                                         {(() => {
                                             const stepCap = bottleneckCalc.stepCapacities.find(s => s.stepIndex === index);
                                             if (stepCap?.isCapped) {
+                                                const batchCapDisplay = stepCap.maxStepBatchCapacity ? `${stepCap.maxStepBatchCapacity.toFixed(2)} ${unitShortcut} total • ` : "";
                                                 return (
                                                     <span
                                                         className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full"
-                                                        title={`Recipe throughput: ${stepCap.calculatedRate.toFixed(2)} ${unitShortcut}/hr exceeds workstation capacity: ${stepCap.workCenterCapacity?.toFixed(2)} ${unitShortcut}/hr. Capped at ${stepCap.hourlyRate.toFixed(2)} ${unitShortcut}/hr.`}
+                                                        title={`Recipe throughput (${stepCap.calculatedRate.toFixed(2)} ${unitShortcut}/hr) exceeds workstation capacity (${stepCap.workCenterCapacity?.toFixed(2)} ${unitShortcut}/hr). Max batch for ${stepCap.runHours.toFixed(2)} hrs run time: ${stepCap.maxStepBatchCapacity?.toFixed(2)} ${unitShortcut}. Capped at ${stepCap.hourlyRate.toFixed(2)} ${unitShortcut}/hr.`}
                                                     >
                                                         <AlertCircle className="h-3 w-3" />
-                                                        Capped at Workstation Capacity ({stepCap.hourlyRate.toFixed(2)} {unitShortcut}/hr)
+                                                        Capped at Workstation Capacity ({batchCapDisplay}{stepCap.hourlyRate.toFixed(2)} {unitShortcut}/hr)
                                                     </span>
                                                 );
                                             }
@@ -885,7 +950,10 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
                                                 handleUpdateRoute(r.route_id, "work_center_id", val ? parseInt(val) : null);
                                                 const selectedWorkCenter = workCenters.find(wc => wc.work_center_id === (val ? parseInt(val) : null));
                                                 if (selectedWorkCenter && selectedWorkCenter.capacity_per_hour) {
-                                                    handleUpdateRoute(r.route_id, "step_batch_size", selectedWorkCenter.capacity_per_hour);
+                                                    // Capacity applies to RUN time only: setup produces nothing.
+                                                    const runDuration = Number(r.run_time_hours) > 0 ? Number(r.run_time_hours) : 1;
+                                                    const dynamicBatchCap = parseFloat((Number(selectedWorkCenter.capacity_per_hour) * runDuration).toFixed(4));
+                                                    handleUpdateRoute(r.route_id, "step_batch_size", dynamicBatchCap);
                                                 }
                                             }}
                                             placeholder="Select Work Center..."
@@ -1041,8 +1109,28 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
 
                                     {/* Step Batch Size */}
                                     <div className="space-y-1.5">
-                                        <label htmlFor={`step-batch-size-${r.route_id}`} className="text-[10px] uppercase font-bold text-muted-foreground tracking-wide flex items-center gap-1">
-                                            <Layers className="h-3 w-3" /> Step Batch Size
+                                        <label htmlFor={`step-batch-size-${r.route_id}`} className="text-[10px] uppercase font-bold text-muted-foreground tracking-wide flex items-center justify-between">
+                                            <span className="flex items-center gap-1">
+                                                <Layers className="h-3 w-3" /> Step Batch Size
+                                            </span>
+
+                                            {(() => {
+                                                const stepCap = bottleneckCalc.stepCapacities.find(s => s.stepIndex === index);
+                                                if (stepCap?.maxStepBatchCapacity) {
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            disabled={isVersionLocked}
+                                                            onClick={() => handleUpdateRoute(r.route_id, "step_batch_size", stepCap.maxStepBatchCapacity)}
+                                                            className={`text-[9px] normal-case hover:underline cursor-pointer disabled:cursor-not-allowed ${stepCap.isCapped ? "text-amber-600 dark:text-amber-400 font-bold" : "text-muted-foreground font-semibold"}`}
+                                                            title={`Workstation rate (${stepCap.workCenterCapacity}/hr) × Run time (${stepCap.runHours.toFixed(2)}h, setup excluded) = ${stepCap.maxStepBatchCapacity.toFixed(2)} ${unitShortcut}. Click to apply cap.`}
+                                                        >
+                                                            Cap: {stepCap.maxStepBatchCapacity.toFixed(2)} {unitShortcut}
+                                                        </button>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
                                         </label>
                                         <input
                                             id={`step-batch-size-${r.route_id}`}
@@ -1064,6 +1152,14 @@ export const RoutesBOMTab: React.FC<RoutesBOMTabProps> = ({
                                             }}
                                             className="w-full h-9 px-2.5 rounded-lg border border-muted bg-background text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50 disabled:bg-muted/30"
                                         />
+                                        {(() => {
+                                            const sc = bottleneckCalc.stepCapacities.find(s => s.stepIndex === index);
+                                            return sc?.maxStepBatchCapacity && Number(r.step_batch_size) > sc.maxStepBatchCapacity + 0.01 ? (
+                                                <span className="text-[10px] font-semibold text-red-600 block leading-tight">
+                                                    Exceeds workstation capacity. Machine time is based on {sc.maxStepBatchCapacity.toFixed(2)} {unitShortcut}.
+                                                </span>
+                                            ) : null;
+                                        })()}
                                     </div>
 
                                     {/* QA Template */}
