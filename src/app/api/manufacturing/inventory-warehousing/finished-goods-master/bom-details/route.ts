@@ -244,12 +244,17 @@ export async function POST(request: Request) {
             throw new Error(productVerification.error || "Product update could not be verified.");
         }
 
+        const isAutoBaseQty = details.is_auto_base_qty !== undefined
+            ? details.is_auto_base_qty
+            : details.isAutoBaseQty;
+
         // 2. Save version metadata (expected yield and base quantity)
         const versionResult = await saveActiveBOMDetails(
             numericVersionId,
             expectedYield,
             baseQuantity,
-            customOverhead
+            customOverhead,
+            isAutoBaseQty
         );
         if (!versionResult.ok) {
             throw new Error(versionResult.error || "Failed to update version metadata in Directus");

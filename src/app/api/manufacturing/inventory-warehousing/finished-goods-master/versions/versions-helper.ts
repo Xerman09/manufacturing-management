@@ -31,6 +31,38 @@ function readDirectusBoolean(value: unknown, fallback: boolean): boolean {
     return fallback;
 }
 
+let isAutoBaseQtySchemaChecked = false;
+export async function ensureIsAutoBaseQtyFieldSchema(): Promise<void> {
+    if (isAutoBaseQtySchemaChecked) return;
+    try {
+        for (const collection of ["product_manufacturing_version", "product_manufacturing_version_draft"]) {
+            const checkRes = await fetch(`${DIRECTUS_URL}/fields/${collection}/is_auto_base_qty`, { headers, cache: "no-store" });
+            if (checkRes.status === 404) {
+                await fetch(`${DIRECTUS_URL}/fields/${collection}`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({
+                        field: "is_auto_base_qty",
+                        type: "boolean",
+                        meta: {
+                            interface: "boolean",
+                            options: { label: "Auto Base Quantity (Bottleneck)" },
+                            display: "boolean",
+                            readonly: false,
+                            hidden: false,
+                            width: "half"
+                        },
+                        schema: { default_value: false, is_nullable: true }
+                    })
+                });
+            }
+        }
+        isAutoBaseQtySchemaChecked = true;
+    } catch (err) {
+        console.error("Error ensuring is_auto_base_qty field schema in Directus:", err);
+    }
+}
+
 export function isStandardBOMVersion(version: VersionSelectionCandidate) {
     const normalizedName = String(version.version_name ?? "")
         .trim()
@@ -138,6 +170,7 @@ export async function getBOMDetailsForVersion(
         }
 
         version.custom_overhead = Number(version.custom_overhead ?? 0);
+        version.is_auto_base_qty = readDirectusBoolean(version.is_auto_base_qty, false);
 
         const overheadFilter = encodeURIComponent(JSON.stringify({
             _and: [
@@ -502,19 +535,22 @@ export async function createProductVersion(
     versionName: string,
     expectedYield: number = 100,
     baseQuantity: number = 1,
-    uomId?: number | null
+    uomId?: number | null,
+    isAutoBaseQty?: boolean | number
 ): Promise<number | null> {
     try {
+        await ensureIsAutoBaseQtyFieldSchema();
         const todayStr = await getTodayDateString();
         const url = `${DIRECTUS_URL}/items/product_manufacturing_version`;
-        const payload = {
+        const payload: Record<string, unknown> = {
             product_id: productId,
             version_name: versionName,
             expected_yield_percentage: expectedYield,
             base_quantity: baseQuantity,
             uom_id: uomId || 1,
             status: "For Approval",
-            valid_from: todayStr
+            valid_from: todayStr,
+            is_auto_base_qty: isAutoBaseQty ? 1 : 0
         };
         const res = await fetch(url, {
             method: "POST",

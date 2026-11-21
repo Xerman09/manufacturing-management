@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Product, BOMItem, VersionOverheadItem } from "../types";
-import { CostingBreakdown, OverheadSummary } from "../costing";
+import { CostingBreakdown, OverheadSummary, calculateMaterialCost } from "../costing";
 
 interface ExportPDFParams {
     selectedProduct: Product;
@@ -209,7 +209,13 @@ export function generateFinishedGoodCostRollupPDF({
         const qty = Number(item.quantity || 0);
         const wastage = Number(item.wastagePercent ?? itemObj.wastageFactor ?? 0);
         const landed = Number(item.landedCost ?? itemObj.unitCost ?? itemObj.costPerUnit ?? 0);
-        const extCost = qty * (1 + (wastage / 100)) * landed;
+        const isByProduct = item.type === "by_product" || itemObj.is_by_product === true;
+        const extCost = calculateMaterialCost({
+            quantity: qty,
+            unitCost: landed,
+            wastagePercent: wastage,
+            isByProduct
+        });
         return [
             item.name || "Ingredient",
             String(item.type || "ingredient").toUpperCase(),

@@ -61,8 +61,8 @@ export async function GET(request: Request) {
             });
         }
 
-        const averageYield = totalTarget > 0 ? (totalActual / totalTarget) * 100 : 98.5;
-        const roundedAverageYield = Math.min(100, Math.max(1, Math.round(averageYield * 10) / 10));
+        const averageYield = totalTarget > 0 ? (totalActual / totalTarget) * 100 : null;
+        const roundedAverageYield = averageYield !== null ? Math.min(100, Math.max(1, Math.round(averageYield * 10) / 10)) : null;
 
         return NextResponse.json({
             productId,
@@ -70,7 +70,7 @@ export async function GET(request: Request) {
             totalTargetQuantity: totalTarget,
             totalActualQuantity: totalActual,
             averageActualYield: roundedAverageYield,
-            recommendedScrapRate: Math.max(0, Math.round((100 - roundedAverageYield) * 10) / 10)
+            recommendedScrapRate: roundedAverageYield !== null ? Math.max(0, Math.round((100 - roundedAverageYield) * 10) / 10) : null
         });
     } catch (e) {
         console.error("API Error calculating historical yield:", e);

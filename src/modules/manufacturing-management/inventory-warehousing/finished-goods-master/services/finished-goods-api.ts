@@ -175,6 +175,7 @@ export async function saveBOMDetails(
     details: {
         version_name: string;
         base_quantity: number;
+        is_auto_base_qty?: boolean | number;
         uom_id?: number | null;
         expected_yield_percentage: number;
         custom_overhead?: number;
@@ -320,12 +321,13 @@ export async function registerNewVersion(
     expectedYield: number,
     versionName: string,
     baseQuantity?: number,
-    uomId?: number
+    uomId?: number,
+    isAutoBaseQty?: boolean
 ): Promise<{ success: boolean; version: ProductVersion }> {
     const res = await fetch("/api/manufacturing/inventory-warehousing/finished-goods-master/versions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId, baseVersionId, expectedYield, versionName, baseQuantity, uomId })
+        body: JSON.stringify({ productId, baseVersionId, expectedYield, versionName, baseQuantity, uomId, isAutoBaseQty })
     });
     if (!res.ok) {
         let msg = "Failed to register version via BFF";
@@ -354,6 +356,7 @@ export async function submitFullVersion(payload: {
     productId: number;
     versionName: string;
     baseQuantity: number;
+    is_auto_base_qty?: boolean;
     uomId?: number;
     expectedYield: number;
     status?: string;
@@ -618,6 +621,8 @@ export async function initiateVersionDraft(
         uomId?: number;
         expectedYieldPercentage?: number;
         customOverhead?: number;
+        isAutoBaseQty?: boolean;
+        is_auto_base_qty?: boolean;
     }
 ): Promise<{ success: boolean; draftId: number; draft: any }> {
     const body = typeof params === "number" ? { versionId: params } : params;

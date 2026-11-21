@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
-import { getBOMDetailsForVersion } from "../versions/versions-helper";
+import { getBOMDetailsForVersion, ensureIsAutoBaseQtyFieldSchema } from "../versions/versions-helper";
 import {
     isMaterialType,
     isMaterialTypeCompatible,
@@ -39,19 +39,35 @@ export async function saveActiveBOMDetails(
     versionId: number,
     expectedYield: number,
     baseQuantity: number = 1,
-    customOverhead: number = 0
+    customOverhead: number = 0,
+    isAutoBaseQty?: boolean | number
 ): Promise<{ ok: boolean; error?: string }> {
     try {
+        await ensureIsAutoBaseQtyFieldSchema();
         const url = `${DIRECTUS_URL}/items/product_manufacturing_version/${versionId}`;
-        const res = await fetch(url, {
+        const updatePayload: Record<string, unknown> = {
+            expected_yield_percentage: expectedYield,
+            base_quantity: baseQuantity,
+            custom_overhead: customOverhead
+        };
+        if (isAutoBaseQty !== undefined) {
+            updatePayload.is_auto_base_qty = isAutoBaseQty ? 1 : 0;
+        }
+        let res = await fetch(url, {
             method: "PATCH",
             headers,
-            body: JSON.stringify({
-                expected_yield_percentage: expectedYield,
-                base_quantity: baseQuantity,
-                custom_overhead: customOverhead
-            })
+            body: JSON.stringify(updatePayload)
         });
+        if (!res.ok) {
+            if (isAutoBaseQty !== undefined) {
+                updatePayload.is_auto_base_qty = Boolean(isAutoBaseQty);
+                res = await fetch(url, {
+                    method: "PATCH",
+                    headers,
+                    body: JSON.stringify(updatePayload)
+                });
+            }
+        }
         if (!res.ok) {
             return { ok: false, error: `Directus version update failed (${res.status})` };
         }

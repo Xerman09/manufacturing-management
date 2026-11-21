@@ -11,13 +11,13 @@ import {
     Package,
     Layers,
     AlertCircle,
-   
+
     Star,
     Clock,
- 
- 
+
+
     GitFork,
- 
+
     CheckCircle2,
     FileText,
     Sliders,
@@ -33,11 +33,11 @@ import { VersionCompareModal } from "./components/VersionCompareModal";
 import { FinishedGoodsHeader } from "./components/FinishedGoodsHeader";
 import { VersionManagementTab } from "./components/VersionManagementTab";
 import { RegisterProductModal } from "./components/RegisterProductModal";
-import { fetchHistoricalYield, applyHistoricalYield } from "./services/historical-yield.service";
+// import { fetchHistoricalYield, applyHistoricalYield } from "./services/historical-yield.service";
 import { useFinishedGoods } from "./hooks/useFinishedGoods";
-import { Product, ProductVersion, BOMItem, RoutingStep } from "./types";
-import { calculateCostBreakdown, calculateMarginSummary, calculateOverheadSummary, calculateRouteBreakdown } from "./costing";
- 
+import { Product, ProductVersion, BOMItem, RoutingStep } from "./types";    
+import { calculateCostBreakdown, calculateMarginSummary, calculateOverheadSummary, calculateRoutesRollup } from "./costing";
+
 import {
     SidebarVersionListSkeleton,
     DetailsTabSkeleton,
@@ -64,7 +64,7 @@ export default function FinishedGoodsModule() {
         ? (requestedTab === "routes_bom" ? "version_management" : requestedTab === "qa_templates" || requestedTab === "importation" ? "quality_importation" : requestedTab)
         : "details";
     const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
-    const [isSyncingYield, setIsSyncingYield] = useState(false);
+    // const [isSyncingYield, setIsSyncingYield] = useState(false);
     const [confirmModal, setConfirmModal] = useState<ConfirmActionModalProps>({
         isOpen: false,
         title: "",
@@ -375,7 +375,8 @@ export default function FinishedGoodsModule() {
             versionName: autoVersionName,
             baseQuantity: Number(sourceVer.base_quantity) || 1,
             uomId: sourceVer.uom_id ? Number(sourceVer.uom_id) : undefined,
-            expectedYieldPercentage: Number(sourceVer.expected_yield_percentage) || 100
+            expectedYieldPercentage: Number(sourceVer.expected_yield_percentage) || 100,
+            isAutoBaseQty: Boolean(sourceVer.is_auto_base_qty)
         });
     };
 
@@ -508,59 +509,27 @@ export default function FinishedGoodsModule() {
     };
 
     const calculateCurrentCost = (priceOverrides: Record<string, number>, expectedYieldPercentage: number) => {
-        let materialsCost = 0;
-        let machineOverheadCost = 0;
-        let machineHours = 0;
-        let lineElapsedHours = 0;
-        let totalMachineCost = 0;
+        const baseQuantity = Number(editedVersionDetails.base_quantity) > 0
+            ? Number(editedVersionDetails.base_quantity)
+            : 1;
 
-        editedRoutes.forEach(route => {
-            const stepDur = (Number(route.setup_time_hours) || 0) + (Number(route.run_time_hours) || 0);
-            if (stepDur > lineElapsedHours) {
-                lineElapsedHours = stepDur;
-            }
-
-            const workCenter = workCenters.find(wc => wc.work_center_id === route.work_center_id);
-            const routeBreakdown = calculateRouteBreakdown({
-                stepBatchSize: route.step_batch_size || 1,
-                machineHourlyRate: workCenter?.overhead_cost_per_hour || 0,
-                setupTimeHours: route.setup_time_hours,
-                runTimeHours: route.run_time_hours,
-                baseQuantity: Number(editedVersionDetails.base_quantity) || 1,
-                materials: (route.bom_items || []).map(item => ({
-                    quantity: item.quantity_required,
-                    unitCost: priceOverrides[String(item.id)] ?? Number(item.cost_per_unit || 0),
-                    wastagePercent: item.wastage_factor_percentage
-                }))
-            });
-
-            materialsCost += routeBreakdown.materialsCost;
-            machineOverheadCost += routeBreakdown.machineOverheadCost;
-            machineHours += routeBreakdown.machineHours;
-            totalMachineCost += routeBreakdown.totalMachineCost;
+        const rollup = calculateRoutesRollup({
+            routes: editedRoutes,
+            workCenters,
+            baseQuantity,
+            priceOverrides
         });
 
-        const baseQuantity = Number(editedVersionDetails.base_quantity) > 0 ? Number(editedVersionDetails.base_quantity) : 1;
-        const laborPositions = editedVersionDetails.labor_positions || [];
-        const totalLaborCost = laborPositions.reduce((sum, pos) => {
-            const count = Number(pos.manpower_count) || 0;
-            const hourly = Number(pos.hourly_rate) || 0;
-            const hours = Number(pos.hours_required) || 0;
-            return sum + (count * hourly * hours);
-        }, 0);
-        const directLaborCost = totalLaborCost / baseQuantity;
-
         return calculateCostBreakdown({
-            materialsCost,
-            directLaborCost,
-            machineOverheadCost,
+            materialsCost: rollup.materialsCost,
+            machineOverheadCost: rollup.machineOverheadCost,
+            machineHours: rollup.machineHours,
+            lineElapsedHours: rollup.lineElapsedHours,
+            totalMachineCost: rollup.totalMachineCost,
             customOverheadCost: editedVersionDetails.custom_overhead,
             expectedYieldPercentage,
             baseQuantity,
-            machineHours,
-            lineElapsedHours,
-            totalMachineCost,
-            laborPositions
+            laborPositions: editedVersionDetails.labor_positions || []
         });
     };
 
