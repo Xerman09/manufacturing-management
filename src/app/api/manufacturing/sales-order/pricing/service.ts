@@ -112,10 +112,10 @@ export async function resolveCustomerDiscountPrice(input: SalesOrderPricingInput
   if (!input.productId) throw new SalesOrderPricingError("productId is required");
 
   const product = await fetchProduct(input.productId);
-  
+
   // Resolve base price if not provided
   const basePrice = input.basePrice ?? asNumber(product.price_per_unit) ?? asNumber(product.cost_per_unit) ?? 0;
-  
+
   // Find category ID of the product
   let categoryId = asNumber(product.product_category);
 
@@ -123,12 +123,12 @@ export async function resolveCustomerDiscountPrice(input: SalesOrderPricingInput
   if (!categoryId && product.parent_id) {
     const parentId = asNumber(product.parent_id);
     if (parentId && parentId > 0) {
-        try {
-            const parent = await fetchProduct(parentId);
-            categoryId = asNumber(parent.product_category);
-        } catch {
-            // Parent not found, ignore.
-        }
+      try {
+        const parent = await fetchProduct(parentId);
+        categoryId = asNumber(parent.product_category);
+      } catch {
+        // Parent not found, ignore.
+      }
     }
   }
 
@@ -139,17 +139,17 @@ export async function resolveCustomerDiscountPrice(input: SalesOrderPricingInput
   if (supplierIds.length === 0 && product.parent_id) {
     const parentId = asNumber(product.parent_id);
     if (parentId && parentId > 0) {
-        try {
-            supplierIds = await fetchProductSuppliers(parentId);
-        } catch {
-            // Parent suppliers not found, ignore.
-        }
+      try {
+        supplierIds = await fetchProductSuppliers(parentId);
+      } catch {
+        // Parent suppliers not found, ignore.
+      }
     }
   }
 
   // Fetch active discount rules for the customer
   const rules = await fetchCustomerDiscountRules(input.customerCode);
-  
+
   // Match the rule using Specificity Scoring:
   // - Matches BOTH Supplier & Category = Score 3 (Most Specific)
   // - Matches Supplier ONLY or Category ONLY = Score 2
@@ -158,31 +158,31 @@ export async function resolveCustomerDiscountPrice(input: SalesOrderPricingInput
   let highestScore = 0;
 
   for (const rule of rules) {
-      const ruleCat = asNumber(rule.category_id);
-      const ruleSup = asNumber(rule.supplier_id);
-      
-      // 1. Evaluate Category Match
-      if (ruleCat && ruleCat !== categoryId) {
-          continue; // Rule requires a specific category, but it doesn't match this product.
+    const ruleCat = asNumber(rule.category_id);
+    const ruleSup = asNumber(rule.supplier_id);
+
+    // 1. Evaluate Category Match
+    if (ruleCat && ruleCat !== categoryId) {
+      continue; // Rule requires a specific category, but it doesn't match this product.
+    }
+
+    // 2. Evaluate Supplier Match
+    if (ruleSup) {
+      if (!supplierIds.includes(ruleSup)) {
+        continue; // Rule requires a specific supplier, but it doesn't match this product.
       }
-      
-      // 2. Evaluate Supplier Match
-      if (ruleSup) {
-          if (!supplierIds.includes(ruleSup)) {
-              continue; // Rule requires a specific supplier, but it doesn't match this product.
-          }
-      }
-      
-      // 3. Rule is valid for this product! Calculate its specificity score.
-      let score = 1; // Base score for global blanket rules (both category and supplier null)
-      if (ruleCat && ruleSup) score = 3;
-      else if (ruleCat || ruleSup) score = 2;
-      
-      // 4. Keep the rule with the highest specificity
-      if (score > highestScore) {
-          highestScore = score;
-          matchedRule = rule;
-      }
+    }
+
+    // 3. Rule is valid for this product! Calculate its specificity score.
+    let score = 1; // Base score for global blanket rules (both category and supplier null)
+    if (ruleCat && ruleSup) score = 3;
+    else if (ruleCat || ruleSup) score = 2;
+
+    // 4. Keep the rule with the highest specificity
+    if (score > highestScore) {
+      highestScore = score;
+      matchedRule = rule;
+    }
   }
 
   // Calculate final price based on the matched rule
@@ -190,24 +190,111 @@ export async function resolveCustomerDiscountPrice(input: SalesOrderPricingInput
   let discount = null;
 
   if (matchedRule && matchedRule.discount_type) {
+    const dt = matchedRule.discount_type;
+    const totalPercent = asNumber(dt.total_percent) ?? 0;
+    finalPrice = roundMoney(basePrice * (1 - totalPercent / 100));
+    discount = {
+      id: asNumber(dt.id),
+      discountType: dt.discount_type,
+      totalPercent: totalPercent
+    };
+  }
+
+  return {
+    productId: input.productId,
+    basePrice,
+    finalPrice,
+    discount
+  };
+}
+
+export async function resolveCustomerDiscountPriceBatch(input: {
+  customerCode: string;
+  items: Array<{ productId: number; basePrice?: number | null }>;
+}) {
+  if (!input.customerCode || !Array.isArray(input.items) || input.items.length === 0) {
+    return [];
+  }
+
+  // 1. Fetch customer discount rules ONCE for the customer
+  const rules = await fetchCustomerDiscountRules(input.customerCode);
+
+  // 2. Fetch distinct products in parallel
+  const uniqueProductIds = [...new Set(input.items.map(i => i.productId).filter(Boolean))];
+  const productsMap = new Map<number, ProductRow>();
+  const suppliersMap = new Map<number, number[]>();
+
+  await Promise.all(
+    uniqueProductIds.map(async pid => {
+      try {
+        const prod = await fetchProduct(pid);
+        productsMap.set(pid, prod);
+        const parentId = asNumber(prod.parent_id);
+        const targetId = parentId ?? pid;
+        const sups = await fetchProductSuppliers(targetId);
+        suppliersMap.set(pid, sups);
+      } catch (e) {
+        console.error(`Failed to fetch product ${pid} for batch pricing:`, e);
+      }
+    })
+  );
+
+  // 3. Resolve discount for each requested item
+  return input.items.map(item => {
+    const product = productsMap.get(item.productId);
+    if (!product) {
+      return {
+        productId: item.productId,
+        basePrice: item.basePrice || 0,
+        finalPrice: item.basePrice || 0,
+        discount: null,
+        error: "Product not found"
+      };
+    }
+
+    const basePrice = item.basePrice ?? asNumber(product.price_per_unit) ?? asNumber(product.cost_per_unit) ?? 0;
+    const categoryId = asNumber(product.product_category);
+    const supplierIds = suppliersMap.get(item.productId) || [];
+
+    let matchedRule: DiscountRuleRow | null = null;
+    let highestScore = 0;
+
+    for (const rule of rules) {
+      const ruleCat = asNumber(rule.category_id);
+      const ruleSup = asNumber(rule.supplier_id);
+
+      if (ruleCat && ruleCat !== categoryId) continue;
+      if (ruleSup && !supplierIds.includes(ruleSup)) continue;
+
+      let score = 1;
+      if (ruleCat && ruleSup) score = 3;
+      else if (ruleCat || ruleSup) score = 2;
+
+      if (score > highestScore) {
+        highestScore = score;
+        matchedRule = rule;
+      }
+    }
+
+    let finalPrice = basePrice;
+    let discount = null;
+
+    if (matchedRule && matchedRule.discount_type) {
       const dt = matchedRule.discount_type;
       const totalPercent = asNumber(dt.total_percent) ?? 0;
       finalPrice = roundMoney(basePrice * (1 - totalPercent / 100));
       discount = {
-          id: asNumber(dt.id),
-          discountType: dt.discount_type,
-          totalPercent: totalPercent
+        id: asNumber(dt.id),
+        discountType: dt.discount_type,
+        totalPercent: totalPercent
       };
-  }
+    }
 
-  return {
-    customerCode: input.customerCode,
-    productId: input.productId,
-    categoryId,
-    basePrice,
-    finalPrice,
-    ruleId: asNumber(matchedRule?.id),
-    discount,
-    debug: { product, rules, matchedRule }
-  };
+    return {
+      productId: item.productId,
+      basePrice,
+      finalPrice,
+      discount
+    };
+  });
 }

@@ -1,7 +1,8 @@
 import React from "react";
 import {
     Loader2, ShieldCheck, X, Building2,
-    FileText, CreditCard, Calendar
+    FileText, CreditCard, Calendar,
+    User, UserCheck, Factory
 } from "lucide-react";
 import { SalesOrder, SalesOrderDetail } from "../../sales-order/types";
 import { formatCurrency } from "@/lib/utils";
@@ -90,9 +91,18 @@ export function SalesOrderApprovalDetailPanel({
                             </button>
                         </div>
 
-                        {/* Metadata Grid */}
-                        <div className="grid grid-cols-2 gap-3.5 bg-muted/50 p-4.5 rounded-xl border border-border text-xs">
-                            <div className="space-y-1 col-span-2">
+                        {/* Metadata Grid - 3 Columns x 4 Rows */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 bg-muted/50 p-4.5 rounded-xl border border-border text-xs">
+                            {/* ROW 1: PO Number, Customer, Price Type */}
+                            <div className="space-y-1">
+                                <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">PO Number</span>
+                                <span className="font-bold text-foreground flex items-center gap-2">
+                                    <FileText className="h-4 w-4 text-muted-foreground" />
+                                    {selectedOrder.po_no || <span className="text-muted-foreground italic font-normal">N/A</span>}
+                                </span>
+                            </div>
+
+                            <div className="space-y-1">
                                 <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Customer</span>
                                 <span className="font-extrabold text-foreground flex items-center gap-2">
                                     <Building2 className="h-4 w-4 text-amber-500" />
@@ -108,13 +118,40 @@ export function SalesOrderApprovalDetailPanel({
                             </div>
 
                             <div className="space-y-1">
-                                <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">PO Number</span>
+                                <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Price Type</span>
                                 <span className="font-bold text-foreground flex items-center gap-2">
-                                    <FileText className="h-4 w-4 text-muted-foreground" />
-                                    {selectedOrder.po_no || <span className="text-muted-foreground italic font-normal">N/A</span>}
+                                    <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                        {selectedOrder.price_type || "Regular"}
+                                    </span>
                                 </span>
                             </div>
 
+                            {/* ROW 2: Salesman, Salesman Account, Production Branch */}
+                            <div className="space-y-1">
+                                <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Salesman</span>
+                                <span className="font-bold text-foreground flex items-center gap-2">
+                                    <User className="h-4 w-4 text-muted-foreground" />
+                                    {selectedOrder.salesman_name || <span className="text-muted-foreground italic font-normal">N/A</span>}
+                                </span>
+                            </div>
+
+                            <div className="space-y-1">
+                                <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Salesman Account</span>
+                                <span className="font-bold text-foreground flex items-center gap-2">
+                                    <UserCheck className="h-4 w-4 text-muted-foreground" />
+                                    {selectedOrder.salesman_account_name || (selectedOrder.salesman_id ? `#${selectedOrder.salesman_id}` : <span className="text-muted-foreground italic font-normal">N/A</span>)}
+                                </span>
+                            </div>
+
+                            <div className="space-y-1">
+                                <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Production Branch</span>
+                                <span className="font-bold text-foreground flex items-center gap-2">
+                                    <Factory className="h-4 w-4 text-muted-foreground" />
+                                    {selectedOrder.branch_name || (selectedOrder.branch_id ? `Branch #${selectedOrder.branch_id}` : <span className="text-muted-foreground italic font-normal">N/A</span>)}
+                                </span>
+                            </div>
+
+                            {/* ROW 3: Payment Terms, Delivery Date, Due Date */}
                             <div className="space-y-1">
                                 <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Payment Terms</span>
                                 <span className="font-bold text-foreground flex items-center gap-2">
@@ -135,14 +172,6 @@ export function SalesOrderApprovalDetailPanel({
                             </div>
 
                             <div className="space-y-1">
-                                <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Order Date</span>
-                                <span className="font-bold text-foreground flex items-center gap-2">
-                                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                                    {selectedOrder.order_date ? new Date(selectedOrder.order_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "N/A"}
-                                </span>
-                            </div>
-
-                            <div className="space-y-1">
                                 <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Delivery Date</span>
                                 <span className="font-bold text-foreground flex items-center gap-2">
                                     <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -150,8 +179,17 @@ export function SalesOrderApprovalDetailPanel({
                                 </span>
                             </div>
 
+                            <div className="space-y-1">
+                                <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Due Date</span>
+                                <span className="font-bold text-foreground flex items-center gap-2">
+                                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                                    {selectedOrder.due_date ? new Date(selectedOrder.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span className="text-muted-foreground italic font-normal">N/A</span>}
+                                </span>
+                            </div>
+
+                            {/* ROW 4: Remarks / Notes (Full width) */}
                             {selectedOrder.remarks && (
-                                <div className="space-y-1 col-span-2 pt-3 border-t border-border border-dashed mt-1.5">
+                                <div className="space-y-1 col-span-1 md:col-span-3 pt-3 border-t border-border border-dashed mt-1.5">
                                     <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Remarks / Notes</span>
                                     <p className="text-[11px] text-muted-foreground leading-relaxed italic">
                                         &ldquo;{selectedOrder.remarks}&rdquo;
@@ -293,8 +331,8 @@ export function SalesOrderApprovalDetailPanel({
                                         isZeroNet
                                             ? "Approval blocked due to ₱0.00 net total"
                                             : !hasAnyBom
-                                            ? "Send to JO is disabled because all items do not have a Bill of Materials (BOM)"
-                                            : "Send to JO"
+                                                ? "Send to JO is disabled because all items do not have a Bill of Materials (BOM)"
+                                                : "Send to JO"
                                     }
                                 >
                                     {updatingStatusId === selectedOrder.order_id ? (

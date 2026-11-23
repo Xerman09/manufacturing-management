@@ -1,4 +1,4 @@
-import { SalesOrder, SalesOrderDetail, QuotationHeader, CreateSalesOrderPayload } from "../types";
+import { SalesOrder, SalesOrderDetail, QuotationHeader, CreateSalesOrderPayload, SalesOrderLookups } from "../types";
 
 let refreshPromise: Promise<boolean> | null = null;
 
@@ -124,4 +124,35 @@ export async function updateSalesOrderDraft(orderId: number, payload: CreateSale
 export async function fetchQuotationPipeline(): Promise<QuotationHeader[]> {
     const res = await fetchWithSessionRetry("/api/manufacturing/finished-goods/quotes");
     return handleResponse(res, "Failed to load quotations");
+}
+
+let cachedLookups: { data: SalesOrderLookups; timestamp: number } | null = null;
+let lookupsPromise: Promise<SalesOrderLookups> | null = null;
+const LOOKUPS_TTL_MS = 5 * 60 * 1000; // 5 minutes cache
+
+export async function fetchSalesOrderLookups(options: { forceRefresh?: boolean; signal?: AbortSignal } = {}): Promise<SalesOrderLookups> {
+    const now = Date.now();
+    if (!options.forceRefresh && cachedLookups && (now - cachedLookups.timestamp < LOOKUPS_TTL_MS)) {
+        return cachedLookups.data;
+    }
+    if (lookupsPromise) {
+        return lookupsPromise;
+    }
+    lookupsPromise = fetchWithSessionRetry("/api/manufacturing/sales-order?action=create-lookups", {
+        signal: options.signal
+    })
+        .then(res => handleResponse<SalesOrderLookups>(res, "Failed to load lookup data"))
+        .then(data => {
+            cachedLookups = { data, timestamp: Date.now() };
+            return data;
+        })
+        .finally(() => {
+            lookupsPromise = null;
+        });
+
+    return lookupsPromise;
+}
+
+export function invalidateSalesOrderLookupsCache() {
+    cachedLookups = null;
 }

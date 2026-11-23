@@ -13,7 +13,8 @@ type Row = Record<string, any>;
 export const SALES_ORDER_FIELDS = [
     "order_id", "order_no", "po_no", "quotation_id", "customer_code", "order_date", "order_status",
     "total_amount", "net_amount", "remarks", "created_date", "discount_amount",
-    "delivery_date", "due_date", "payment_terms", "salesman_id", "branch_id", "for_invoicing_at"
+    "delivery_date", "due_date", "payment_terms", "salesman_id", "branch_id", "for_invoicing_at",
+    "price_type_id", "price_type"
 ].join(",");
 
 export const SALES_ORDER_DETAIL_FIELDS = [
@@ -453,19 +454,43 @@ export async function enrichSalesOrderReadModel(
     const termsParams = new URLSearchParams({ fields: "id,payment_name,payment_days", limit: "-1" });
     if (paymentTermIds.length > 0) termsParams.set("filter[id][_in]", paymentTermIds.join(","));
     const termsPromise = paymentTermIds.length > 0 ? read("payment_terms", termsParams) : Promise.resolve({ data: [] });
+
+    const branchIds = [...new Set(salesOrders.map((order) => Number(order.branch_id)).filter(Boolean))];
+    const branchesParams = new URLSearchParams({ fields: "id,branch_name", limit: "-1" });
+    if (branchIds.length > 0) branchesParams.set("filter[id][_in]", branchIds.join(","));
+    const branchesPromise = branchIds.length > 0
+        ? read("branches", branchesParams).catch(() => ({ data: [] }))
+        : Promise.resolve({ data: [] });
+
+    const salesmanIds = [...new Set(salesOrders.map((order) => Number(order.salesman_id)).filter(Boolean))];
+    const salesmenParams = new URLSearchParams({ fields: "id,salesman_name,salesman_code,employee_id", limit: "-1" });
+    if (salesmanIds.length > 0) salesmenParams.set("filter[id][_in]", salesmanIds.join(","));
+    const salesmenPromise = salesmanIds.length > 0
+        ? read("salesman", salesmenParams).catch(() => ({ data: [] }))
+        : Promise.resolve({ data: [] });
+
+    const usersPromise = read("user", new URLSearchParams({ fields: "user_id,user_fname,user_lname", limit: "-1" })).catch(() => ({ data: [] }));
+
     const linkedJobOrdersPromise = includeLinkedJobOrders
         ? findLinkedJobOrders(read, details)
         : Promise.resolve(new Map<number, LinkedJobOrder[]>());
 
     const productIds = [...new Set(details.map((detail) => Number(detail.product_id)).filter(Boolean))];
     const unitsPromise = read("units", new URLSearchParams({ fields: "unit_id,unit_name,unit_shortcut", limit: "-1" }));
-    const [customerResult, termsResult, products, unitsResult, linkedJobOrdersByDetail] = await Promise.all([
+    const [customerResult, termsResult, branchesResult, salesmenResult, userResult, products, unitsResult, linkedJobOrdersByDetail] = await Promise.all([
         customersPromise,
         termsPromise,
+        branchesPromise,
+        salesmenPromise,
+        usersPromise,
         fetchProductGraph(read, productIds),
         unitsPromise,
         linkedJobOrdersPromise
     ]);
+
+    const branchesById = new Map((branchesResult.data || []).map((b: any) => [Number(b.id), b]));
+    const salesmenById = new Map((salesmenResult.data || []).map((s: any) => [Number(s.id), s]));
+    const usersById = new Map((userResult.data || []).map((u: any) => [Number(u.user_id), u]));
 
     const unitsMap = new Map<number, any>((unitsResult.data || []).map((u: any) => [Number(u.unit_id), u]));
     const customersByCode = new Map(customerResult.data.map((customer) => [String(customer.customer_code), customer]));
@@ -479,10 +504,25 @@ export async function enrichSalesOrderReadModel(
     for (const order of salesOrders) {
         const customer = customersByCode.get(String(order.customer_code));
         order.customer_name = customer?.customer_name || order.customer_code;
+        if (!order.price_type) {
+            order.price_type = customer?.price_type || "Regular";
+        }
         const term = termsById.get(Number(order.payment_terms));
         if (term) {
             order.payment_term_name = term.payment_name;
             order.payment_term_days = term.payment_days;
+        }
+        const branch = branchesById.get(Number(order.branch_id));
+        if (branch) {
+            order.branch_name = branch.branch_name;
+        }
+        const salesman = salesmenById.get(Number(order.salesman_id));
+        if (salesman) {
+            const employeeUser = salesman.employee_id ? usersById.get(Number(salesman.employee_id)) : null;
+            order.salesman_name = employeeUser
+                ? `${employeeUser.user_fname} ${employeeUser.user_lname}`.trim()
+                : (salesman.salesman_name || `Salesman #${salesman.id}`);
+            order.salesman_account_name = salesman.salesman_code || salesman.salesman_name || (salesman.id ? `Account #${salesman.id}` : null);
         }
     }
 
