@@ -127,3 +127,46 @@ export interface SalesOrderLookups {
     productTypes: Array<{ id: number; name: string }>;
     discountTypes: Array<{ id: number; discount_type: string; total_percent: number }>;
 }
+
+export interface SalesInvoiceItem {
+    detail_id: number;
+    product_id: number;
+    product_code: string;
+    product_name: string;
+    quantity: number;
+    unit_price: number;
+    uom: string;
+    gross_amount: number;
+    discount: number;
+    discount_type_id: number | null;
+    discount_type_name: string;
+    net_amount: number;
+}
+
+export interface SalesInvoicePdf {
+    id: number;
+    pdf_file: string;
+    filename_download?: string;
+    uploaded_at?: string;
+    url: string;
+}
+
+export interface SalesInvoiceSummary {
+    invoice_id: number;
+    invoice_no: string;
+    order_id: string;
+    customer_code: string;
+    invoice_date: string | null;
+    dispatch_date: string | null;
+    due_date: string | null;
+    transaction_status: string;
+    payment_status: string;
+    total_amount: number;
+    discount_amount: number;
+    net_amount: number;
+    vat_amount: number;
+    remarks: string | null;
+    pdf: SalesInvoicePdf | null;
+    items: SalesInvoiceItem[];
+}
+
