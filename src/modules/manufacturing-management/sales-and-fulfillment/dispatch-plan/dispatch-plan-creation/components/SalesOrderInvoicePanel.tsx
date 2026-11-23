@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 import { Search, CheckCircle2, FileText, Loader2, X, Inbox, Building2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { EligibleSalesOrder } from "../../shared.types";
 import {
@@ -93,7 +92,7 @@ export const SalesOrderInvoicePanel: React.FC<SalesOrderInvoicePanelProps> = ({
         </div>
       </div>
 
-      <ScrollArea className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
         <div className="p-3 space-y-2.5">
           {isBranchMissing ? (
             <div className="flex flex-col items-center justify-center py-16 px-5 text-center border-2 border-dashed rounded-xl text-muted-foreground gap-3 bg-muted/5">
@@ -181,10 +180,10 @@ export const SalesOrderInvoicePanel: React.FC<SalesOrderInvoicePanelProps> = ({
                       {order.invoices.map((inv) => (
                         <span
                           key={inv.invoice_id}
-                          className="inline-flex items-center gap-1 text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-foreground"
+                          className="inline-flex max-w-full items-center gap-1 text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-foreground"
                         >
-                          <FileText className="h-2.5 w-2.5 text-muted-foreground" />
-                          {inv.invoice_no}
+                          <FileText className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
+                          <span className="truncate">{inv.invoice_no}</span>
                         </span>
                       ))}
                     </div>
@@ -194,7 +193,7 @@ export const SalesOrderInvoicePanel: React.FC<SalesOrderInvoicePanelProps> = ({
                     <span className="text-[11px] text-muted-foreground truncate max-w-[130px]">
                       {order.city || order.branch_name || "-"}
                     </span>
-                    <span className="font-mono text-xs font-bold text-foreground">
+                    <span className="font-mono text-xs font-bold text-foreground shrink-0">
                       {formatCurrency(order.total_amount)}
                     </span>
                   </div>
@@ -203,7 +202,7 @@ export const SalesOrderInvoicePanel: React.FC<SalesOrderInvoicePanelProps> = ({
             })
           )}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 };

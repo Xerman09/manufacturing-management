@@ -31,7 +31,6 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { UnifiedRouteStop, EligibleInvoice } from "../../shared.types";
 import { formatCurrency, getOrderStatusBadgeStyle } from "../../shared.utils";
@@ -214,7 +213,7 @@ const DraggableStopRow: React.FC<DraggableStopRowProps> = ({
             <span className="text-muted-foreground text-[11px]">
               {invCount > 0 ? `${invCount} ${invCount === 1 ? "Invoice" : "Invoices"}` : "1 Order"}
             </span>
-            <span className="font-mono font-bold text-foreground">
+            <span className="font-mono font-bold text-foreground shrink-0">
               {formatCurrency(stop.amount)}
             </span>
           </div>
@@ -224,10 +223,10 @@ const DraggableStopRow: React.FC<DraggableStopRowProps> = ({
               {stop.invoices.map((inv: EligibleInvoice) => (
                 <span
                   key={inv.invoice_id}
-                  className="inline-flex items-center gap-1 text-[10px] font-mono bg-muted/70 px-1.5 py-0.5 rounded"
+                  className="inline-flex max-w-full items-center gap-1 text-[10px] font-mono bg-muted/70 px-1.5 py-0.5 rounded"
                 >
-                  <FileText className="h-2.5 w-2.5 text-muted-foreground" />
-                  {inv.invoice_no}
+                  <FileText className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{inv.invoice_no}</span>
                 </span>
               ))}
             </div>
@@ -349,7 +348,7 @@ export const RouteSequencePanel: React.FC<RouteSequencePanelProps> = ({
         </div>
 
         {/* Stops List with Draggable Reordering */}
-        <ScrollArea className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           <div className="p-3 space-y-2.5">
             {stops.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 px-4 text-center border-2 border-dashed rounded-xl text-muted-foreground gap-1.5">
@@ -383,7 +382,7 @@ export const RouteSequencePanel: React.FC<RouteSequencePanelProps> = ({
               </DndContext>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Bottom Summary: Vehicle Capacity + Selected Route Value (matching Image 1) */}
         <div className="p-4 border-t bg-background space-y-3 shrink-0">
