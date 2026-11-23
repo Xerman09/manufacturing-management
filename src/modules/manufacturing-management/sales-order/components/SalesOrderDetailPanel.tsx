@@ -1,10 +1,11 @@
 /* eslint-disable */
 // disabled-lint-next-line @typescript-eslint/no-unused-vars
 import React, { useState, useEffect } from "react";
-import { 
-    Loader2, AlertCircle, Building2, 
+import {
+    Loader2, AlertCircle, Building2,
     FileText, CreditCard, Calendar, Check, Minus, Plus,
-    ShieldCheck, PackageCheck, X, CheckCircle2, PackageOpen, Save, Send 
+    ShieldCheck, PackageCheck, X, CheckCircle2, PackageOpen, Save, Send,
+    User, UserCheck, Factory
 } from "lucide-react";
 import { toast } from "sonner";
 import { SalesOrder, SalesOrderDetail } from "../types";
@@ -126,7 +127,7 @@ export function SalesOrderDetailPanel({
                             <div className="h-3 w-64 bg-muted/60 rounded"></div>
                         </div>
                     </div>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         {[...Array(4)].map((_, i) => (
                             <div key={i} className="space-y-2">
@@ -155,7 +156,7 @@ export function SalesOrderDetailPanel({
                             <div className="h-4 w-32 bg-muted rounded"></div>
                             <div className="h-8 w-64 bg-muted/50 rounded-lg"></div>
                         </div>
-                        
+
                         <div className="rounded-md border bg-card">
                             <div className="border-b bg-muted/40 p-3 flex gap-4">
                                 <div className="h-3 w-24 bg-muted/60 rounded"></div>
@@ -200,17 +201,16 @@ export function SalesOrderDetailPanel({
                         <h4 className="text-sm font-black text-foreground uppercase tracking-wider">
                             {selectedOrder.order_no}
                         </h4>
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider whitespace-nowrap ${
-                            selectedOrder.order_status === "Draft"
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider whitespace-nowrap ${selectedOrder.order_status === "Draft"
                                 ? "bg-muted text-foreground border border-border"
                                 : selectedOrder.order_status === "Pending"
-                                ? "bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20"
-                                : selectedOrder.order_status === "For Revision"
-                                ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20"
-                                : selectedOrder.order_status === "For Approval"
-                                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
-                                : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
-                        }`}>
+                                    ? "bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20"
+                                    : selectedOrder.order_status === "For Revision"
+                                        ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20"
+                                        : selectedOrder.order_status === "For Approval"
+                                            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                                            : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                            }`}>
                             {selectedOrder.order_status || "Draft"}
                         </span>
                     </div>
@@ -218,9 +218,18 @@ export function SalesOrderDetailPanel({
                 </div>
             </div>
 
-            {/* Metadata Grid */}
-            <div className="grid grid-cols-2 gap-3.5 bg-muted/50 p-4.5 rounded-xl border border-border text-xs">
-                <div className="space-y-1 col-span-2">
+            {/* Metadata Grid - 3 Columns x 4 Rows */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 bg-muted/50 p-4.5 rounded-xl border border-border text-xs">
+                {/* ROW 1: PO Number, Customer, Price Type */}
+                <div className="space-y-1">
+                    <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">PO Number</span>
+                    <span className="font-bold text-foreground flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        {selectedOrder.po_no || <span className="text-muted-foreground italic font-normal">N/A</span>}
+                    </span>
+                </div>
+
+                <div className="space-y-1">
                     <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Customer</span>
                     <span className="font-extrabold text-foreground flex items-center gap-2">
                         <Building2 className="h-4 w-4 text-primary" />
@@ -234,28 +243,58 @@ export function SalesOrderDetailPanel({
                         )}
                     </span>
                 </div>
-                
+
                 <div className="space-y-1">
-                    <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">PO Number</span>
+                    <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Price Type</span>
                     <span className="font-bold text-foreground flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-muted-foreground" />
-                        {selectedOrder.po_no || <span className="text-muted-foreground italic font-normal">N/A</span>}
+                        <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
+                            {selectedOrder.price_type || "Regular"}
+                        </span>
                     </span>
                 </div>
 
+                {/* ROW 2: Salesman, Salesman Account, Production Branch */}
+                <div className="space-y-1">
+                    <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Salesman</span>
+                    <span className="font-bold text-foreground flex items-center gap-2">
+                        <User className="h-4 w-4 text-muted-foreground" />
+                        {selectedOrder.salesman_name || <span className="text-muted-foreground italic font-normal">N/A</span>}
+                    </span>
+                </div>
+
+                <div className="space-y-1">
+                    <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Salesman Account</span>
+                    <span className="font-bold text-foreground flex items-center gap-2">
+                        <UserCheck className="h-4 w-4 text-muted-foreground" />
+                        {selectedOrder.salesman_account_name || (selectedOrder.salesman_id ? `#${selectedOrder.salesman_id}` : <span className="text-muted-foreground italic font-normal">N/A</span>)}
+                    </span>
+                </div>
+
+                <div className="space-y-1">
+                    <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Production Branch</span>
+                    <span className="font-bold text-foreground flex items-center gap-2">
+                        <Factory className="h-4 w-4 text-muted-foreground" />
+                        {selectedOrder.branch_name || (selectedOrder.branch_id ? `Branch #${selectedOrder.branch_id}` : <span className="text-muted-foreground italic font-normal">N/A</span>)}
+                    </span>
+                </div>
+
+                {/* ROW 3: Payment Terms, Delivery Date, Due Date */}
                 <div className="space-y-1">
                     <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Payment Terms</span>
                     <span className="font-bold text-foreground flex items-center gap-2">
                         <CreditCard className="h-4 w-4 text-muted-foreground" />
-                        {selectedOrder.payment_terms ? `${selectedOrder.payment_terms} Days` : "COD"}
-                    </span>
-                </div>
-
-                <div className="space-y-1">
-                    <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Order Date</span>
-                    <span className="font-bold text-foreground flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-muted-foreground" />
-                        {selectedOrder.order_date ? new Date(selectedOrder.order_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "N/A"}
+                        {selectedOrder.payment_term_name ? (
+                            <span className="truncate">
+                                {selectedOrder.payment_term_name}
+                                {selectedOrder.payment_term_days !== undefined && selectedOrder.payment_term_days !== null && (
+                                    <span className="text-[9.5px] text-muted-foreground font-normal">
+                                        {" "}({selectedOrder.payment_term_days}d)
+                                    </span>
+                                )}
+                            </span>
+                        ) : (
+                            selectedOrder.payment_terms ? `${selectedOrder.payment_terms} Days` : "COD"
+                        )}
                     </span>
                 </div>
 
@@ -267,8 +306,17 @@ export function SalesOrderDetailPanel({
                     </span>
                 </div>
 
+                <div className="space-y-1">
+                    <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Due Date</span>
+                    <span className="font-bold text-foreground flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-muted-foreground" />
+                        {selectedOrder.due_date ? new Date(selectedOrder.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span className="text-muted-foreground italic font-normal">N/A</span>}
+                    </span>
+                </div>
+
+                {/* ROW 4: Remarks / Notes (Full width) */}
                 {selectedOrder.remarks && (
-                    <div className="space-y-1 col-span-2 pt-3 border-t border-border border-dashed mt-1.5">
+                    <div className="space-y-1 col-span-1 md:col-span-3 pt-3 border-t border-border border-dashed mt-1.5">
                         <span className="text-muted-foreground block text-[9.5px] font-bold uppercase tracking-wider">Remarks / Notes</span>
                         <p className="text-[11px] text-muted-foreground leading-relaxed italic">
                             &ldquo;{selectedOrder.remarks}&rdquo;
@@ -317,13 +365,12 @@ export function SalesOrderDetailPanel({
                             const hasBomVersion = Boolean(bomVersionName && bomVersionName.trim() !== "");
 
                             return (
-                                <div 
-                                    key={item.detail_id} 
-                                    className={`border rounded-xl p-4 transition-all duration-200 flex flex-col justify-between gap-3 ${
-                                        isChanged 
-                                            ? "bg-amber-500/5 border-amber-500/30" 
+                                <div
+                                    key={item.detail_id}
+                                    className={`border rounded-xl p-4 transition-all duration-200 flex flex-col justify-between gap-3 ${isChanged
+                                            ? "bg-amber-500/5 border-amber-500/30"
                                             : "bg-background border-border hover:border-primary/50"
-                                    }`}
+                                        }`}
                                 >
                                     <div className="flex items-start justify-between gap-2.5">
                                         <div className="space-y-1.5">
@@ -462,11 +509,10 @@ export function SalesOrderDetailPanel({
                         <button
                             disabled={savingQuantities || orderDetails.length === 0 || !hasChanges}
                             onClick={() => handleSaveQuantities()}
-                            className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-bold shadow-xs transition-all cursor-pointer ${
-                                hasChanges 
+                            className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-bold shadow-xs transition-all cursor-pointer ${hasChanges
                                     ? "bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-600 active:scale-[0.98] shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/25"
                                     : "border border-border bg-muted text-muted-foreground cursor-not-allowed opacity-75"
-                            }`}
+                                }`}
                             title={hasChanges ? "Save quantity edits" : "No quantity changes to save"}
                         >
                             {savingQuantities ? (
@@ -505,11 +551,11 @@ export function SalesOrderDetailPanel({
                 )}
 
             </div>
-            <FIFOAllocationModal 
-                isOpen={isAllocationModalOpen} 
-                onClose={() => setIsAllocationModalOpen(false)} 
-                selectedOrder={selectedOrder} 
-                orderDetails={orderDetails} 
+            <FIFOAllocationModal
+                isOpen={isAllocationModalOpen}
+                onClose={() => setIsAllocationModalOpen(false)}
+                selectedOrder={selectedOrder}
+                orderDetails={orderDetails}
             />
         </div>
     );
@@ -531,7 +577,7 @@ function FIFOAllocationModal({ isOpen, onClose, selectedOrder, orderDetails }: F
 
     useEffect(() => {
         if (!isOpen || !selectedOrder) return;
-        
+
         async function fetchInventoryData() {
             setLoading(true);
             try {
@@ -540,7 +586,7 @@ function FIFOAllocationModal({ isOpen, onClose, selectedOrder, orderDetails }: F
                     const data = await res.json();
                     setBatches(data.batches || []);
                     setBranches(data.branches || []);
-                    
+
                     const orderBranch = selectedOrder.branch_id;
                     if (orderBranch) {
                         setTargetBranchId(orderBranch);
@@ -555,7 +601,7 @@ function FIFOAllocationModal({ isOpen, onClose, selectedOrder, orderDetails }: F
                 setLoading(false);
             }
         }
-        
+
         fetchInventoryData();
     }, [isOpen, selectedOrder]);
 
@@ -567,15 +613,15 @@ function FIFOAllocationModal({ isOpen, onClose, selectedOrder, orderDetails }: F
         const prodName = detail.product_id.product_name;
         const prodCode = detail.product_id.product_code;
         const ordered = detail.ordered_quantity;
-        
+
         // Filter lots for the target branch and product
-        const prodLots = batches.filter(b => 
-            Number(b.product_id) === prodId && 
-            Number(b.branch_id) === Number(targetBranchId) && 
-            b.qa_status === "Passed" && 
+        const prodLots = batches.filter(b =>
+            Number(b.product_id) === prodId &&
+            Number(b.branch_id) === Number(targetBranchId) &&
+            b.qa_status === "Passed" &&
             Number(b.quantity_received) > 0
         );
-        
+
         // FIFO sorting: earliest expiry first, then by line_id
         const sortedLots = [...prodLots].sort((a, b) => {
             if (a.expiration_date && b.expiration_date) {
@@ -585,16 +631,16 @@ function FIFOAllocationModal({ isOpen, onClose, selectedOrder, orderDetails }: F
             if (b.expiration_date) return 1;
             return Number(a.line_id) - Number(b.line_id);
         });
-        
+
         let remaining = ordered;
         const allocatedLots: any[] = [];
         let totalAvailable = 0;
-        
+
         sortedLots.forEach(lot => {
             const avail = Number(lot.quantity_received);
             totalAvailable += avail;
             if (remaining <= 0) return;
-            
+
             const take = Math.min(avail, remaining);
             if (take > 0) {
                 allocatedLots.push({
@@ -606,7 +652,7 @@ function FIFOAllocationModal({ isOpen, onClose, selectedOrder, orderDetails }: F
                 remaining -= take;
             }
         });
-        
+
         return {
             productId: prodId,
             productName: prodName,
@@ -628,10 +674,10 @@ function FIFOAllocationModal({ isOpen, onClose, selectedOrder, orderDetails }: F
         try {
             for (const item of previewData) {
                 if (item.allocatedLots.length === 0) continue;
-                
+
                 const detail = orderDetails.find(d => d.product_id.product_id === item.productId);
                 if (!detail) continue;
-                
+
                 const payload = {
                     branchId: Number(targetBranchId),
                     productId: item.productId,
@@ -643,7 +689,7 @@ function FIFOAllocationModal({ isOpen, onClose, selectedOrder, orderDetails }: F
                         }
                     ]
                 };
-                
+
                 const res = await fetch("/api/manufacturing/planning-engineering", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -652,13 +698,13 @@ function FIFOAllocationModal({ isOpen, onClose, selectedOrder, orderDetails }: F
                         ...payload
                     })
                 });
-                
+
                 if (!res.ok) {
                     const errData = await res.json();
                     throw new Error(errData.error || `Failed to allocate ${item.productName}`);
                 }
             }
-            
+
             toast.success("Direct inventory allocation executed successfully!");
             onClose();
             window.location.reload();

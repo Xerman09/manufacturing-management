@@ -35,10 +35,12 @@ interface UserPermissionsCache {
     authorizedSubsystemPaths: string[];
     authorizedModulePaths: string[];
     allModulePaths: string[];
+    cachedAt: number;
 }
 
 const USER_PERMISSIONS_CACHE = new Map<string, UserPermissionsCache>();
 const MAX_CACHE_SIZE = 500;
+const USER_PERMISSIONS_TTL = process.env.NODE_ENV === "development" ? 0 : 60000; // 1 minute TTL in production
 
 
 function normalizeLockedModuleMode(value?: string | null) {
@@ -529,7 +531,8 @@ export async function middleware(req: NextRequest) {
         const directusToken = process.env.DIRECTUS_STATIC_TOKEN;
 
         const cachedPerms = USER_PERMISSIONS_CACHE.get(token);
-        if (cachedPerms) {
+        const isPermsFresh = cachedPerms && (USER_PERMISSIONS_TTL === 0 ? false : (Date.now() - cachedPerms.cachedAt) < USER_PERMISSIONS_TTL);
+        if (isPermsFresh && cachedPerms) {
             bypassModuleAuthorization = cachedPerms.bypassModuleAuthorization;
             authorizedSubsystemPaths = cachedPerms.authorizedSubsystemPaths;
             authorizedModulePaths = cachedPerms.authorizedModulePaths;
@@ -591,7 +594,8 @@ export async function middleware(req: NextRequest) {
                         bypassModuleAuthorization,
                         authorizedSubsystemPaths,
                         authorizedModulePaths,
-                        allModulePaths
+                        allModulePaths,
+                        cachedAt: Date.now()
                     });
                 } else {
                     // Fail-fast on server errors

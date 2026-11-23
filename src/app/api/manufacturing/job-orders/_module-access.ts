@@ -13,7 +13,18 @@ export const JOB_ORDER_MODULE_PATHS = {
     salesOrders: "/mm/sales-and-fulfillment/sales-order"
 } as const;
 
-export type JobOrderModulePath = typeof JOB_ORDER_MODULE_PATHS[keyof typeof JOB_ORDER_MODULE_PATHS];
+export const JOB_ORDER_MODULE_SLUGS: Record<keyof typeof JOB_ORDER_MODULE_PATHS, string[]> = {
+    planning: ["planning-engineering", "planning", "master-planning"],
+    staging: ["material-staging", "staging"],
+    production: ["shop-floor-execution-terminal", "shop-floor", "production"],
+    qualityAssurance: ["manufacturing-qa", "qa", "quality-assurance"],
+    inspectionQa: ["manufacturing-job-order-inspection-qa", "job-order-inspection-qa", "inspection-qa"],
+    calendarOfSchedule: ["calendar-of-schedule", "calendar", "schedule"],
+    costVariance: ["cost-variance", "variance"],
+    salesOrders: ["sales-order", "sales-orders", "sales-and-fulfillment"]
+};
+
+export type JobOrderModulePath = typeof JOB_ORDER_MODULE_PATHS[keyof typeof JOB_ORDER_MODULE_PATHS] | string;
 
 export class JobOrderModuleAccessError extends Error {
     constructor(
@@ -33,7 +44,7 @@ export interface AuthorizedJobOrderUser {
 }
 
 interface ModuleAccessRow {
-    module_id?: { base_path?: unknown } | number | null;
+    module_id?: { base_path?: unknown; slug?: unknown } | number | null;
 }
 
 interface AuthenticatedUser {
@@ -130,7 +141,7 @@ export async function requireJobOrderModuleAccess(
     const authHeaders = { Authorization: `Bearer ${directusToken}`, Accept: "application/json" };
     const accessParams = new URLSearchParams({
         "filter[user_id][_eq]": String(userId),
-        fields: "module_id.base_path",
+        fields: "module_id.base_path,module_id.slug",
         limit: "-1"
     });
 
@@ -162,12 +173,31 @@ export async function requireJobOrderModuleAccess(
         || hasAdminRole(authenticated?.role)
         || hasAdminRole(directusUser.role)
         || isAdminValue(directusUser.isAdmin);
-    const hasModuleAccess = accessRows.some((row) =>
-        row.module_id
-        && typeof row.module_id === "object"
-        && requestedPaths.includes(row.module_id.base_path as JobOrderModulePath)
-    );
-    if (!admin && !hasModuleAccess) {
+
+    const normalizePathStr = (p?: unknown): string => {
+        if (typeof p !== "string") return "";
+        return p.trim().replace(/\/+$/, "");
+    };
+
+    const hasModuleAccess = admin || accessRows.some((row) => {
+        if (!row.module_id || typeof row.module_id !== "object") return false;
+        const rowSlug = typeof row.module_id.slug === "string" ? row.module_id.slug.trim() : "";
+        const rowBasePath = normalizePathStr(row.module_id.base_path);
+
+        return requestedPaths.some((p) => {
+            const cleanTarget = normalizePathStr(p);
+            // Match slug directly if target matches
+            if (rowSlug && cleanTarget.toLowerCase().includes(rowSlug.toLowerCase())) return true;
+            // Match base path exactly or hierarchical
+            if (rowBasePath && cleanTarget) {
+                return cleanTarget === rowBasePath
+                    || cleanTarget.startsWith(`${rowBasePath}/`)
+                    || rowBasePath.startsWith(`${cleanTarget}/`);
+            }
+            return false;
+        });
+    });
+    if (!hasModuleAccess) {
         throw new JobOrderModuleAccessError(403, "MODULE_ACCESS_REQUIRED", "You do not have access to this Job Order module.");
     }
 

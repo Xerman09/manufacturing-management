@@ -18,7 +18,12 @@ export interface SalesOrder {
     payment_term_name?: string;
     payment_term_days?: number;
     salesman_id?: number;
+    salesman_name?: string;
+    salesman_account_name?: string;
     branch_id?: number;
+    branch_name?: string;
+    price_type_id?: number | null;
+    price_type?: string | null;
 }
 
 export interface SalesOrderDetail {
@@ -64,6 +69,8 @@ export interface CreateSalesOrderPayload {
     salesmanId?: number;
     quotationId?: number;
     remarks?: string;
+    priceTypeId?: number | null;
+    priceType?: string | null;
     items: DirectOrderItemPayload[];
     submitForApproval?: boolean;
 }
@@ -99,4 +106,24 @@ export interface ProductLookupItem {
     has_active_version?: boolean;
     has_active_uom_version?: boolean;
     has_bom?: boolean;
+}
+
+export interface SalesOrderLookups {
+    customers: Array<{
+        id: number;
+        customer_name: string;
+        customer_code: string;
+        price_type?: string | null;
+        price_type_id?: number | null;
+        payment_term?: number | null;
+        payment_term_id?: number | null;
+    }>;
+    products: ProductLookupItem[];
+    branches: Array<{ id: number; branch_name: string }>;
+    paymentTerms: Array<{ id: number; payment_name: string; payment_days: number }>;
+    salesmen: Array<{ id: number; salesman_name: string; salesman_code?: string; employee_id?: number }>;
+    users: Array<{ user_id: number; user_fname: string; user_lname: string }>;
+    suppliers: Array<{ id: number; supplier_name: string }>;
+    productTypes: Array<{ id: number; name: string }>;
+    discountTypes: Array<{ id: number; discount_type: string; total_percent: number }>;
 }
