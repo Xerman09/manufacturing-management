@@ -38,6 +38,8 @@ export const salesOrderPostSchema = z.object({
     discountAmount: money.default(0),
     salesmanId: optionalId,
     branchId: optionalId,
+    priceTypeId: optionalId,
+    priceType: z.string().nullish(),
     submitForApproval: z.boolean().optional()
 }).strict().superRefine((value, context) => {
     if (!value.customerId && !value.quotationId) {

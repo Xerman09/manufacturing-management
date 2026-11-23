@@ -11,7 +11,7 @@ interface AuthenticatedUser {
 }
 
 interface UserModuleAccess {
-    module_id?: { base_path?: unknown } | number | null;
+    module_id?: { base_path?: unknown; slug?: unknown } | number | null;
 }
 
 export type ReportAccessResult =
@@ -56,7 +56,7 @@ export async function authorizeLaborEfficiencyProductivityReport(): Promise<Repo
 
     const params = new URLSearchParams({
         "filter[user_id][_eq]": String(userId),
-        fields: "module_id.base_path",
+        fields: "module_id.base_path,module_id.slug",
         limit: "-1"
     });
     const directusBase = (process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_API_BASE_URL)?.replace(/\/+$/, "");
@@ -75,9 +75,12 @@ export async function authorizeLaborEfficiencyProductivityReport(): Promise<Repo
 
     const payload = await accessResponse.json().catch(() => null);
     const rows = Array.isArray(payload?.data) ? payload.data as UserModuleAccess[] : [];
-    const allowed = rows.some((row) =>
-        row.module_id && typeof row.module_id === "object" && row.module_id.base_path === MODULE_PATH
-    );
+    const allowed = rows.some((row) => {
+        if (!row.module_id || typeof row.module_id !== "object") return false;
+        const slug = typeof row.module_id.slug === "string" ? row.module_id.slug.trim().toLowerCase() : "";
+        const basePath = typeof row.module_id.base_path === "string" ? row.module_id.base_path.trim().replace(/\/+$/, "") : "";
+        return slug === "labor-efficiency-productivity-report" || basePath === MODULE_PATH || basePath.endsWith("labor-efficiency-productivity-report");
+    });
     return allowed
         ? { ok: true }
         : { ok: false, status: 403, error: "You do not have access to this report." };

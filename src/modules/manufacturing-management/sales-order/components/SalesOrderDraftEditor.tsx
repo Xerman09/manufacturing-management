@@ -5,7 +5,7 @@ import { Loader2, Plus, Search, Trash2, Save, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { SalesOrder, SalesOrderDetail } from "../types";
 import { CreatableSelect } from "../../finished-goods-master/components/CreatableSelect";
-import { updateSalesOrderDraft } from "../services/sales-order-api";
+import { updateSalesOrderDraft, fetchSalesOrderLookups } from "../services/sales-order-api";
 
 export interface SalesOrderDraftEditorProps {
     selectedOrder: SalesOrder;
@@ -85,6 +85,8 @@ export function SalesOrderDraftEditor({
 
     // Form fields
     const [customerId, setCustomerId] = useState("");
+    const [priceTypeId, setPriceTypeId] = useState<number | null>(null);
+    const [priceType, setPriceType] = useState("");
     const [poNo, setPoNo] = useState("");
     const [branchId, setBranchId] = useState("");
     const [paymentTermId, setPaymentTermId] = useState("");
@@ -223,8 +225,7 @@ export function SalesOrderDraftEditor({
 
     useEffect(() => {
         setLoadingLookups(true);
-        fetch("/api/manufacturing/sales-order?action=create-lookups")
-            .then(res => res.json())
+        fetchSalesOrderLookups()
             .then(data => {
                 setCustomers(data.customers || []);
                 setProducts(data.products || []);
@@ -236,8 +237,12 @@ export function SalesOrderDraftEditor({
                 setLookupError("");
 
                 // Initialize state from selectedOrder
-                const matchCust = data.customers?.find((c: any) => c.customer_code === selectedOrder.customer_code);
+                const matchCust = data.customers?.find(c => c.customer_code === selectedOrder.customer_code);
                 setCustomerId(matchCust ? String(matchCust.id) : "");
+                const matchPtId = matchCust?.price_type_id != null ? Number(matchCust.price_type_id) : null;
+                const resolvedPtId = selectedOrder.price_type_id ?? (Number.isSafeInteger(matchPtId) && matchPtId! > 0 ? matchPtId : null);
+                setPriceTypeId(resolvedPtId);
+                setPriceType(selectedOrder.price_type || matchCust?.price_type || "");
                 setPoNo(selectedOrder.po_no || "");
                 setBranchId(String(selectedOrder.branch_id || ""));
                 setPaymentTermId(String(selectedOrder.payment_terms || ""));
@@ -294,21 +299,57 @@ export function SalesOrderDraftEditor({
         setCustomerId(value);
         setFormErrors(prev => ({ ...prev, customerId: undefined }));
         const customer = customers.find(item => String(item.id) === value);
+        const custPtId = customer?.price_type_id != null ? Number(customer.price_type_id) : null;
+        const resolvedPtId = Number.isSafeInteger(custPtId) && custPtId! > 0 ? custPtId : null;
+        setPriceTypeId(resolvedPtId);
+        setPriceType(customer?.price_type || "");
         const pt = customer?.payment_term ?? customer?.payment_term_id;
         const defaultTerm = typeof pt === 'object' && pt !== null ? Number((pt as any).id) : Number(pt);
         const hasTerm = Number.isSafeInteger(defaultTerm) && defaultTerm > 0 && paymentTerms.some(t => Number(t.id) === defaultTerm);
         setPaymentTermId(hasTerm ? String(defaultTerm) : "");
 
-        setItems(prev => {
-            const newItems = [...prev];
-            Promise.all(newItems.map(async (item, i) => {
-                if (item.product_id) {
-                    const { discountType, discountAmount, discountPercent } = await fetchLineDiscount(value, item.product_id, item.unit_price);
-                    setItems(current => current.map((c, idx) => idx === i ? { ...c, discount_type: discountType, discount_amount: discountAmount, discount_percent: discountPercent } : c));
+        // Refetch discounts for existing items using single batch call if available
+        if (items.some(item => item.product_id)) {
+            const customerCode = customer?.customer_code;
+            if (customerCode) {
+                try {
+                    const res = await fetch("/api/manufacturing/sales-order/pricing", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            customerCode,
+                            items: items.filter(it => it.product_id).map(it => ({
+                                productId: it.product_id,
+                                basePrice: it.unit_price
+                            }))
+                        })
+                    });
+                    if (res.ok) {
+                        const json = await res.json();
+                        const resultsMap = new Map<number, any>();
+                        (json.data || []).forEach((r: any) => resultsMap.set(Number(r.productId), r));
+
+                        setItems(prev => prev.map(item => {
+                            if (!item.product_id) return item;
+                            const resItem = resultsMap.get(Number(item.product_id));
+                            if (!resItem) return item;
+                            const discountAmount = typeof resItem.finalPrice === 'number' && typeof resItem.basePrice === 'number'
+                                ? resItem.basePrice - resItem.finalPrice
+                                : 0;
+                            return {
+                                ...item,
+                                discount_type: resItem.discount?.id || null,
+                                discount_amount: discountAmount,
+                                discount_percent: resItem.discount?.totalPercent || 0
+                            };
+                        }));
+                        return;
+                    }
+                } catch (e) {
+                    console.error("Batch pricing error in draft editor:", e);
                 }
-            }));
-            return newItems;
-        });
+            }
+        }
     };
 
     useEffect(() => {
@@ -455,6 +496,8 @@ export function SalesOrderDraftEditor({
         try {
             await updateSalesOrderDraft(selectedOrder.order_id, {
                 customerId: Number(customerId),
+                priceTypeId: priceTypeId || undefined,
+                priceType: priceType || undefined,
                 poNo,
                 branchId: Number(branchId),
                 paymentTerms: Number(paymentTermId),
@@ -578,7 +621,9 @@ export function SalesOrderDraftEditor({
                 </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Header Fields - 3 Columns x 4 Rows */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* ROW 1: PO Number, Customer, Price Type */}
                 <div className="space-y-1.5">
                     <label htmlFor="direct-so-po" className={fieldLabelClassName}>PO Number <span className="text-destructive">*</span></label>
                     <input
@@ -599,30 +644,16 @@ export function SalesOrderDraftEditor({
                     {formErrors.customerId && <p className="text-xs text-destructive">{formErrors.customerId}</p>}
                 </div>
                 <div className="space-y-1.5">
-                    <label className={fieldLabelClassName}>Production Branch <span className="text-destructive">*</span></label>
-                    <CreatableSelect
-                        options={branches.map(b => ({ value: String(b.id), label: b.branch_name }))}
-                        value={branchId} onValueChange={(val: string) => { setBranchId(val); setFormErrors(p => ({ ...p, branchId: undefined })); }}
-                        placeholder="Choose branch..."
-                        disabled={!lookupsReady}
-                        aria-invalid={Boolean(formErrors.branchId)}
+                    <label htmlFor="direct-so-price-type" className={fieldLabelClassName}>Price Type</label>
+                    <input
+                        id="direct-so-price-type" type="text"
+                        value={priceType || (customerId ? "Regular" : "Auto from Customer")} readOnly disabled
+                        title="Customer price tier (Non-editable)"
+                        className={`${inputClassName} bg-muted/60 cursor-not-allowed text-muted-foreground font-semibold`}
                     />
-                    {formErrors.branchId && <p className="text-xs text-destructive">{formErrors.branchId}</p>}
                 </div>
-                <div className="space-y-1.5">
-                    <label className={fieldLabelClassName}>Payment Terms <span className="text-destructive">*</span></label>
-                    <CreatableSelect
-                        options={paymentTerms.map(t => ({ value: String(t.id), label: `${t.payment_name} (${t.payment_days} days)` }))}
-                        value={paymentTermId} onValueChange={(val: string) => { setPaymentTermId(val); setFormErrors(p => ({ ...p, paymentTermId: undefined })); }}
-                        placeholder="Choose payment term..."
-                        disabled={!lookupsReady}
-                        aria-invalid={Boolean(formErrors.paymentTermId)}
-                    />
-                    {formErrors.paymentTermId && <p className="text-xs text-destructive">{formErrors.paymentTermId}</p>}
-                </div>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {/* ROW 2: Salesman, Salesman Account, Production Branch */}
                 <div className="space-y-1.5">
                     <label className={fieldLabelClassName}>Salesman <span className="text-destructive">*</span></label>
                     <CreatableSelect
@@ -646,6 +677,30 @@ export function SalesOrderDraftEditor({
                     {formErrors.salesmanAccountId && <p className="text-xs text-destructive">{formErrors.salesmanAccountId}</p>}
                 </div>
                 <div className="space-y-1.5">
+                    <label className={fieldLabelClassName}>Production Branch <span className="text-destructive">*</span></label>
+                    <CreatableSelect
+                        options={branches.map(b => ({ value: String(b.id), label: b.branch_name }))}
+                        value={branchId} onValueChange={(val: string) => { setBranchId(val); setFormErrors(p => ({ ...p, branchId: undefined })); }}
+                        placeholder="Choose branch..."
+                        disabled={!lookupsReady}
+                        aria-invalid={Boolean(formErrors.branchId)}
+                    />
+                    {formErrors.branchId && <p className="text-xs text-destructive">{formErrors.branchId}</p>}
+                </div>
+
+                {/* ROW 3: Payment Terms, Delivery Date, Due Date */}
+                <div className="space-y-1.5">
+                    <label className={fieldLabelClassName}>Payment Terms <span className="text-destructive">*</span></label>
+                    <CreatableSelect
+                        options={paymentTerms.map(t => ({ value: String(t.id), label: `${t.payment_name} (${t.payment_days} days)` }))}
+                        value={paymentTermId} onValueChange={(val: string) => { setPaymentTermId(val); setFormErrors(p => ({ ...p, paymentTermId: undefined })); }}
+                        placeholder="Choose payment term..."
+                        disabled={!lookupsReady}
+                        aria-invalid={Boolean(formErrors.paymentTermId)}
+                    />
+                    {formErrors.paymentTermId && <p className="text-xs text-destructive">{formErrors.paymentTermId}</p>}
+                </div>
+                <div className="space-y-1.5">
                     <label className={fieldLabelClassName}>Delivery Date <span className="text-destructive">*</span></label>
                     <input
                         type="date" value={deliveryDate} onChange={e => { setDeliveryDate(e.target.value); setFormErrors(p => ({ ...p, deliveryDate: undefined })); }}
@@ -666,7 +721,7 @@ export function SalesOrderDraftEditor({
                     const leadTime = getLeadTimeStatus();
                     if (leadTime.feasible) return null;
                     return (
-                        <div className="col-span-1 md:col-span-4 bg-amber-500/10 border border-amber-500/20 text-amber-600 rounded-lg p-3 text-xs flex flex-col gap-1.5 mt-1">
+                        <div className="col-span-1 md:col-span-3 bg-amber-500/10 border border-amber-500/20 text-amber-600 rounded-lg p-3 text-xs flex flex-col gap-1.5 mt-1">
                             <div className="font-bold flex items-center gap-1.5">⚠️ Lead Time Feasibility Warning</div>
                             <div>The requested delivery date of <strong>{deliveryDate}</strong> is earlier than the standard manufacturing lead time of <strong>{leadTime.maxLeadDays} days</strong> (Earliest feasible date: <strong>{leadTime.requiredDate}</strong>).</div>
                             <label className="flex items-center gap-1.5 mt-1 font-semibold cursor-pointer">
@@ -676,14 +731,15 @@ export function SalesOrderDraftEditor({
                         </div>
                     );
                 })()}
-            </div>
 
-            <div className="space-y-1">
-                <label className={fieldLabelClassName}>Remarks / Special Instructions</label>
-                <textarea
-                    value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Add general remarks, freight instructions, or delivery guidelines here..." rows={2}
-                    className="w-full bg-background border rounded-lg px-3 py-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none font-semibold"
-                />
+                {/* ROW 4: Remarks / Special Instructions (Full width) */}
+                <div className="col-span-1 md:col-span-3 space-y-1">
+                    <label className={fieldLabelClassName}>Remarks / Special Instructions</label>
+                    <textarea
+                        value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Add general remarks, freight instructions, or delivery guidelines here..." rows={2}
+                        className="w-full bg-background border rounded-lg px-3 py-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none font-semibold"
+                    />
+                </div>
             </div>
 
             <div className="space-y-3 border-t pt-4">

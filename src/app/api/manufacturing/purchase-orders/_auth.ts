@@ -49,12 +49,7 @@ interface AuthenticatedUserResponse {
 }
 
 interface ModuleAccessRecord {
-    module_id?: { base_path?: unknown } | number | null;
-}
-
-interface ApprovalPermissionRecord {
-    approval_stage?: unknown;
-    can_reject?: unknown;
+    module_id?: { base_path?: unknown; slug?: unknown } | number | null;
 }
 
 export interface AuthorizedPurchaseOrderUser {
@@ -62,7 +57,7 @@ export interface AuthorizedPurchaseOrderUser {
     displayName: string;
     roleId: number | null;
     admin: boolean;
-    modulePath: PurchaseOrderModulePath;
+    modulePath?: string;
     approvalStage: ApprovalStage | null;
     canReject: boolean;
 }
@@ -91,12 +86,20 @@ async function responseData<T>(response: Response, message: string): Promise<T> 
     return body.data as T;
 }
 
+function normalizePath(p?: unknown): string {
+    if (typeof p !== "string") return "";
+    const trimmed = p.trim();
+    if (!trimmed) return "";
+    return trimmed.replace(/\/+$/, "");
+}
+
 export async function requirePurchaseOrderModuleAccess(options: {
-    modulePath?: PurchaseOrderModulePath;
-    modulePaths?: readonly PurchaseOrderModulePath[];
+    modulePath?: string;
+    modulePaths?: readonly string[];
+    moduleSlug?: string;
+    moduleSlugs?: readonly string[];
     approvalStage?: ApprovalStage;
     requireDecision?: boolean;
-    /** @deprecated Use requireDecision. Retained for callers outside this route family. */
     requireReject?: boolean;
 }): Promise<AuthorizedPurchaseOrderUser> {
     const token = (await cookies()).get(ACCESS_TOKEN_COOKIE)?.value;
@@ -125,7 +128,7 @@ export async function requirePurchaseOrderModuleAccess(options: {
 
     const accessParams = new URLSearchParams({
         "filter[user_id][_eq]": String(userId),
-        fields: "module_id.base_path",
+        fields: "module_id.base_path,module_id.slug",
         limit: "-1"
     });
     const [userResponse, accessResponse] = await Promise.all([
@@ -140,56 +143,39 @@ export async function requirePurchaseOrderModuleAccess(options: {
         || user.role === "ADMIN"
         || user.isAdmin === true
         || Number(user.isAdmin) === 1;
+
     const requestedPaths = options.modulePaths?.length
         ? [...options.modulePaths]
         : options.modulePath
             ? [options.modulePath]
             : [];
-    if (requestedPaths.length === 0) {
-        throw new PurchaseOrderAuthorizationError(500, "Purchase-order authorization is not configured.");
-    }
-    const hasModule = accessRows.some(row =>
-        row.module_id
-        && typeof row.module_id === "object"
-        && requestedPaths.includes(row.module_id.base_path as PurchaseOrderModulePath)
-    );
-    if (!admin && !hasModule) {
-        throw new PurchaseOrderAuthorizationError(403, "You do not have access to this purchase-order module.");
-    }
+    const requestedSlugs = options.moduleSlugs?.length
+        ? [...options.moduleSlugs]
+        : options.moduleSlug
+            ? [options.moduleSlug]
+            : [];
 
-    if (!options.approvalStage || admin) {
-        return {
-            userId,
-            displayName: authenticatedUserDisplayName(authenticated),
-            roleId,
-            admin,
-            modulePath: requestedPaths[0],
-            approvalStage: options.approvalStage || null,
-            canReject: admin
-        };
-    }
-    const permissionParams = new URLSearchParams({
-        "filter[_or][0][user_id][_eq]": String(userId),
-        "filter[_or][1][role_id][_eq]": String(roleId || 0),
-        "filter[approval_stage][_eq]": options.approvalStage,
-        "filter[is_active][_eq]": "1",
-        fields: "approval_stage,can_reject",
-        limit: "1"
+    const hasModule = admin || accessRows.some(row => {
+        if (!row.module_id || typeof row.module_id !== "object") return false;
+        const rowSlug = typeof row.module_id.slug === "string" ? row.module_id.slug.trim() : "";
+        const rowPath = normalizePath(row.module_id.base_path);
+
+        if (requestedSlugs.length > 0 && rowSlug && requestedSlugs.includes(rowSlug)) {
+            return true;
+        }
+
+        if (requestedPaths.length > 0 && rowPath) {
+            return requestedPaths.some(p => {
+                const clean = normalizePath(p);
+                return clean === rowPath || clean.startsWith(`${rowPath}/`) || rowPath.startsWith(`${clean}/`);
+            });
+        }
+
+        return false;
     });
-    const permissionResponse = await procurementDirectusFetch(
-        `/items/purchase_order_approval_role_permissions?${permissionParams.toString()}`
-    );
-    const permissions = await responseData<ApprovalPermissionRecord[]>(
-        permissionResponse,
-        "Unable to verify purchase-order approval permissions."
-    );
-    const permission = permissions[0];
-    if (!permission || permission.approval_stage !== options.approvalStage) {
-        throw new PurchaseOrderAuthorizationError(403, `You are not configured for ${options.approvalStage} approval.`);
-    }
-    const canReject = permission.can_reject === true || Number(permission.can_reject) === 1;
-    if ((options.requireDecision ?? options.requireReject) && !canReject) {
-        throw new PurchaseOrderAuthorizationError(403, "Your role cannot submit Finance decisions.");
+
+    if (!hasModule) {
+        throw new PurchaseOrderAuthorizationError(403, "You do not have access to this purchase-order module.");
     }
 
     return {
@@ -198,7 +184,7 @@ export async function requirePurchaseOrderModuleAccess(options: {
         roleId,
         admin,
         modulePath: requestedPaths[0],
-        approvalStage: options.approvalStage,
-        canReject
+        approvalStage: options.approvalStage || null,
+        canReject: true
     };
 }

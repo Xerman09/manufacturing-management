@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 import { DollarSign, Eye, Check, Loader2, Search, SlidersHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
 import { SalesOrder } from "../types";
 import { formatCurrency } from "@/lib/utils";
+import { fetchSalesOrderLookups } from "../services/sales-order-api";
 
 interface ActiveSalesOrdersTableProps {
     salesOrders: SalesOrder[];
@@ -61,10 +62,21 @@ export function ActiveSalesOrdersTable({
     const [customersList, setCustomersList] = useState<{ id: number; customer_name: string; customer_code: string }[]>([]);
 
     useEffect(() => {
-        fetch("/api/manufacturing/customer?limit=-1&fields=id,customer_name,customer_code")
-            .then(res => res.ok ? res.json() : [])
-            .then(data => setCustomersList(data.data || data))
+        let isMounted = true;
+        fetchSalesOrderLookups()
+            .then(data => {
+                if (isMounted && data?.customers) {
+                    setCustomersList(data.customers.map(c => ({
+                        id: c.id,
+                        customer_name: c.customer_name,
+                        customer_code: c.customer_code
+                    })));
+                }
+            })
             .catch(err => console.error(err));
+        return () => {
+            isMounted = false;
+        };
     }, []);
 
     const filteredCustomers = customersList.filter(c => 

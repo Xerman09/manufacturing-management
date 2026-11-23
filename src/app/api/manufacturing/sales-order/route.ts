@@ -168,7 +168,7 @@ async function canApproveSalesOrders(user: AuthenticatedUser) {
 
     const params = new URLSearchParams({
         "filter[user_id][_eq]": String(user.id),
-        fields: "module_id.base_path",
+        fields: "module_id.base_path,module_id.slug",
         limit: "-1"
     });
     const response = await fetch(`${DIRECTUS_URL}/items/user_access_modules?${params.toString()}`, {
@@ -177,7 +177,12 @@ async function canApproveSalesOrders(user: AuthenticatedUser) {
     });
     if (!response.ok) throw new ApiError(503, "Unable to verify sales-order approval access.");
     const rows = (await response.json()).data || [];
-    return rows.some((row: any) => row.module_id?.base_path === "/mm/sales-order-approval");
+    return rows.some((row: any) => {
+        if (!row.module_id || typeof row.module_id !== "object") return false;
+        const slug = typeof row.module_id.slug === "string" ? row.module_id.slug.trim().toLowerCase() : "";
+        const basePath = typeof row.module_id.base_path === "string" ? row.module_id.base_path.trim().replace(/\/+$/, "") : "";
+        return slug === "sales-order-approval" || basePath === "/mm/sales-order-approval" || basePath.endsWith("sales-order-approval");
+    });
 }
 
 function mutationError(error: unknown, fallback: string) {
@@ -400,7 +405,7 @@ async function createSalesOrderWithDetails(
             try {
                 const jsonErr = JSON.parse(errorText);
                 parsedError = jsonErr.errors?.[0]?.message || errorText;
-            } catch {}
+            } catch { }
             throw new ApiError(503, `Failed to create the sales-order header: ${parsedError}`);
         }
         headerCreated = true;
@@ -485,7 +490,7 @@ export async function GET(request: Request) {
 
             const [customerResult, productResult] = await Promise.all([
                 read("customer", new URLSearchParams({
-                    fields: "id,customer_name,customer_code,payment_term",
+                    fields: "id,customer_name,customer_code,payment_term,price_type,price_type_id",
                     limit: "-1",
                     sort: "customer_name"
                 })),
@@ -497,7 +502,7 @@ export async function GET(request: Request) {
                 }))
             ]);
 
-            const [branchResult, paymentTermResult, salesmanResult, supplierResult, productTypeResult, userResult, discountTypeResult, versionsResult] = await Promise.all([
+            const [branchResult, paymentTermResult, salesmanResult, supplierResult, productTypeResult, userResult, discountTypeResult, versionsResult, priceTypesResult] = await Promise.all([
                 optionalRead("branches", new URLSearchParams({
                     "filter[isActive][_eq]": "1",
                     fields: "id,branch_name",
@@ -535,6 +540,11 @@ export async function GET(request: Request) {
                     limit: "-1"
                 })),
                 optionalRead("product_manufacturing_version", new URLSearchParams({
+                    fields: "version_id,product_id,uom_id,status,is_active,is_primary,version_name",
+                    limit: "-1"
+                })),
+                optionalRead("price_types", new URLSearchParams({
+                    fields: "price_type_id,price_type_name,is_active",
                     limit: "-1"
                 }))
             ]);
@@ -546,7 +556,7 @@ export async function GET(request: Request) {
                 const isActiveStatus = st === "active";
                 const isActiveFlag = v.is_active === true || v.is_active === 1 || String(v.is_active) === "1";
                 const isPrimaryFlag = v.is_primary === true || v.is_primary === 1 || String(v.is_primary) === "1" || Number(v.is_primary) === 1;
-                
+
                 const rawProd = v.product_id;
                 const prodId = Number(typeof rawProd === "object" && rawProd !== null ? rawProd.product_id || rawProd.id : rawProd);
                 const rawUom = v.uom_id;
@@ -560,6 +570,14 @@ export async function GET(request: Request) {
                 }
             });
 
+            const priceTypeMap = new Map<number, string>();
+            (priceTypesResult.data || []).forEach((pt: any) => {
+                const ptId = Number(pt.price_type_id || pt.id);
+                if (Number.isSafeInteger(ptId) && ptId > 0 && pt.price_type_name) {
+                    priceTypeMap.set(ptId, String(pt.price_type_name).trim());
+                }
+            });
+
             const customers = (customerResult.data || []).map((customer: any) => {
                 const rawPaymentTerm = customer.payment_term;
                 const paymentTermId = Number(
@@ -567,10 +585,24 @@ export async function GET(request: Request) {
                         ? rawPaymentTerm.id
                         : rawPaymentTerm
                 );
+                const rawPtId = customer.price_type_id;
+                const ptId = Number(
+                    rawPtId && typeof rawPtId === "object"
+                        ? rawPtId.price_type_id || rawPtId.id
+                        : rawPtId
+                );
+                const relationalName = rawPtId && typeof rawPtId === "object" ? rawPtId.price_type_name : null;
+                const resolvedPriceType = relationalName
+                    || (Number.isSafeInteger(ptId) && ptId > 0 ? priceTypeMap.get(ptId) : null)
+                    || customer.price_type
+                    || "Price List";
+
                 return {
                     id: customer.id,
                     customer_name: customer.customer_name,
                     customer_code: customer.customer_code,
+                    price_type: resolvedPriceType,
+                    price_type_id: Number.isSafeInteger(ptId) && ptId > 0 ? ptId : null,
                     payment_term: Number.isSafeInteger(paymentTermId) && paymentTermId > 0
                         ? paymentTermId
                         : null,
@@ -685,12 +717,12 @@ export async function GET(request: Request) {
             status: planningQueue
                 ? "For Production"
                 : forProductionQueue
-                ? "For Production"
-                : inProductionQueue
-                ? "In Production"
-                : excludeHasJo
-                ? (includeAllStatuses ? plannerStatuses : "For Production,In Production")
-                : status,
+                    ? "For Production"
+                    : inProductionQueue
+                        ? "In Production"
+                        : excludeHasJo
+                            ? (includeAllStatuses ? plannerStatuses : "For Production,In Production")
+                            : status,
             customerCode,
             dateFrom,
             dateTo
@@ -922,6 +954,27 @@ export async function POST(request: Request) {
             if (!custRes.ok) throw new ApiError(400, "The selected customer does not exist.");
             const cust = (await custRes.json()).data;
             const customerCode = cust.customer_code || cust.customer_name || "CUST-GEN";
+            const customerPriceTypeId = body.priceTypeId ? Number(body.priceTypeId) : (cust.price_type_id ? Number(typeof cust.price_type_id === "object" ? cust.price_type_id.price_type_id || cust.price_type_id.id : cust.price_type_id) : null);
+            let customerPriceTypeName = body.priceType ? String(body.priceType).trim() : null;
+            if (!customerPriceTypeName) {
+                if (customerPriceTypeId) {
+                    try {
+                        const ptRes = await fetch(`${DIRECTUS_URL}/items/price_types/${customerPriceTypeId}?fields=price_type_id,price_type_name`, { headers, cache: "no-store" });
+                        if (ptRes.ok) {
+                            const ptData = (await ptRes.json()).data;
+                            if (ptData?.price_type_name) customerPriceTypeName = String(ptData.price_type_name).trim();
+                        }
+                    } catch {
+                        // ignore and fall back
+                    }
+                }
+                if (!customerPriceTypeName && cust.price_type) {
+                    customerPriceTypeName = String(cust.price_type).trim();
+                }
+                if (!customerPriceTypeName) {
+                    customerPriceTypeName = "Regular";
+                }
+            }
 
             const productIds = directItems.map((item) => item.product_id);
             const productParams = new URLSearchParams({
@@ -1017,6 +1070,8 @@ export async function POST(request: Request) {
                 payment_terms: paymentTerms ? Number(paymentTerms) : null,
                 salesman_id: salesmanId ? Number(salesmanId) : null,
                 branch_id: branchId ? Number(branchId) : null,
+                price_type_id: customerPriceTypeId,
+                price_type: customerPriceTypeName,
                 currency: "PHP",
                 exchange_rate: 1
             };
@@ -1098,11 +1153,35 @@ export async function POST(request: Request) {
         const targetCustomerId = customerId || quote.customer_id;
         const custRes = await fetch(`${DIRECTUS_URL}/items/customer/${targetCustomerId}`, { headers, cache: "no-store" });
         let customerCode = "CUST-GEN";
+        let customerPriceTypeId: number | null = body.priceTypeId ? Number(body.priceTypeId) : null;
+        let customerPriceTypeName: string | null = body.priceType ? String(body.priceType).trim() : null;
         let actualQuoteCustomerId = Number(targetCustomerId);
         if (custRes.ok) {
             const cust = (await custRes.json()).data;
             customerCode = cust.customer_code || cust.customer_name || "CUST-GEN";
+            if (!customerPriceTypeId && cust.price_type_id) {
+                customerPriceTypeId = Number(typeof cust.price_type_id === "object" ? cust.price_type_id.price_type_id || cust.price_type_id.id : cust.price_type_id);
+            }
+            if (!customerPriceTypeName) {
+                if (customerPriceTypeId) {
+                    try {
+                        const ptRes = await fetch(`${DIRECTUS_URL}/items/price_types/${customerPriceTypeId}?fields=price_type_id,price_type_name`, { headers, cache: "no-store" });
+                        if (ptRes.ok) {
+                            const ptData = (await ptRes.json()).data;
+                            if (ptData?.price_type_name) customerPriceTypeName = String(ptData.price_type_name).trim();
+                        }
+                    } catch {
+                        // ignore and fall back
+                    }
+                }
+                if (!customerPriceTypeName && cust.price_type) {
+                    customerPriceTypeName = String(cust.price_type).trim();
+                }
+            }
             actualQuoteCustomerId = Number(cust.id);
+        }
+        if (!customerPriceTypeName) {
+            customerPriceTypeName = "Regular";
         }
 
         // Resolve an explicit customer override, then Standard BOM Version 1, then a legacy active version.
@@ -1166,6 +1245,8 @@ export async function POST(request: Request) {
             payment_terms: paymentTerms ? Number(paymentTerms) : null,
             salesman_id: salesmanId ? Number(salesmanId) : null,
             branch_id: branchId ? Number(branchId) : null,
+            price_type_id: customerPriceTypeId,
+            price_type: customerPriceTypeName,
             currency: "PHP",
             exchange_rate: 1
         };
@@ -1357,6 +1438,8 @@ export async function PATCH(request: Request) {
                     payment_terms: body.paymentTerms ? Number(body.paymentTerms) : null,
                     salesman_id: body.salesmanId ? Number(body.salesmanId) : null,
                     branch_id: body.branchId ? Number(body.branchId) : null,
+                    price_type_id: body.priceTypeId ? Number(body.priceTypeId) : undefined,
+                    price_type: body.priceType ? String(body.priceType).trim() : undefined,
                     remarks: body.remarks || null,
                     discount_amount: totalDiscount,
                     modified_by: user.id,

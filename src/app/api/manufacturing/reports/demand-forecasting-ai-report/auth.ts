@@ -11,7 +11,7 @@ interface AuthenticatedUser {
 }
 
 interface UserModuleAccess {
-    module_id?: { base_path?: unknown } | number | null;
+    module_id?: { base_path?: unknown; slug?: unknown } | number | null;
 }
 
 export type DemandReportAccessResult =
@@ -80,7 +80,7 @@ export async function authorizeDemandForecastingReport(
 
     const params = new URLSearchParams({
         "filter[user_id][_eq]": String(userId),
-        fields: "module_id.base_path",
+        fields: "module_id.base_path,module_id.slug",
         limit: "-1"
     });
     const directusBase = (process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_API_BASE_URL)?.replace(/\/+$/, "");
@@ -108,12 +108,12 @@ export async function authorizeDemandForecastingReport(
         return null;
     });
     const accessRows = Array.isArray(payload?.data) ? (payload.data as UserModuleAccess[]) : [];
-    const hasAccess = accessRows.some(
-        (row) =>
-            row.module_id &&
-            typeof row.module_id === "object" &&
-            row.module_id.base_path === MODULE_PATH
-    );
+    const hasAccess = accessRows.some((row) => {
+        if (!row.module_id || typeof row.module_id !== "object") return false;
+        const slug = typeof row.module_id.slug === "string" ? row.module_id.slug.trim().toLowerCase() : "";
+        const basePath = typeof row.module_id.base_path === "string" ? row.module_id.base_path.trim().replace(/\/+$/, "") : "";
+        return slug === "demand-forecasting-ai-report" || basePath === MODULE_PATH || basePath.endsWith("demand-forecasting-ai-report");
+    });
 
     return hasAccess
         ? { ok: true, userId, isAdmin: false, accessToken: token }
