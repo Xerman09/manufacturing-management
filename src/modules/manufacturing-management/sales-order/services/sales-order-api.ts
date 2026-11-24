@@ -1,4 +1,11 @@
-import { SalesOrder, SalesOrderDetail, QuotationHeader, CreateSalesOrderPayload, SalesOrderLookups } from "../types";
+import {
+    SalesOrder,
+    SalesOrderDetail,
+    QuotationHeader,
+    CreateSalesOrderPayload,
+    SalesOrderLookups,
+    SalesInvoiceSummary
+} from "../types";
 
 let refreshPromise: Promise<boolean> | null = null;
 
@@ -156,3 +163,14 @@ export async function fetchSalesOrderLookups(options: { forceRefresh?: boolean; 
 export function invalidateSalesOrderLookupsCache() {
     cachedLookups = null;
 }
+
+export async function fetchSalesOrderInvoices(orderId: number, orderNo?: string): Promise<SalesInvoiceSummary[]> {
+    const params = new URLSearchParams();
+    if (orderId) params.append("orderId", String(orderId));
+    if (orderNo) params.append("orderNo", orderNo);
+
+    const res = await fetchWithSessionRetry(`/api/manufacturing/sales-order/invoices?${params.toString()}`);
+    const data = await handleResponse<{ success: boolean; invoices: SalesInvoiceSummary[] }>(res, "Failed to load invoices");
+    return data.invoices || [];
+}
+

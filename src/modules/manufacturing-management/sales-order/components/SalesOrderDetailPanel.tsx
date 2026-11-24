@@ -5,10 +5,11 @@ import {
     Loader2, AlertCircle, Building2,
     FileText, CreditCard, Calendar, Check, Minus, Plus,
     ShieldCheck, PackageCheck, X, CheckCircle2, PackageOpen, Save, Send,
-    User, UserCheck, Factory
+    User, UserCheck, Factory, Download, ExternalLink, Receipt, Package
 } from "lucide-react";
 import { toast } from "sonner";
-import { SalesOrder, SalesOrderDetail } from "../types";
+import { SalesOrder, SalesOrderDetail, SalesInvoiceSummary } from "../types";
+import { fetchSalesOrderInvoices } from "../services/sales-order-api";
 import { formatCurrency } from "@/lib/utils";
 import { SalesOrderDraftEditor } from "./SalesOrderDraftEditor";
 
@@ -38,6 +39,46 @@ export function SalesOrderDetailPanel({
     const [editableQuantities, setEditableQuantities] = useState<Record<number, number>>({});
     const [savingQuantities, setSavingQuantities] = useState(false);
     const [isAllocationModalOpen, setIsAllocationModalOpen] = useState(false);
+
+    // Invoices state
+    const [invoices, setInvoices] = useState<SalesInvoiceSummary[]>([]);
+    const [loadingInvoices, setLoadingInvoices] = useState(false);
+    const [activeInvoiceTab, setActiveInvoiceTab] = useState<string>("so-details");
+
+    // Fetch invoices whenever selectedOrder changes
+    useEffect(() => {
+        if (!selectedOrder?.order_id) {
+            setInvoices([]);
+            setActiveInvoiceTab("so-details");
+            return;
+        }
+
+        let isMounted = true;
+        setLoadingInvoices(true);
+        fetchSalesOrderInvoices(selectedOrder.order_id, selectedOrder.order_no)
+            .then(data => {
+                if (isMounted) {
+                    setInvoices(data);
+                    // Default to first invoice if available, or stay on so-details
+                    if (data.length > 0) {
+                        setActiveInvoiceTab(data[0].invoice_no);
+                    } else {
+                        setActiveInvoiceTab("so-details");
+                    }
+                }
+            })
+            .catch(err => {
+                console.error("Failed to fetch invoices for SO:", err);
+                if (isMounted) setInvoices([]);
+            })
+            .finally(() => {
+                if (isMounted) setLoadingInvoices(false);
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [selectedOrder?.order_id, selectedOrder?.order_no]);
 
     // Sync initial quantities when orderDetails changes or panel opens
     useEffect(() => {
@@ -192,6 +233,9 @@ export function SalesOrderDetailPanel({
         );
     }
 
+    const activeInvoice = invoices.find(inv => inv.invoice_no === activeInvoiceTab) || invoices[0] || null;
+    const isInvoiceMode = invoices.length > 0 && activeInvoiceTab !== "so-details" && Boolean(activeInvoice);
+
     return (
         <div className="bg-card p-6 space-y-6">
             {/* Header info */}
@@ -201,7 +245,15 @@ export function SalesOrderDetailPanel({
                         <h4 className="text-sm font-black text-foreground uppercase tracking-wider">
                             {selectedOrder.order_no}
                         </h4>
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider whitespace-nowrap ${selectedOrder.order_status === "Draft"
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                            {/* INV Status Pill (if available) */}
+                            {invoices.length > 0 && activeInvoice && (
+                                <span className="inline-flex px-2.5 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider whitespace-nowrap bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
+                                    INV: {activeInvoice.transaction_status || "Prepared"}
+                                </span>
+                            )}
+                            {/* SO Status Pill */}
+                            <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider whitespace-nowrap ${selectedOrder.order_status === "Draft"
                                 ? "bg-muted text-foreground border border-border"
                                 : selectedOrder.order_status === "Pending"
                                     ? "bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20"
@@ -210,9 +262,10 @@ export function SalesOrderDetailPanel({
                                         : selectedOrder.order_status === "For Approval"
                                             ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
                                             : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
-                            }`}>
-                            {selectedOrder.order_status || "Draft"}
-                        </span>
+                                }`}>
+                                SO: {selectedOrder.order_status || "Draft"}
+                            </span>
+                        </div>
                     </div>
                     <p className="text-[10px] text-muted-foreground mt-0.5">Sales Order Overview & Line Items</p>
                 </div>
@@ -325,178 +378,368 @@ export function SalesOrderDetailPanel({
                 )}
             </div>
 
-            {/* Line items section */}
-            <div className="space-y-3.5">
-                <div className="flex items-center justify-between">
-                    <h5 className="text-[9.5px] font-extrabold uppercase text-muted-foreground tracking-wider">
-                        Agreement Line Items
-                    </h5>
-                    {hasChanges && (
-                        <span className="text-[9px] bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-black uppercase tracking-wider flex items-center gap-1">
-                            <AlertCircle className="h-3 w-3" /> Unsaved Changes
+            {/* Tabs Header: Invoices and SO Details */}
+            <div className="flex items-center justify-between border-b border-border pb-2 pt-1">
+                <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
+                    {invoices.length > 0 ? (
+                        <>
+                            {invoices.map((inv) => (
+                                <button
+                                    key={inv.invoice_no}
+                                    type="button"
+                                    onClick={() => setActiveInvoiceTab(inv.invoice_no)}
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${activeInvoiceTab === inv.invoice_no
+                                        ? "bg-primary text-primary-foreground shadow-xs"
+                                        : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                        }`}
+                                >
+                                    <Receipt className="h-3 w-3" />
+                                    INV: {inv.invoice_no}
+                                </button>
+                            ))}
+                            <button
+                                type="button"
+                                onClick={() => setActiveInvoiceTab("so-details")}
+                                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${activeInvoiceTab === "so-details"
+                                    ? "bg-primary text-primary-foreground shadow-xs"
+                                    : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                    }`}
+                            >
+                                SO Agreement Items
+                            </button>
+                        </>
+                    ) : (
+                        <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                            Agreement Line Items
                         </span>
                     )}
                 </div>
+                {invoices.length > 0 && (
+                    <span className="text-[10px] font-black text-muted-foreground uppercase tracking-wider shrink-0 ml-2">
+                        Total Invoices: {invoices.length}
+                    </span>
+                )}
+            </div>
 
-                {loadingDetails ? (
-                    <div className="flex flex-col items-center justify-center p-12 gap-2 border border-dashed rounded-xl bg-muted/50">
-                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                        <span className="text-[10px] text-muted-foreground font-semibold">Fetching agreement items...</span>
-                    </div>
-                ) : orderDetails.length === 0 ? (
-                    <div className="text-center p-8 border border-dashed rounded-xl bg-muted/50 text-xs text-muted-foreground italic">
-                        No items logged in detail.
+            {/* Line items section */}
+            <div className="space-y-3.5">
+                {isInvoiceMode && activeInvoice ? (
+                    /* ══ INVOICE LINE ITEMS ══ */
+                    <div className="space-y-3">
+                        <div className="border rounded-xl overflow-x-auto bg-background">
+                            <table className="w-full min-w-[720px] text-[11px] text-left">
+                                <thead className="bg-muted/50 border-b font-semibold text-muted-foreground">
+                                    <tr>
+                                        <th className="p-3 uppercase text-[9px] font-black tracking-widest">Product / SKU</th>
+                                        <th className="p-3 text-center uppercase text-[9px] font-black tracking-widest w-[60px] whitespace-nowrap">UOM</th>
+                                        <th className="p-3 text-right uppercase text-[9px] font-black tracking-widest w-[100px] whitespace-nowrap">Unit Price</th>
+                                        <th className="p-3 text-center uppercase text-[9px] font-black tracking-widest w-[100px] whitespace-nowrap">Invoiced Qty</th>
+                                        <th className="p-3 text-right uppercase text-[9px] font-black text-rose-500 tracking-widest min-w-[110px] whitespace-nowrap">Discount</th>
+                                        <th className="p-3 text-center uppercase text-[9px] font-black tracking-widest min-w-[130px] whitespace-nowrap">Discount Type</th>
+                                        <th className="p-3 text-right uppercase text-[9px] font-black tracking-widest w-[120px] whitespace-nowrap">Net Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y font-medium">
+                                    {activeInvoice.items.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={7} className="p-8 text-center text-muted-foreground italic">
+                                                No line items found for this invoice.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        activeInvoice.items.map((item, idx) => {
+                                            // Fallback lookup against enriched orderDetails to guarantee name & code resolution
+                                            const matchedOrderLine = orderDetails.find(
+                                                od => Number(od.product_id?.product_id) === Number(item.product_id)
+                                            );
+                                            const resolvedName = (item.product_name && item.product_name !== "Unknown Product")
+                                                ? item.product_name
+                                                : (matchedOrderLine?.product_id?.product_name || `Product #${item.product_id}`);
+
+                                            const resolvedCode = (item.product_code && !item.product_code.startsWith("PRD-"))
+                                                ? item.product_code
+                                                : (matchedOrderLine?.product_id?.product_code || item.product_code);
+
+                                            const resolvedUom = item.uom || matchedOrderLine?.product_id?.uom || "BOX";
+
+                                            return (
+                                                <tr key={idx} className="hover:bg-muted/10 transition-colors">
+                                                    <td className="p-3">
+                                                        <div className="flex flex-col gap-0.5">
+                                                            <span className="font-bold text-foreground text-xs leading-snug">{resolvedName}</span>
+                                                            <span className="text-[9.5px] text-muted-foreground font-mono font-semibold">{resolvedCode}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="p-3 text-center whitespace-nowrap">
+                                                        <span className="text-[9.5px] font-bold bg-muted px-1.5 py-0.5 rounded uppercase text-muted-foreground">
+                                                            {resolvedUom}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3 text-right font-mono font-semibold text-foreground whitespace-nowrap tabular-nums">
+                                                        {formatCurrency(item.unit_price)}
+                                                    </td>
+                                                    <td className="p-3 text-center font-bold text-foreground font-mono whitespace-nowrap">
+                                                        {item.quantity}
+                                                    </td>
+                                                    <td className="p-3 text-right whitespace-nowrap">
+                                                        {item.discount > 0 ? (
+                                                            <span className="text-[11px] font-bold text-rose-500 font-mono tabular-nums tracking-tight whitespace-nowrap">
+                                                                -{formatCurrency(item.discount)}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-muted-foreground font-bold">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-3 text-center whitespace-nowrap px-2">
+                                                        {item.discount_type_name && item.discount_type_name !== "—" ? (
+                                                            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider whitespace-nowrap border border-rose-500/20 bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                                                                {item.discount_type_name}
+                                                            </span>
+                                                        ) : item.discount > 0 ? (
+                                                            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider whitespace-nowrap border border-border bg-muted text-muted-foreground">
+                                                                Discounted
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-muted-foreground font-bold">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-3 text-right font-bold font-mono text-sky-600 dark:text-sky-400 whitespace-nowrap tabular-nums">
+                                                        {formatCurrency(item.net_amount)}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 ) : (
+                    /* ══ SO AGREEMENT LINE ITEMS ══ */
                     <div className="space-y-3">
-                        {orderDetails.map(item => {
-                            const pId = item.product_id;
-                            const name = pId?.product_name || `Product #${item.product_id}`;
-                            const code = pId?.product_code || `CODE-${item.product_id}`;
-                            const brand = pId?.brand || "N/A";
-                            const category = pId?.category || "N/A";
-                            const uom = pId?.uom || "PCS";
+                        <div className="flex items-center justify-between">
+                            <h5 className="text-[9.5px] font-extrabold uppercase text-muted-foreground tracking-wider">
+                                Agreement Line Items
+                            </h5>
+                            {hasChanges && (
+                                <span className="text-[9px] bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-black uppercase tracking-wider flex items-center gap-1">
+                                    <AlertCircle className="h-3 w-3" /> Unsaved Changes
+                                </span>
+                            )}
+                        </div>
 
-                            const currentQty = editableQuantities[item.detail_id] ?? item.ordered_quantity;
-                            const totalCost = item.unit_price * currentQty;
-                            const isChanged = currentQty !== item.ordered_quantity;
+                        {loadingDetails ? (
+                            <div className="flex flex-col items-center justify-center p-12 gap-2 border border-dashed rounded-xl bg-muted/50">
+                                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                                <span className="text-[10px] text-muted-foreground font-semibold">Fetching agreement items...</span>
+                            </div>
+                        ) : orderDetails.length === 0 ? (
+                            <div className="text-center p-8 border border-dashed rounded-xl bg-muted/50 text-xs text-muted-foreground italic">
+                                No items logged in detail.
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {orderDetails.map(item => {
+                                    const pId = item.product_id;
+                                    const name = pId?.product_name || `Product #${item.product_id}`;
+                                    const code = pId?.product_code || `CODE-${item.product_id}`;
+                                    const brand = pId?.brand || "N/A";
+                                    const category = pId?.category || "N/A";
+                                    const uom = pId?.uom || "PCS";
 
-                            const bomVersionName = item.bom_version_name;
-                            const hasBomVersion = Boolean(bomVersionName && bomVersionName.trim() !== "");
+                                    const currentQty = editableQuantities[item.detail_id] ?? item.ordered_quantity;
+                                    const totalCost = item.unit_price * currentQty;
+                                    const isChanged = currentQty !== item.ordered_quantity;
 
-                            return (
-                                <div
-                                    key={item.detail_id}
-                                    className={`border rounded-xl p-4 transition-all duration-200 flex flex-col justify-between gap-3 ${isChanged
-                                            ? "bg-amber-500/5 border-amber-500/30"
-                                            : "bg-background border-border hover:border-primary/50"
-                                        }`}
-                                >
-                                    <div className="flex items-start justify-between gap-2.5">
-                                        <div className="space-y-1.5">
-                                            <div className="text-xs font-bold text-foreground leading-snug">{name}</div>
-                                            <div className="flex flex-wrap items-center gap-1.5">
-                                                <span className="text-[9px] font-mono bg-muted border border-border px-1.5 py-0.2 rounded text-muted-foreground uppercase font-semibold">
-                                                    {code}
-                                                </span>
-                                                {hasBomVersion ? (
-                                                    <span className="text-[9px] bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.2 rounded font-bold">
-                                                        {bomVersionName}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-[9px] bg-muted text-muted-foreground border border-border px-1.5 py-0.2 rounded font-medium italic">
-                                                        No Version
-                                                    </span>
-                                                )}
-                                                {brand !== "N/A" && (
-                                                    <span className="text-[9px] bg-primary/10 text-primary px-1.5 py-0.2 rounded font-semibold">
-                                                        {brand}
-                                                    </span>
-                                                )}
-                                                {category !== "N/A" && (
-                                                    <span className="text-[9px] bg-muted px-1.5 py-0.2 rounded text-muted-foreground font-semibold">
-                                                        {category}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div className="text-right shrink-0">
-                                            <div className="text-xs font-black text-foreground font-mono">
-                                                {formatCurrency(totalCost - (item.discount_amount || 0))}
-                                            </div>
-                                            <div className="text-[9px] text-muted-foreground font-semibold mt-0.5">
-                                                {formatCurrency(item.unit_price)} / {uom}
-                                            </div>
-                                            {item.discount_amount ? (
-                                                <div className="text-[9px] text-destructive font-semibold mt-0.5">
-                                                    - {formatCurrency(item.discount_amount)} discount
+                                    const bomVersionName = item.bom_version_name;
+                                    const hasBomVersion = Boolean(bomVersionName && bomVersionName.trim() !== "");
+
+                                    return (
+                                        <div
+                                            key={item.detail_id}
+                                            className={`border rounded-xl p-4 transition-all duration-200 flex flex-col justify-between gap-3 ${isChanged
+                                                ? "bg-amber-500/5 border-amber-500/30"
+                                                : "bg-background border-border hover:border-primary/50"
+                                                }`}
+                                        >
+                                            <div className="flex items-start justify-between gap-2.5">
+                                                <div className="space-y-1.5">
+                                                    <div className="text-xs font-bold text-foreground leading-snug">{name}</div>
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                        <span className="text-[9px] font-mono bg-muted border border-border px-1.5 py-0.2 rounded text-muted-foreground uppercase font-semibold">
+                                                            {code}
+                                                        </span>
+                                                        {hasBomVersion ? (
+                                                            <span className="text-[9px] bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.2 rounded font-bold">
+                                                                {bomVersionName}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[9px] bg-muted text-muted-foreground border border-border px-1.5 py-0.2 rounded font-medium italic">
+                                                                No Version
+                                                            </span>
+                                                        )}
+                                                        {brand !== "N/A" && (
+                                                            <span className="text-[9px] bg-primary/10 text-primary px-1.5 py-0.2 rounded font-semibold">
+                                                                {brand}
+                                                            </span>
+                                                        )}
+                                                        {category !== "N/A" && (
+                                                            <span className="text-[9px] bg-muted px-1.5 py-0.2 rounded text-muted-foreground font-semibold">
+                                                                {category}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            ) : null}
-                                        </div>
-                                    </div>
-
-                                    <div className="flex items-center justify-between pt-2.5 border-t border-border border-dashed">
-                                        <span className="text-[9.5px] text-muted-foreground font-bold uppercase tracking-wider">
-                                            Quantity
-                                        </span>
-                                        <div className="flex items-center gap-2.5">
-                                            {isChanged && (
-                                                <span className="text-[9px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 font-black font-mono uppercase tracking-wider">
-                                                    Was {item.ordered_quantity}
-                                                </span>
-                                            )}
-                                            {isEditable ? (
-                                                <div className="flex items-center">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => decrementQty(item.detail_id, currentQty)}
-                                                        className="h-7 w-7 rounded-l-lg border border-border bg-background hover:bg-muted text-muted-foreground flex items-center justify-center transition-all font-bold cursor-pointer"
-                                                    >
-                                                        <Minus className="h-3.5 w-3.5" />
-                                                    </button>
-                                                    <input
-                                                        type="number"
-                                                        min="1"
-                                                        value={currentQty}
-                                                        onChange={e => {
-                                                            const val = parseInt(e.target.value);
-                                                            setEditableQuantities(prev => ({
-                                                                ...prev,
-                                                                [item.detail_id]: isNaN(val) ? 1 : Math.max(1, val)
-                                                            }));
-                                                        }}
-                                                        className="h-7 w-12 border-y border-border bg-background text-center text-xs font-bold text-foreground outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => incrementQty(item.detail_id, currentQty)}
-                                                        className="h-7 w-7 rounded-r-lg border border-border bg-background hover:bg-muted text-muted-foreground flex items-center justify-center transition-all font-bold cursor-pointer"
-                                                    >
-                                                        <Plus className="h-3.5 w-3.5" />
-                                                    </button>
+                                                <div className="text-right shrink-0">
+                                                    <div className="text-xs font-black text-foreground font-mono">
+                                                        {formatCurrency(totalCost - (item.discount_amount || 0))}
+                                                    </div>
+                                                    <div className="text-[9px] text-muted-foreground font-semibold mt-0.5">
+                                                        {formatCurrency(item.unit_price)} / {uom}
+                                                    </div>
+                                                    {item.discount_amount ? (
+                                                        <div className="text-[9px] text-destructive font-semibold mt-0.5">
+                                                            - {formatCurrency(item.discount_amount)} discount
+                                                        </div>
+                                                    ) : null}
                                                 </div>
-                                            ) : (
-                                                <span className="text-xs font-extrabold text-foreground font-mono">
-                                                    {item.ordered_quantity} <span className="text-[10px] text-muted-foreground font-normal">{uom}</span>
+                                            </div>
+
+                                            <div className="flex items-center justify-between pt-2.5 border-t border-border border-dashed">
+                                                <span className="text-[9.5px] text-muted-foreground font-bold uppercase tracking-wider">
+                                                    Quantity
                                                 </span>
-                                            )}
+                                                <div className="flex items-center gap-2.5">
+                                                    {isChanged && (
+                                                        <span className="text-[9px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 font-black font-mono uppercase tracking-wider">
+                                                            Was {item.ordered_quantity}
+                                                        </span>
+                                                    )}
+                                                    {isEditable ? (
+                                                        <div className="flex items-center">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => decrementQty(item.detail_id, currentQty)}
+                                                                className="h-7 w-7 rounded-l-lg border border-border bg-background hover:bg-muted text-muted-foreground flex items-center justify-center transition-all font-bold cursor-pointer"
+                                                            >
+                                                                <Minus className="h-3.5 w-3.5" />
+                                                            </button>
+                                                            <input
+                                                                type="number"
+                                                                min="1"
+                                                                value={currentQty}
+                                                                onChange={e => {
+                                                                    const val = parseInt(e.target.value);
+                                                                    setEditableQuantities(prev => ({
+                                                                        ...prev,
+                                                                        [item.detail_id]: isNaN(val) ? 1 : Math.max(1, val)
+                                                                    }));
+                                                                }}
+                                                                className="h-7 w-12 border-y border-border bg-background text-center text-xs font-bold text-foreground outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => incrementQty(item.detail_id, currentQty)}
+                                                                className="h-7 w-7 rounded-r-lg border border-border bg-background hover:bg-muted text-muted-foreground flex items-center justify-center transition-all font-bold cursor-pointer"
+                                                            >
+                                                                <Plus className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-xs font-extrabold text-foreground font-mono">
+                                                            {item.ordered_quantity} <span className="text-[10px] text-muted-foreground font-normal">{uom}</span>
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
 
             {/* Financial Breakdown card */}
-            <div className="bg-card text-card-foreground border border-border rounded-xl p-4.5 space-y-3 shadow-xs relative overflow-hidden">
-                <div className="flex justify-between items-center text-xs">
-                    <span className="text-muted-foreground font-medium">Subtotal Gross</span>
-                    <span className="font-bold font-mono">
-                        {formatCurrency(grossSum)}
-                    </span>
-                </div>
-                {discount > 0 ? (
-                    <div className="flex justify-between items-center text-xs text-destructive">
-                        <span className="font-medium">Total Discount</span>
-                        <span className="font-bold font-mono">
-                            - {formatCurrency(discount)}
+            {isInvoiceMode && activeInvoice ? (
+                /* Invoice Financial Breakdown (matching CRM card) */
+                <div className="bg-card text-card-foreground border border-border rounded-xl p-5 space-y-2.5 shadow-xs relative overflow-hidden">
+                    <div className="flex justify-between items-center text-xs">
+                        <span className="text-muted-foreground font-medium uppercase tracking-wider">Total Amount</span>
+                        <span className="font-bold font-mono text-foreground">
+                            {formatCurrency(activeInvoice.total_amount)}
                         </span>
                     </div>
-                ) : null}
-                <div className="border-t border-border my-2 pt-3 flex justify-between items-center">
-                    <span className="text-xs font-extrabold uppercase tracking-wider text-foreground">
-                        Net Amount Locked
-                    </span>
-                    <span className="text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
-                        {formatCurrency(netSum)}
-                    </span>
+                    <div className="flex justify-between items-center text-xs">
+                        <span className="text-muted-foreground font-medium uppercase tracking-wider">Total Discount</span>
+                        <span className="font-bold font-mono text-rose-500">
+                            {activeInvoice.discount_amount > 0 ? `-${formatCurrency(activeInvoice.discount_amount)}` : formatCurrency(0)}
+                        </span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                        <span className="text-sky-600 dark:text-sky-400 font-medium uppercase tracking-wider">Net Amount</span>
+                        <span className="font-bold font-mono text-sky-600 dark:text-sky-400">
+                            {formatCurrency(activeInvoice.net_amount)}
+                        </span>
+                    </div>
+                    <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+                        <span className="font-medium uppercase tracking-wider">VAT (12%)</span>
+                        <span className="font-mono font-medium">
+                            {formatCurrency(activeInvoice.vat_amount)}
+                        </span>
+                    </div>
+                    <div className="border-t border-border my-2 pt-3 flex justify-between items-center">
+                        <span className="text-xs font-black uppercase tracking-widest text-sky-600 dark:text-sky-400">
+                            TOTAL INVOICE
+                        </span>
+                        <span className="text-xl font-black text-foreground font-mono">
+                            {formatCurrency(activeInvoice.net_amount)}
+                        </span>
+                    </div>
                 </div>
-            </div>
+            ) : (
+                /* SO Order Financial Breakdown */
+                <div className="bg-card text-card-foreground border border-border rounded-xl p-4.5 space-y-3 shadow-xs relative overflow-hidden">
+                    <div className="flex justify-between items-center text-xs">
+                        <span className="text-muted-foreground font-medium">Subtotal Gross</span>
+                        <span className="font-bold font-mono">
+                            {formatCurrency(grossSum)}
+                        </span>
+                    </div>
+                    {discount > 0 ? (
+                        <div className="flex justify-between items-center text-xs text-destructive">
+                            <span className="font-medium">Total Discount</span>
+                            <span className="font-bold font-mono">
+                                - {formatCurrency(discount)}
+                            </span>
+                        </div>
+                    ) : null}
+                    <div className="border-t border-border my-2 pt-3 flex justify-between items-center">
+                        <span className="text-xs font-extrabold uppercase tracking-wider text-foreground">
+                            Net Amount Locked
+                        </span>
+                        <span className="text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                            {formatCurrency(netSum)}
+                        </span>
+                    </div>
+                </div>
+            )}
 
-            {/* Action buttons */}
+            {/* Action buttons & View Invoice Receipt */}
             <div className="space-y-2.5 pt-1">
+                {isInvoiceMode && activeInvoice?.pdf && (
+                    <a
+                        href={activeInvoice.pdf.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white py-3 text-xs font-bold transition-all active:scale-[0.98] shadow-md shadow-blue-500/10 cursor-pointer no-underline"
+                    >
+                        <Package className="h-4 w-4" />
+                        VIEW INVOICE RECEIPT
+                    </a>
+                )}
                 {hasChanges && (
                     <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 flex items-start gap-2.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400 leading-relaxed shadow-xs">
                         <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
@@ -510,8 +753,8 @@ export function SalesOrderDetailPanel({
                             disabled={savingQuantities || orderDetails.length === 0 || !hasChanges}
                             onClick={() => handleSaveQuantities()}
                             className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-bold shadow-xs transition-all cursor-pointer ${hasChanges
-                                    ? "bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-600 active:scale-[0.98] shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/25"
-                                    : "border border-border bg-muted text-muted-foreground cursor-not-allowed opacity-75"
+                                ? "bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-600 active:scale-[0.98] shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/25"
+                                : "border border-border bg-muted text-muted-foreground cursor-not-allowed opacity-75"
                                 }`}
                             title={hasChanges ? "Save quantity edits" : "No quantity changes to save"}
                         >
