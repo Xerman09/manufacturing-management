@@ -1123,8 +1123,11 @@ export function CreateSalesOrderModal({
                                                                     }
                                                                     if (isFinishedGoods && requiresBom(p)) {
                                                                         const parentHasVer = Boolean(p.has_active_version);
-                                                                        const childHasVer = products.some(child => Number(child.parent_product_id) === Number(p.product_id) && Boolean(child.has_active_version));
-                                                                        if (!parentHasVer && !childHasVer) return false;
+                                                                        const childHasEligible = products.some(child =>
+                                                                            Number(child.parent_product_id) === Number(p.product_id) &&
+                                                                            (!requiresBom(child) || Boolean(child.has_active_version) || Boolean(child.has_active_uom_version))
+                                                                        );
+                                                                        if (!parentHasVer && !childHasEligible) return false;
                                                                     }
                                                                     // Check if parent still has at least one selectable UOM variant
                                                                     const isCurrentParent = Number(p.product_id) === Number(item.parent_product_id);
@@ -1135,7 +1138,7 @@ export function CreateSalesOrderModal({
                                                                             .filter(child => {
                                                                                 if (!isFinishedGoods) return true;
                                                                                 if (!requiresBom(child)) return true;
-                                                                                return Boolean(child.has_active_uom_version);
+                                                                                return Boolean(child.has_active_version) || Boolean(p.has_active_version) || Boolean(child.has_active_uom_version);
                                                                             });
                                                                         if (availableVariants.length === 0) return false;
                                                                     }
@@ -1152,7 +1155,8 @@ export function CreateSalesOrderModal({
                                                                 .filter(product => {
                                                                     if (!isFinishedGoods) return true;
                                                                     if (!requiresBom(product)) return true;
-                                                                    return Boolean(product.has_active_uom_version);
+                                                                    const parentProd = products.find(p => Number(p.product_id) === Number(item.parent_product_id));
+                                                                    return Boolean(product.has_active_version) || Boolean(parentProd?.has_active_version) || Boolean(product.has_active_uom_version);
                                                                 })
                                                                 .sort((a, b) => Number(b.is_parent) - Number(a.is_parent) || Number(a.unit_count) - Number(b.unit_count))
                                                                 .map(product => ({

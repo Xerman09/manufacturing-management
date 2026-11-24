@@ -488,6 +488,27 @@ export async function GET(request: Request) {
                 }
             };
 
+            const readVersionsResilient = async () => {
+                try {
+                    const primaryRes = await read("product_manufacturing_version", new URLSearchParams({
+                        fields: "version_id,product_id,uom_id,status,is_primary,version_name",
+                        limit: "-1"
+                    }));
+                    if (Array.isArray(primaryRes?.data) && primaryRes.data.length > 0) return primaryRes;
+                } catch (err) {
+                    console.warn("Failed to fetch product_manufacturing_version with is_primary; falling back to core fields:", err);
+                }
+                try {
+                    return await read("product_manufacturing_version", new URLSearchParams({
+                        fields: "version_id,product_id,uom_id,status,version_name",
+                        limit: "-1"
+                    }));
+                } catch (coreErr) {
+                    console.error("Failed to fetch product_manufacturing_version with core fields:", coreErr);
+                    return { data: [] };
+                }
+            };
+
             const [customerResult, productResult] = await Promise.all([
                 read("customer", new URLSearchParams({
                     fields: "id,customer_name,customer_code,payment_term,price_type,price_type_id",
@@ -539,10 +560,7 @@ export async function GET(request: Request) {
                     fields: "id,discount_type,total_percent",
                     limit: "-1"
                 })),
-                optionalRead("product_manufacturing_version", new URLSearchParams({
-                    fields: "version_id,product_id,uom_id,status,is_active,is_primary,version_name",
-                    limit: "-1"
-                })),
+                readVersionsResilient(),
                 optionalRead("price_types", new URLSearchParams({
                     fields: "price_type_id,price_type_name,is_active",
                     limit: "-1"
@@ -553,7 +571,7 @@ export async function GET(request: Request) {
             const activeVersionProductUomPairs = new Set<string>();
             (versionsResult.data || []).forEach((v: any) => {
                 const st = String(v.status || "").trim().toLowerCase();
-                const isActiveStatus = st === "active";
+                const isActiveStatus = st === "active" || st === "approved";
                 const isActiveFlag = v.is_active === true || v.is_active === 1 || String(v.is_active) === "1";
                 const isPrimaryFlag = v.is_primary === true || v.is_primary === 1 || String(v.is_primary) === "1" || Number(v.is_primary) === 1;
 
