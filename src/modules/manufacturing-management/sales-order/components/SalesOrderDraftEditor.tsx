@@ -805,8 +805,11 @@ export function SalesOrderDraftEditor({
                                             }
                                             if (isFinishedGoods && requiresBom(p)) {
                                                 const parentHasVer = Boolean(p.has_active_version);
-                                                const childHasVer = products.some(child => Number(child.parent_product_id) === Number(p.product_id) && Boolean(child.has_active_version));
-                                                if (!parentHasVer && !childHasVer) return false;
+                                                const childHasEligible = products.some(child =>
+                                                    Number(child.parent_product_id) === Number(p.product_id) &&
+                                                    (!requiresBom(child) || Boolean(child.has_active_version) || Boolean(child.has_active_uom_version))
+                                                );
+                                                if (!parentHasVer && !childHasEligible) return false;
                                             }
                                             // Check if parent still has at least one selectable UOM variant
                                             const isCurrentParent = Number(p.product_id) === Number(item.parent_product_id);
@@ -817,7 +820,7 @@ export function SalesOrderDraftEditor({
                                                     .filter(child => {
                                                         if (!isFinishedGoods) return true;
                                                         if (!requiresBom(child)) return true;
-                                                        return Boolean(child.has_active_uom_version);
+                                                        return Boolean(child.has_active_version) || Boolean(p.has_active_version) || Boolean(child.has_active_uom_version);
                                                     });
                                                 if (availableVariants.length === 0) return false;
                                             }
@@ -829,7 +832,8 @@ export function SalesOrderDraftEditor({
                                         .filter(p => {
                                             if (!isFinishedGoods) return true;
                                             if (!requiresBom(p)) return true;
-                                            return Boolean(p.has_active_uom_version);
+                                            const parentProd = products.find(prod => Number(prod.product_id) === Number(item.parent_product_id));
+                                            return Boolean(p.has_active_version) || Boolean(parentProd?.has_active_version) || Boolean(p.has_active_uom_version);
                                         })
                                         .sort((a, b) => Number(b.is_parent) - Number(a.is_parent) || Number(a.unit_count) - Number(b.unit_count))
                                         .map(p => ({ value: String(p.product_id), label: formatUomLabel(p) }));
