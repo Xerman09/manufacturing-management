@@ -85,7 +85,8 @@ export async function GET(request: Request) {
         const rawData = json.data || [];
 
         const versionsList = rawData.map((v: Record<string, unknown> & { version_id: number; version_name?: string; status?: string; is_primary?: boolean | number | string; expected_yield_percentage?: number; base_quantity?: number; uom_id?: number | null; valid_from?: string | null; valid_to?: string | null; rejection_reason?: string | null; approval_remarks?: string | null; created_at?: string | null; updated_at?: string | null; created_by?: number | string | null; approved_by?: number | string | null; approved_at?: string | null }) => {
-            const isActive = v.status === "Active";
+            const rawStatus = String(v.status || "").trim().toLowerCase();
+            const isActive = rawStatus === "active" || rawStatus === "approved";
             return {
                 version_id: v.version_id,
                 id: v.version_id, // compatibility
