@@ -87,11 +87,8 @@ export const AICopilotDrawer: React.FC<Props> = ({
                     <div className="flex items-center gap-2">
                         <Sparkles className="h-4 w-4 text-purple-600 dark:text-purple-400 animate-pulse" />
                         <h3 className="text-xs font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">
-                            AI Executive Copilot
+                            AI Executive Insight
                         </h3>
-                        <Badge variant="outline" className="text-[10px] bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/20 font-bold">
-                            Tier {aiTier.tierLevel}: {aiTier.tierName}
-                        </Badge>
                     </div>
 
                     <div className="flex items-center gap-3">
