@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { formatPhtDateTime } from "@/app/api/manufacturing/services/core-api.service";
 import { authorizeJobOrderModuleAccess, JOB_ORDER_MODULE_PATHS } from "@/app/api/manufacturing/job-orders/_module-access";
 import {
     fetchMmInventoryMovements,
@@ -335,7 +336,7 @@ export async function POST(request: Request) {
             : positiveSafeInteger(body.approvedBy, "approvedBy");
         const relationship = await verifyFinalQALotRelationship({ jobOrderId, lotId, productId, branchId });
         await ensureNoExistingRelease(relationship.lotId);
-        const timestamp = new Date().toISOString();
+        const timestamp = formatPhtDateTime();
         const payload = {
             job_order_id: relationship.jobOrderId,
             mm_lot_id: relationship.lotId,

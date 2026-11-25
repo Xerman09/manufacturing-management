@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
       remarks: String(body.remarks || ""),
       status: "PENDING",
       requested_by: requested_by,
-      created_at: new Date().toISOString()
+      created_at: new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).replace(" ", "T")
     };
 
     const directusRes = await fetch(`${DIRECTUS_BASE}/items/invoice_cancellation_requests`, {

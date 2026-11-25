@@ -177,11 +177,11 @@ export async function POST(req: NextRequest) {
         }
 
         // 6. Update Sales Order status to 'For Consolidation'
-        const nowIso = new Date().toISOString();
+        const nowPht = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).replace(" ", "T");
         const patchPayload: Record<string, unknown> = {
             order_status: "For Consolidation",
-            for_consolidation_at: nowIso,
-            modified_date: nowIso,
+            for_consolidation_at: nowPht,
+            modified_date: nowPht,
         };
 
         if (userId) {
@@ -210,7 +210,7 @@ export async function POST(req: NextRequest) {
             message: `Sales Order #${so.order_no} has been successfully moved to 'Consolidation Planning'.`,
             order_id: orderId,
             order_status: "For Consolidation",
-            for_consolidation_at: nowIso,
+            for_consolidation_at: nowPht,
         });
     } catch (error) {
         console.error("[Sales Order Fulfillment] Error in POST /proceed:", error);

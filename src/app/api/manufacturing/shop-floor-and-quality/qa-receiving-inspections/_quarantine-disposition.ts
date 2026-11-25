@@ -1,4 +1,5 @@
 import { procurementDirectusFetch } from "@/app/api/manufacturing/procurement/_directus";
+import { formatPhtDateTime } from "@/app/api/manufacturing/services/core-api.service";
 import {
     loadMmLots,
     loadMovementRowsForMmLots,
@@ -625,7 +626,7 @@ export async function processQuarantineDisposition(input: {
                 return_movement_id: movementId,
                 last_operation_key: operationKey,
                 updated_by: input.actorUserId,
-                processed_at: new Date().toISOString()
+                processed_at: formatPhtDateTime()
             });
         } catch (error) {
             await mutate(`/items/inventory_movements/${movementId}`, "DELETE").catch(() => undefined);
