@@ -729,16 +729,28 @@ export function SalesOrderDetailPanel({
 
             {/* Action buttons & View Invoice Receipt */}
             <div className="space-y-2.5 pt-1">
-                {isInvoiceMode && activeInvoice?.pdf && (
-                    <a
-                        href={activeInvoice.pdf.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white py-3 text-xs font-bold transition-all active:scale-[0.98] shadow-md shadow-blue-500/10 cursor-pointer no-underline"
-                    >
-                        <Package className="h-4 w-4" />
-                        VIEW INVOICE RECEIPT
-                    </a>
+                {isInvoiceMode && activeInvoice && (
+                    activeInvoice.pdf?.pdf_file ? (
+                        <a
+                            href={`/api/manufacturing/files?id=${encodeURIComponent(activeInvoice.pdf.pdf_file)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white py-3 text-xs font-bold transition-all active:scale-[0.98] shadow-md shadow-blue-500/10 cursor-pointer no-underline"
+                        >
+                            <FileText className="h-4 w-4" />
+                            VIEW INVOICE RECEIPT
+                        </a>
+                    ) : (
+                        <button
+                            type="button"
+                            disabled
+                            className="w-full inline-flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-bold border border-border bg-muted/60 text-muted-foreground/70 cursor-not-allowed opacity-60 shadow-xs"
+                            title={`No archived printable PDF receipt found for Invoice #${activeInvoice.invoice_no || activeInvoice.invoice_id}.`}
+                        >
+                            <FileText className="h-4 w-4 text-muted-foreground/50" />
+                            NO PRINTABLE RECEIPT AVAILABLE
+                        </button>
+                    )
                 )}
                 {hasChanges && (
                     <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 flex items-start gap-2.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400 leading-relaxed shadow-xs">
