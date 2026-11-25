@@ -118,7 +118,7 @@ export async function GET(
         // 1.1 Fetch Customer Details
         let customerInfo = null;
         if (customerCode) {
-            const custRes = await fetch(`${DIRECTUS_BASE}/items/customer?filter[customer_code][_eq]=${customerCode}&fields=customer_name,store_name,customer_tin,province,city,brgy`, {
+            const custRes = await fetch(`${DIRECTUS_BASE}/items/customer?filter[customer_code][_eq]=${customerCode}&fields=customer_name,store_name,customer_tin,province,city,brgy,isVAT,isEWT`, {
                 headers: directusHeaders()
             });
             const custData = await custRes.json();

@@ -32,6 +32,8 @@ export interface ReceiptData {
     barcodeDataUrl?: string;
     template?: ORTemplate;
     printBackground?: boolean;
+    isVAT?: number | boolean | null;
+    isEWT?: number | boolean | null;
 }
 
 import { DiscountType } from '../types';
@@ -291,11 +293,22 @@ const generateOfficialReceipt = async (data: ReceiptData, existingDoc?: jsPDF): 
     // -------------------------------------------------------------------------
 
     // Calculate values once
+    const rawIsVat = data.isVAT;
+    const isCustomerVat = rawIsVat === 1 || rawIsVat === true;
+    const rawIsEwt = data.isEWT;
+    const isCustomerEwt = rawIsEwt === 1 || rawIsEwt === true;
+
     const grossTotal = data.items.reduce((s, i) => s + (i.unit_price * i.qty), 0);
     const discountTotal = data.items.reduce((s, i) => s + i.discount_amount, 0);
     const netTotal = grossTotal - discountTotal;
-    const vatableSales = netTotal / 1.12;
-    const vatAmount = netTotal - vatableSales;
+
+    // VAT calculation based on customer.isVAT
+    const vatableSales = isCustomerVat ? netTotal / 1.12 : 0;
+    const vatAmount = isCustomerVat ? netTotal - vatableSales : 0;
+
+    // EWT calculation: EWT Base = Sales - Discount - VAT payable; EWT amount = EWT Base * 1%
+    const ewtBase = isCustomerVat ? vatableSales : netTotal;
+    const withholdingTax = isCustomerEwt ? ewtBase * 0.01 : 0;
 
     const fieldValues: Record<string, string> = {
         customer_name: data.customer_name.toUpperCase(),
@@ -314,8 +327,8 @@ const generateOfficialReceipt = async (data: ReceiptData, existingDoc?: jsPDF): 
         total_amount_due: formatCurrency(netTotal),
         net_total_footer: formatCurrency(netTotal),
         zero_rated: "0.00",
-        exempt: "0.00",
-        withholding_tax: "0.00"
+        exempt: isCustomerVat ? "0.00" : formatCurrency(netTotal),
+        withholding_tax: formatCurrency(withholdingTax)
     };
 
     // Render every field defined in the template

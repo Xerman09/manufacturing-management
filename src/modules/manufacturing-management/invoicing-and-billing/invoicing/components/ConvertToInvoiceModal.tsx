@@ -757,7 +757,9 @@ export const ConvertToInvoiceModal: React.FC<ConvertToInvoiceModalProps> = ({
                     discountTypes: discountTypes,
                     barcodeDataUrl: undefined,
                     template: orTemplate || DEFAULT_TEMPLATE,
-                    printBackground: companyCode === 'MEN2-Marikina'
+                    printBackground: companyCode === 'MEN2-Marikina',
+                    isVAT: conversionData?.customer?.isVAT,
+                    isEWT: conversionData?.customer?.isEWT
                 };
 
                 // Accumulate all receipts into a single multi-page document
@@ -1774,11 +1776,22 @@ export const ConvertToInvoiceModal: React.FC<ConvertToInvoiceModalProps> = ({
                                     {(() => {
                                         const fullName = conversionData?.customer?.customer_name || 'N/A';
                                         const storeName = conversionData?.customer?.store_name || fullName;
+                                        const rawIsVat = conversionData?.customer?.isVAT;
+                                        const isCustomerVat = rawIsVat === 1 || rawIsVat === true;
+                                        const rawIsEwt = conversionData?.customer?.isEWT;
+                                        const isCustomerEwt = rawIsEwt === 1 || rawIsEwt === true;
+
                                         const grossTotal = currentReceipt.items.reduce((s, i) => s + (i.unit_price * i.qty), 0) || 0;
                                         const discountTotal = currentReceipt.items.reduce((s, i) => s + i.discount_amount, 0) || 0;
                                         const netTotal = grossTotal - discountTotal;
-                                        const vatableSales = netTotal / 1.12;
-                                        const vatAmount = netTotal - vatableSales;
+
+                                        // VAT calculation based on customer.isVAT
+                                        const vatableSales = isCustomerVat ? netTotal / 1.12 : 0;
+                                        const vatAmount = isCustomerVat ? netTotal - vatableSales : 0;
+
+                                        // EWT calculation: EWT Base = Sales - Discount - VAT payable; EWT amount = EWT Base * 1%
+                                        const ewtBase = isCustomerVat ? vatableSales : netTotal;
+                                        const withholdingTax = isCustomerEwt ? ewtBase * 0.01 : 0;
 
                                         const fieldValues: Record<string, string> = {
                                             customer_name: fullName.toUpperCase(),
@@ -1797,8 +1810,8 @@ export const ConvertToInvoiceModal: React.FC<ConvertToInvoiceModalProps> = ({
                                             total_amount_due: formatCurrency(netTotal),
                                             net_total_footer: formatCurrency(netTotal),
                                             zero_rated: "0.00",
-                                            exempt: "0.00",
-                                            withholding_tax: "0.00"
+                                            exempt: isCustomerVat ? "0.00" : formatCurrency(netTotal),
+                                            withholding_tax: formatCurrency(withholdingTax)
                                         };
 
                                         return (

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ORTemplate, ORFieldConfig } from "../types";
-import { Upload, Move, Type, Trash2, Maximize2, AlertTriangle, Loader2 } from "lucide-react";
+import { Upload, Type, Trash2, Maximize2, AlertTriangle, Loader2, ChevronDown, ChevronUp, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import Barcode from "react-barcode";
 import { InvoicingService } from "../services/InvoicingService";
@@ -37,6 +37,7 @@ export const DEFAULT_TEMPLATE: ORTemplate = {
         vat_amount: { x: 180, y: 151, fontSize: 10, fontFamily: 'courier', fontWeight: 'normal', label: 'VAT Amount' },
         gross_total: { x: 180, y: 157, fontSize: 11, fontFamily: 'courier', fontWeight: 'normal', label: 'Gross Total' },
         discount_total: { x: 180, y: 163, fontSize: 10, fontFamily: 'courier', fontWeight: 'normal', label: 'Discount Total' },
+        withholding_tax: { x: 180, y: 169, fontSize: 10, fontFamily: 'courier', fontWeight: 'normal', label: 'Withholding Tax' },
         net_total: { x: 180, y: 175, fontSize: 12, fontFamily: 'courier', fontWeight: 'normal', label: 'Net Total' },
         po_no: { x: 10, y: 185, fontSize: 10, fontFamily: 'courier', fontWeight: 'normal', label: 'PO Number' },
         salesman: { x: 10, y: 191, fontSize: 10, fontFamily: 'courier', fontWeight: 'normal', label: 'Salesman Name' },
@@ -75,6 +76,7 @@ export const MARIKINA_TEMPLATE: ORTemplate = {
         vat_amount: { x: 160, y: 226, fontSize: 10, fontFamily: 'courier', fontWeight: 'normal', label: 'VAT Amount' },
         gross_total: { x: 160, y: 232, fontSize: 11, fontFamily: 'courier', fontWeight: 'normal', label: 'Gross Total' },
         discount_total: { x: 160, y: 238, fontSize: 10, fontFamily: 'courier', fontWeight: 'normal', label: 'Discount Total' },
+        withholding_tax: { x: 160, y: 244, fontSize: 10, fontFamily: 'courier', fontWeight: 'normal', label: 'Withholding Tax' },
         net_total: { x: 160, y: 250, fontSize: 12, fontFamily: 'courier', fontWeight: 'bold', label: 'Net Total' },
         po_no: { x: 10, y: 220, fontSize: 10, fontFamily: 'courier', fontWeight: 'normal', label: 'PO Number', hidden: true },
         salesman: { x: 10, y: 226, fontSize: 10, fontFamily: 'courier', fontWeight: 'normal', label: 'Salesman Name', hidden: true },
@@ -100,6 +102,7 @@ export const MARIKINA_TEMPLATE: ORTemplate = {
 export const ReceiptTemplateEditor: React.FC<Props> = ({ isOpen, onClose, onSave, initialTemplate, receiptTypeName }) => {
     const [template, setTemplate] = useState<ORTemplate>(DEFAULT_TEMPLATE);
     const [activeField, setActiveField] = useState<string | null>(null);
+    const [isFieldsSectionOpen, setIsFieldsSectionOpen] = useState(true);
     const [zoom, setZoom] = useState(1);
     const [isUploading, setIsUploading] = useState(false);
     const canvasRef = useRef<HTMLDivElement>(null);
@@ -129,12 +132,17 @@ export const ReceiptTemplateEditor: React.FC<Props> = ({ isOpen, onClose, onSave
                 mergedColumns.barcode = { x: 10 };
             }
 
+            const mergedFields = {
+                ...fallbackTemplate.fields,
+                ...(initialTemplate.fields || {})
+            };
+            if (!mergedFields.withholding_tax) {
+                mergedFields.withholding_tax = fallbackTemplate.fields.withholding_tax;
+            }
+
             setTemplate({
                 ...initialTemplate,
-                fields: {
-                    ...fallbackTemplate.fields,
-                    ...(initialTemplate.fields || {})
-                },
+                fields: mergedFields,
                 tableSettings: {
                     ...fallbackTemplate.tableSettings,
                     ...(initialTemplate.tableSettings || {}),
@@ -416,164 +424,227 @@ export const ReceiptTemplateEditor: React.FC<Props> = ({ isOpen, onClose, onSave
                         </section>
 
                         <section className="space-y-3">
-                            <Label className="text-xs font-bold uppercase text-muted-foreground">Fields Configuration</Label>
-                            <div className="space-y-2">
-                                {Object.entries(template.fields).map(([key, config]) => (
-                                    <div 
-                                        key={key}
-                                        className={`p-2 rounded-lg border cursor-pointer transition-colors ${activeField === key ? 'bg-primary/10 border-primary ring-1 ring-primary/20' : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-primary/50'}`}
-                                        onClick={() => setActiveField(key)}
-                                    >
-                                        <div className="flex justify-between items-center mb-2">
-                                            <span className="text-xs font-medium uppercase">{config.label}</span>
-                                            <Move className="w-3 h-3 text-muted-foreground" />
-                                        </div>
-                                        {activeField === key && (
-                                            <div className="grid grid-cols-2 gap-2 mt-2">
-                                                {key === 'barcode' ? (
-                                                    // SPECIALIZED BARCODE SETTINGS
-                                                    <>
-                                                        <div className="space-y-1">
-                                                            <Label className="text-[10px]">Font Size (pt)</Label>
-                                                            <Input 
-                                                                type="number" 
-                                                                value={config.fontSize} 
-                                                                onChange={e => updateField(key, { fontSize: Number(e.target.value) })} 
-                                                                className="h-8 text-xs font-mono"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <Label className="text-[10px]">Text Weight</Label>
-                                                            <Select 
-                                                                value={config.fontWeight} 
-                                                                onValueChange={v => updateField(key, { fontWeight: v as "normal" | "bold" })}
-                                                            >
-                                                                <SelectTrigger className="h-8 text-xs">
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="normal">Normal</SelectItem>
-                                                                    <SelectItem value="bold">Bold</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <Label className="text-[10px]">Bar Height (mm)</Label>
-                                                            <Input 
-                                                                type="number" 
-                                                                step="0.5"
-                                                                value={config.barcodeHeight ?? 9} 
-                                                                onChange={e => updateField(key, { barcodeHeight: Number(e.target.value) })} 
-                                                                className="h-8 text-xs font-mono"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <Label className="text-[10px]">Bar Thickness (mm)</Label>
-                                                            <Input 
-                                                                type="number" 
-                                                                step="0.01"
-                                                                value={config.barcodeModuleWidth ?? 0.35} 
-                                                                onChange={e => updateField(key, { barcodeModuleWidth: Number(e.target.value) })} 
-                                                                className="h-8 text-xs font-mono"
-                                                            />
-                                                        </div>
-                                                        <div className="col-span-2 space-y-2 py-1">
-                                                            <div className="flex items-center gap-2">
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    id={`hide-field-${key}`}
-                                                                    checked={config.hidden ?? false}
-                                                                    onChange={e => updateField(key, { hidden: e.target.checked })}
-                                                                    className="w-3 h-3 rounded border-zinc-300 pointer-events-auto"
-                                                                />
-                                                                <Label htmlFor={`hide-field-${key}`} className="text-[10px] cursor-pointer font-bold text-red-600">Hide Barcode Lines</Label>
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    id={`hide-text-${key}`}
-                                                                    checked={config.hideBarcodeText ?? false}
-                                                                    onChange={e => updateField(key, { hideBarcodeText: e.target.checked })}
-                                                                    className="w-3 h-3 rounded border-zinc-300 pointer-events-auto"
-                                                                />
-                                                                <Label htmlFor={`hide-text-${key}`} className="text-[10px] cursor-pointer">Hide Text Below</Label>
-                                                            </div>
-                                                        </div>
-                                                    </>
-                                                ) : (
-                                                    // NORMAL FIELD SETTINGS
-                                                    <>
-                                                        <div className="space-y-1">
-                                                            <Label className="text-[10px]">Font Size</Label>
-                                                            <Input 
-                                                                type="number" 
-                                                                bs-size="sm"
-                                                                value={config.fontSize} 
-                                                                onChange={e => updateField(key, { fontSize: Number(e.target.value) })} 
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <Label className="text-[10px]">Weight</Label>
-                                                            <Select 
-                                                                value={config.fontWeight} 
-                                                                onValueChange={v => updateField(key, { fontWeight: v as "normal" | "bold" })}
-                                                            >
-                                                                <SelectTrigger className="h-8">
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="normal">Normal</SelectItem>
-                                                                    <SelectItem value="bold">Bold</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <Label className="text-[10px]">Max Width (mm)</Label>
-                                                            <Input 
-                                                                type="number" 
-                                                                value={config.maxWidth ?? ""} 
-                                                                placeholder="Auto"
-                                                                onChange={e => updateField(key, { maxWidth: e.target.value === "" ? undefined : Number(e.target.value) })} 
-                                                                className="h-8 text-xs font-mono"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <Label className="text-[10px]">Line Height</Label>
-                                                            <Input 
-                                                                type="number" 
-                                                                step="0.1"
-                                                                value={config.lineHeight ?? 1.2} 
-                                                                onChange={e => updateField(key, { lineHeight: Number(e.target.value) })} 
-                                                                className="h-8 text-xs font-mono"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <Label className="text-[10px]">Spacing</Label>
-                                                            <Input 
-                                                                type="number" 
-                                                                step="0.1"
-                                                                value={config.charSpacing ?? 0} 
-                                                                onChange={e => updateField(key, { charSpacing: Number(e.target.value) })} 
-                                                                className="h-8 text-xs"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <Label className="text-[10px]">ScaleX</Label>
-                                                            <Input 
-                                                                type="number" 
-                                                                step="0.05"
-                                                                value={config.scaleX ?? 1} 
-                                                                onChange={e => updateField(key, { scaleX: Number(e.target.value) })} 
-                                                                className="h-8 text-xs"
-                                                            />
-                                                        </div>
-                                                    </>
+                            <div 
+                                className="flex items-center justify-between cursor-pointer select-none group py-1"
+                                onClick={() => setIsFieldsSectionOpen(prev => !prev)}
+                            >
+                                <Label className="text-xs font-bold uppercase text-muted-foreground cursor-pointer group-hover:text-foreground transition-colors">
+                                    Fields Configuration
+                                </Label>
+                                <div className="text-muted-foreground group-hover:text-foreground transition-colors">
+                                    {isFieldsSectionOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                </div>
+                            </div>
+                            {isFieldsSectionOpen && (
+                                <div className="space-y-2">
+                                    {Object.entries(template.fields).map(([key, config]) => {
+                                        const isExpanded = activeField === key;
+                                        const isHidden = config.hidden ?? false;
+
+                                        return (
+                                            <div 
+                                                key={key}
+                                                className={`p-2 rounded-lg border transition-colors ${
+                                                    isExpanded 
+                                                        ? 'bg-primary/10 border-primary ring-1 ring-primary/20' 
+                                                        : isHidden 
+                                                            ? 'bg-zinc-100/60 dark:bg-zinc-900/40 border-dashed border-zinc-300 dark:border-zinc-800 opacity-60 hover:opacity-100 hover:border-primary/50' 
+                                                            : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-primary/50'
+                                                }`}
+                                            >
+                                                <div 
+                                                    className="flex justify-between items-center cursor-pointer select-none"
+                                                    onClick={() => setActiveField(prev => prev === key ? null : key)}
+                                                >
+                                                    <div className="flex items-center gap-1.5 min-w-0">
+                                                        <span className={`text-xs font-medium uppercase truncate ${isHidden ? 'line-through text-muted-foreground' : ''}`}>
+                                                            {config.label}
+                                                        </span>
+                                                        {isHidden && (
+                                                            <span className="text-[9px] font-semibold text-amber-600 bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.2 rounded">
+                                                                Hidden
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                        <button
+                                                            type="button"
+                                                            title={isHidden ? "Show on invoice" : "Hide on invoice"}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                updateField(key, { hidden: !isHidden });
+                                                            }}
+                                                            className={`p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors ${
+                                                                isHidden ? 'text-zinc-400 hover:text-foreground' : 'text-primary'
+                                                            }`}
+                                                        >
+                                                            {isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                                        </button>
+                                                        <span className="p-1 text-muted-foreground">
+                                                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                {isExpanded && (
+                                                    <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-800/50">
+                                                        {key === 'barcode' ? (
+                                                            // SPECIALIZED BARCODE SETTINGS
+                                                            <>
+                                                                <div className="space-y-1">
+                                                                    <Label className="text-[10px]">Font Size (pt)</Label>
+                                                                    <Input 
+                                                                        type="number" 
+                                                                        value={config.fontSize} 
+                                                                        onChange={e => updateField(key, { fontSize: Number(e.target.value) })} 
+                                                                        className="h-8 text-xs font-mono"
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <Label className="text-[10px]">Text Weight</Label>
+                                                                    <Select 
+                                                                        value={config.fontWeight} 
+                                                                        onValueChange={v => updateField(key, { fontWeight: v as "normal" | "bold" })}
+                                                                    >
+                                                                        <SelectTrigger className="h-8 text-xs">
+                                                                            <SelectValue />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="normal">Normal</SelectItem>
+                                                                            <SelectItem value="bold">Bold</SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <Label className="text-[10px]">Bar Height (mm)</Label>
+                                                                    <Input 
+                                                                        type="number" 
+                                                                        step="0.5"
+                                                                        value={config.barcodeHeight ?? 9} 
+                                                                        onChange={e => updateField(key, { barcodeHeight: Number(e.target.value) })} 
+                                                                        className="h-8 text-xs font-mono"
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <Label className="text-[10px]">Bar Thickness (mm)</Label>
+                                                                    <Input 
+                                                                        type="number" 
+                                                                        step="0.01"
+                                                                        value={config.barcodeModuleWidth ?? 0.35} 
+                                                                        onChange={e => updateField(key, { barcodeModuleWidth: Number(e.target.value) })} 
+                                                                        className="h-8 text-xs font-mono"
+                                                                    />
+                                                                </div>
+                                                                <div className="col-span-2 space-y-2 py-1">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <input 
+                                                                            type="checkbox" 
+                                                                            id={`hide-field-${key}`}
+                                                                            checked={config.hidden ?? false}
+                                                                            onChange={e => updateField(key, { hidden: e.target.checked })}
+                                                                            className="w-3 h-3 rounded border-zinc-300 pointer-events-auto"
+                                                                        />
+                                                                        <Label htmlFor={`hide-field-${key}`} className="text-[10px] cursor-pointer font-bold text-red-600">Hide Barcode Lines</Label>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <input 
+                                                                            type="checkbox" 
+                                                                            id={`hide-text-${key}`}
+                                                                            checked={config.hideBarcodeText ?? false}
+                                                                            onChange={e => updateField(key, { hideBarcodeText: e.target.checked })}
+                                                                            className="w-3 h-3 rounded border-zinc-300 pointer-events-auto"
+                                                                        />
+                                                                        <Label htmlFor={`hide-text-${key}`} className="text-[10px] cursor-pointer">Hide Text Below</Label>
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        ) : (
+                                                            // NORMAL FIELD SETTINGS
+                                                            <>
+                                                                <div className="col-span-2 flex items-center gap-2 pb-1">
+                                                                    <input 
+                                                                        type="checkbox" 
+                                                                        id={`hide-field-${key}`}
+                                                                        checked={config.hidden ?? false}
+                                                                        onChange={e => updateField(key, { hidden: e.target.checked })}
+                                                                        className="w-3.5 h-3.5 rounded border-zinc-300 pointer-events-auto"
+                                                                    />
+                                                                    <Label htmlFor={`hide-field-${key}`} className="text-[10px] cursor-pointer font-bold text-red-600">
+                                                                        Hide on Invoice
+                                                                    </Label>
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <Label className="text-[10px]">Font Size</Label>
+                                                                    <Input 
+                                                                        type="number" 
+                                                                        bs-size="sm"
+                                                                        value={config.fontSize} 
+                                                                        onChange={e => updateField(key, { fontSize: Number(e.target.value) })} 
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <Label className="text-[10px]">Weight</Label>
+                                                                    <Select 
+                                                                        value={config.fontWeight} 
+                                                                        onValueChange={v => updateField(key, { fontWeight: v as "normal" | "bold" })}
+                                                                    >
+                                                                        <SelectTrigger className="h-8">
+                                                                            <SelectValue />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="normal">Normal</SelectItem>
+                                                                            <SelectItem value="bold">Bold</SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <Label className="text-[10px]">Max Width (mm)</Label>
+                                                                    <Input 
+                                                                        type="number" 
+                                                                        value={config.maxWidth ?? ""} 
+                                                                        placeholder="Auto"
+                                                                        onChange={e => updateField(key, { maxWidth: e.target.value === "" ? undefined : Number(e.target.value) })} 
+                                                                        className="h-8 text-xs font-mono"
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <Label className="text-[10px]">Line Height</Label>
+                                                                    <Input 
+                                                                        type="number" 
+                                                                        step="0.1"
+                                                                        value={config.lineHeight ?? 1.2} 
+                                                                        onChange={e => updateField(key, { lineHeight: Number(e.target.value) })} 
+                                                                        className="h-8 text-xs font-mono"
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <Label className="text-[10px]">Spacing</Label>
+                                                                    <Input 
+                                                                        type="number" 
+                                                                        step="0.1"
+                                                                        value={config.charSpacing ?? 0} 
+                                                                        onChange={e => updateField(key, { charSpacing: Number(e.target.value) })} 
+                                                                        className="h-8 text-xs"
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <Label className="text-[10px]">ScaleX</Label>
+                                                                    <Input 
+                                                                        type="number" 
+                                                                        step="0.05"
+                                                                        value={config.scaleX ?? 1} 
+                                                                        onChange={e => updateField(key, { scaleX: Number(e.target.value) })} 
+                                                                        className="h-8 text-xs"
+                                                                    />
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </section>
 
                         <section className="space-y-3">

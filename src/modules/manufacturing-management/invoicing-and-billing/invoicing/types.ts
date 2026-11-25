@@ -164,6 +164,8 @@ export interface ConversionData {
         province: string;
         city: string;
         brgy: string;
+        isVAT?: number | boolean | null;
+        isEWT?: number | boolean | null;
     };
     payment_name?: string;
     total_allocated_quantity?: number;
