@@ -34,6 +34,8 @@ const CUSTOMER_PROFILE_FIELDS = [
     "city",
     "province",
     "isActive",
+    "isVAT",
+    "isEWT",
     "latitude",
     "longitude"
 ] as const;

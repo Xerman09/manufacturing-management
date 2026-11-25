@@ -7,6 +7,7 @@ import {
 import { DIRECTUS_URL, headers } from "./core-api.service";
 
 const CUSTOMER_COLLECTION = "customer";
+const CUSTOMER_TAX_FIELDS = ["isVAT", "isEWT"] as const;
 const CUSTOMER_READ_FIELDS = [
     "*",
     "store_signage",
@@ -44,6 +45,7 @@ const CUSTOMER_PROFILE_FIELDS = [
     "city",
     "province",
     "isActive",
+    ...CUSTOMER_TAX_FIELDS,
     "latitude",
     "longitude"
 ] as const;
@@ -70,6 +72,8 @@ export interface CustomerProfilePayload {
     city?: string | null;
     province?: string | null;
     isActive?: number | boolean | null;
+    isVAT?: 0 | 1;
+    isEWT?: 0 | 1;
     latitude?: number | null;
     longitude?: number | null;
 }
@@ -222,6 +226,14 @@ const STRING_PROFILE_FIELDS = [
 
 function normalizeProfilePayload(value: CustomerProfilePayload | UnknownRecord): UnknownRecord {
     const profile = pickProfilePayload(value);
+    const taxErrors: Record<string, string> = {};
+    for (const field of CUSTOMER_TAX_FIELDS) {
+        if (field in profile && profile[field] !== 0 && profile[field] !== 1) {
+            taxErrors[field] = `${field} must be 0 or 1.`;
+        }
+    }
+    if (Object.keys(taxErrors).length > 0) throw new CustomerProfileValidationError(taxErrors);
+
     for (const field of STRING_PROFILE_FIELDS) {
         if (typeof profile[field] === "string") profile[field] = profile[field].trim();
     }
@@ -587,6 +599,9 @@ export async function createCustomer(
     const audit = await requireAuditContext(context);
     const profile = normalizeProfilePayload(payload);
     if (profile.isActive === undefined) profile.isActive = 1;
+    for (const field of CUSTOMER_TAX_FIELDS) {
+        profile[field] ??= 0;
+    }
     throwIfInvalidCustomerProfile(profile);
     const priceType = await resolveActivePriceType(profile.price_type_id);
 
@@ -614,8 +629,12 @@ export async function updateCustomer(
     const audit = await requireAuditContext(context);
     const profile = normalizeProfilePayload(payload);
     const current = await fetchCustomerById(id);
+    const currentProfile = pickProfilePayload(current);
+    for (const field of CUSTOMER_TAX_FIELDS) {
+        delete currentProfile[field];
+    }
     const mergedProfile = {
-        ...pickProfilePayload(current),
+        ...currentProfile,
         ...profile
     };
     throwIfInvalidCustomerProfile(mergedProfile);

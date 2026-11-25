@@ -1,8 +1,9 @@
 /* eslint-disable */
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useId, useMemo, useRef } from "react";
 import { X, Save, User, MapPin, ChevronDown, Loader2, Search, Sliders, Building, Phone, Settings, Eye } from "lucide-react";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ClientFormData, Customer, PaymentTerm, PriceType, StoreType } from "../types";
 import { toast } from "sonner";
@@ -19,6 +20,7 @@ interface ClientFormModalProps {
     editingCustomer: Customer | null;
     formData: ClientFormData;
     setFormData: React.Dispatch<React.SetStateAction<ClientFormData>>;
+    showTaxFlags: boolean;
     storeTypes: StoreType[];
     setStoreTypes?: React.Dispatch<React.SetStateAction<StoreType[]>>;
     priceTypes: PriceType[];
@@ -132,6 +134,7 @@ export default function ClientFormModal({
     editingCustomer,
     formData,
     setFormData,
+    showTaxFlags,
     storeTypes,
     setStoreTypes,
     priceTypes,
@@ -156,6 +159,7 @@ export default function ClientFormModal({
 }: ClientFormModalProps) {
     const resolvedMode = mode ?? (editingCustomer ? "edit" : "create");
     const isViewMode = resolvedMode === "view";
+    const taxFlagId = useId();
     const [storeTypeQuery, setStoreTypeQuery] = useState("");
     const [isStoreTypeFocused, setIsStoreTypeFocused] = useState(false);
     const [isRegisteringStoreType, setIsRegisteringStoreType] = useState(false);
@@ -936,6 +940,21 @@ export default function ClientFormModal({
                                     <div className="w-9 h-5 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
                                 </label>
                             </div>
+                            {showTaxFlags && (
+                                <div className="mt-3 flex flex-wrap gap-x-6 gap-y-3">
+                                    {([["isVAT", "VAT Registered"], ["isEWT", "Subject to EWT"]] as const).map(([field, label]) => (
+                                        <label key={field} htmlFor={`${taxFlagId}-${field}`} className="flex items-center gap-2 text-xs font-bold">
+                                            <Checkbox
+                                                id={`${taxFlagId}-${field}`}
+                                                checked={formData[field]}
+                                                disabled={isViewMode}
+                                                onCheckedChange={(checked) => setFormData(prev => ({ ...prev, [field]: checked === true }))}
+                                            />
+                                            {label}
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         {editingCustomer && (

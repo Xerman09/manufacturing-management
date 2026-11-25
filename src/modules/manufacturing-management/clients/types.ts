@@ -35,6 +35,8 @@ export interface ClientFormData {
     latitude: string;
     longitude: string;
     isActive: boolean;
+    isVAT: boolean;
+    isEWT: boolean;
 }
 
 export interface Customer {
@@ -59,6 +61,8 @@ export interface Customer {
     city?: string;
     province?: string;
     isActive?: number | boolean;
+    isVAT?: number | boolean | null;
+    isEWT?: number | boolean | null;
     created_at?: string;
     updated_by?: number | null;
     updated_at?: string | null;

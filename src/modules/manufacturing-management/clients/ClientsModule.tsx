@@ -17,7 +17,7 @@ import ClientFormModal from "./components/ClientFormModal";
 
 type ClientModalMode = "create" | "view" | "edit";
 
-export default function ClientsModule() {
+export default function ClientsModule({ showTaxFlags = false }: { showTaxFlags?: boolean }) {
     const [modalMode, setModalMode] = useState<ClientModalMode>("create");
     const {
         customers,
@@ -61,7 +61,7 @@ export default function ClientsModule() {
         loadingBomSettings,
         bomSettingsError,
         updateProductVersionOverride
-    } = useClients();
+    } = useClients(showTaxFlags);
 
     const handleCreate = () => {
         setModalMode("create");
@@ -251,6 +251,7 @@ export default function ClientsModule() {
                 editingCustomer={editingCustomer}
                 formData={formData}
                 setFormData={setFormData}
+                showTaxFlags={showTaxFlags}
                 storeTypes={storeTypes}
                 setStoreTypes={setStoreTypes}
                 priceTypes={priceTypes}
