@@ -42,6 +42,15 @@ async function handleApiResponse<T>(res: Response, fallbackMessage: string): Pro
     return res.json();
 }
 
+export async function fetchDeliveryBranches(): Promise<Branch[]> {
+    const res = await fetch(`${BASE_API_URL}/branches`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+    });
+    return handleApiResponse<Branch[]>(res, "Failed to load branches.");
+}
+
 export async function fetchDeliveryClearanceList(params: {
     page?: number;
     size?: number;

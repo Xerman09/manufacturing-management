@@ -12,6 +12,7 @@ import {
 } from "../types";
 import {
     fetchDeliveryClearanceList,
+    fetchDeliveryBranches,
     submitDeliveryClearance,
 } from "../services/deliveries-api";
 import { toast } from "sonner";
@@ -80,6 +81,28 @@ export function useDeliveries() {
     const [selectedRecordForClearance, setSelectedRecordForClearance] = useState<DeliveryClearanceRecord | null>(null);
     const [isClearanceModalOpen, setIsClearanceModalOpen] = useState<boolean>(false);
     const [submitting, setSubmitting] = useState<boolean>(false);
+
+    // 1. Fetch branches independently on mount for instant lookup (< 50ms)
+    useEffect(() => {
+        let ignore = false;
+        async function loadBranches() {
+            try {
+                const branchList = await fetchDeliveryBranches();
+                if (!ignore && Array.isArray(branchList) && branchList.length > 0) {
+                    setBranches(branchList);
+                }
+            } catch (err) {
+                if (!ignore) {
+                    const msg = err instanceof Error ? err.message : "Failed to load branches.";
+                    toast.error(msg);
+                }
+            }
+        }
+        loadBranches();
+        return () => {
+            ignore = true;
+        };
+    }, []);
 
     useEffect(() => {
         let ignore = false;

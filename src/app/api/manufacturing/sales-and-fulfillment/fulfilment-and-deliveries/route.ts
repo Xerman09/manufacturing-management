@@ -180,14 +180,15 @@ export async function GET(req: NextRequest) {
         const branches: DirectusBranch[] = branchRes.ok ? (await branchRes.json()).data || [] : [];
         const branchMap = new Map<number, DirectusBranch>(branches.map((b) => [Number(b.id), b]));
 
-        // 2a. Fetch dispatch plans eligible for clearance (Primary grouping entity)
+        // 2. Fetch candidate dispatch plans (lightweight list with only existing fields)
         const dispatchQs = new URLSearchParams();
         dispatchQs.set("limit", "-1");
         dispatchQs.set("sort", "-created_at,-dispatch_id");
+        dispatchQs.set("fields", "dispatch_id,dispatch_no,dispatch_date,driver_id,vehicle_id,branch_id,status,total_amount,remarks,created_at,is_delete");
         dispatchQs.set("filter[status][_in]", "Dispatched,Approved,Completed,Delivered,Audited");
 
         if (branchIdParam && branchIdParam !== "All") {
-            dispatchQs.set("filter[branch_id][_eq]", branchIdParam);
+            dispatchQs.set("filter[branch_id][_eq]", String(branchIdParam));
         }
 
         const dpRes = await fetch(
@@ -205,26 +206,185 @@ export async function GET(req: NextRequest) {
             return true;
         });
 
-        const dispatchIds = allDispatchPlans.map((dp) => Number(dp.dispatch_id)).filter(Boolean);
+        // 3. Fetch drivers and vehicles only for candidate plans
+        const candidateDriverIds = [...new Set(allDispatchPlans.map((dp) => Number(dp.driver_id)).filter(Boolean))];
+        const candidateVehicleIds = [...new Set(allDispatchPlans.map((dp) => Number(dp.vehicle_id)).filter(Boolean))];
 
-        // Fetch dispatch_plan_details (links dispatch_id -> sales_order_id)
-        const dispatchDetails: DirectusDispatchDetail[] = [];
-        if (dispatchIds.length > 0) {
-            const chunkSize = 100;
-            for (let i = 0; i < dispatchIds.length; i += chunkSize) {
-                const chunk = dispatchIds.slice(i, i + chunkSize);
-                const dpDetRes = await fetch(
-                    `${DIRECTUS_URL}/items/dispatch_plan_details?filter[dispatch_id][_in]=${chunk.join(",")}&limit=-1`,
+        const driverNameMap = new Map<number, string>();
+        const vehicleMap = new Map<number, string>();
+
+        await Promise.all([
+            candidateDriverIds.length > 0
+                ? fetch(
+                    `${DIRECTUS_URL}/items/user?filter[user_id][_in]=${candidateDriverIds.slice(0, 100).join(",")}&fields=user_id,user_fname,user_lname&limit=-1`,
                     { headers: directusHeaders, cache: "no-store" }
-                );
-                if (dpDetRes.ok) {
-                    const dData = (await dpDetRes.json()).data || [];
-                    dispatchDetails.push(...dData);
+                ).then(async (r) => {
+                    if (r.ok) {
+                        const uData = (await r.json()).data || [];
+                        for (const u of uData) {
+                            const name = [u.user_fname, u.user_lname].filter(Boolean).join(" ").trim();
+                            if (name) driverNameMap.set(Number(u.user_id), name);
+                        }
+                    }
+                }).catch(() => null)
+                : Promise.resolve(null),
+
+            candidateVehicleIds.length > 0
+                ? fetch(
+                    `${DIRECTUS_URL}/items/vehicles?filter[vehicle_id][_in]=${candidateVehicleIds.slice(0, 100).join(",")}&fields=vehicle_id,vehicle_plate,name&limit=-1`,
+                    { headers: directusHeaders, cache: "no-store" }
+                ).then(async (r) => {
+                    if (r.ok) {
+                        const vData = (await r.json()).data || [];
+                        for (const v of vData) {
+                            const vId = Number(v.vehicle_id);
+                            const is3PL =
+                                v.name?.toLowerCase().includes("third party") ||
+                                v.name?.toLowerCase().includes("3rd party") ||
+                                v.vehicle_plate?.toLowerCase().includes("3pl") ||
+                                vId === 245;
+                            const plate = v.vehicle_plate?.trim();
+                            const name = v.name?.trim();
+                            const label = plate
+                                ? (name && name !== plate ? `${plate} — ${name}` : plate)
+                                : (name || (is3PL ? "3PL — Third Party Logistics" : `Vehicle #${vId}`));
+                            vehicleMap.set(vId, label);
+                        }
+                    }
+                }).catch(() => null)
+                : Promise.resolve(null),
+        ]);
+
+        // 4. Search matching dispatch_ids if a search term was provided
+        const matchingDispatchIdsFromSearch = new Set<number>();
+        if (search) {
+            try {
+                const [soSearchRes, invSearchRes, custSearchRes] = await Promise.all([
+                    fetch(`${DIRECTUS_URL}/items/sales_order?filter[order_no][_icontains]=${encodeURIComponent(search)}&fields=order_id&limit=50`, { headers: directusHeaders, cache: "no-store" }),
+                    fetch(`${DIRECTUS_URL}/items/sales_invoice?filter[invoice_no][_icontains]=${encodeURIComponent(search)}&fields=order_id,invoice_id&limit=50`, { headers: directusHeaders, cache: "no-store" }),
+                    fetch(`${DIRECTUS_URL}/items/customer?filter[customer_name][_icontains]=${encodeURIComponent(search)}&fields=customer_code&limit=50`, { headers: directusHeaders, cache: "no-store" }),
+                ]);
+                const soIds: number[] = [];
+                if (soSearchRes.ok) {
+                    const data = (await soSearchRes.json()).data || [];
+                    soIds.push(...data.map((x: { order_id: number }) => Number(x.order_id)));
                 }
+                if (invSearchRes.ok) {
+                    const data = (await invSearchRes.json()).data || [];
+                    for (const i of data) {
+                        if (i.order_id && !isNaN(Number(i.order_id))) soIds.push(Number(i.order_id));
+                    }
+                }
+                if (custSearchRes.ok) {
+                    const custCodes = ((await custSearchRes.json()).data || []).map((x: { customer_code: string }) => x.customer_code).filter(Boolean);
+                    if (custCodes.length > 0) {
+                        const custSoRes = await fetch(`${DIRECTUS_URL}/items/sales_order?filter[customer_code][_in]=${custCodes.map(encodeURIComponent).join(",")}&fields=order_id&limit=50`, { headers: directusHeaders, cache: "no-store" });
+                        if (custSoRes.ok) {
+                            const cSoData = (await custSoRes.json()).data || [];
+                            soIds.push(...cSoData.map((x: { order_id: number }) => Number(x.order_id)));
+                        }
+                    }
+                }
+                const distinctSearchOrderIds = [...new Set(soIds)].filter(Boolean);
+                if (distinctSearchOrderIds.length > 0) {
+                    const dpdRes = await fetch(`${DIRECTUS_URL}/items/dispatch_plan_details?filter[sales_order_id][_in]=${distinctSearchOrderIds.slice(0, 100).join(",")}&fields=dispatch_id&limit=-1`, { headers: directusHeaders, cache: "no-store" });
+                    if (dpdRes.ok) {
+                        const dpdData = (await dpdRes.json()).data || [];
+                        for (const d of dpdData) {
+                            if (d.dispatch_id) matchingDispatchIdsFromSearch.add(Number(d.dispatch_id));
+                        }
+                    }
+                }
+            } catch (sErr) {
+                console.warn("[fulfilment-and-deliveries search error]", sErr);
             }
         }
 
+        // 5. Filter candidate plans by search and status
+        const filteredPlans = allDispatchPlans.filter((dp) => {
+            const dpId = Number(dp.dispatch_id);
+            const bName = (branchMap.get(Number(dp.branch_id))?.branch_name || "").toLowerCase();
+            const dName = (driverNameMap.get(Number(dp.driver_id)) || "").toLowerCase();
+            const vName = (vehicleMap.get(Number(dp.vehicle_id)) || "").toLowerCase();
+            const dNo = (dp.dispatch_no || "").toLowerCase();
+
+            const matchesSearch =
+                !search ||
+                dNo.includes(search) ||
+                bName.includes(search) ||
+                dName.includes(search) ||
+                vName.includes(search) ||
+                matchingDispatchIdsFromSearch.has(dpId);
+
+            if (!matchesSearch) return false;
+
+            if (statusFilter === "All") return true;
+            const st = (dp.status || "").toLowerCase();
+            const sFilter = statusFilter.toLowerCase();
+            if (sFilter === "completed" || sFilter === "delivered" || sFilter === "fulfilled") {
+                return st === "completed" || st === "delivered";
+            }
+            if (sFilter === "pending") {
+                return st === "dispatched" || st === "approved";
+            }
+            return st === sFilter;
+        });
+
+        // 6. Compute lightweight summary metrics
+        const totalDispatched = allDispatchPlans.length;
+        const pendingClearance = allDispatchPlans.filter(
+            (dp) => dp.status === "Dispatched" || dp.status === "Approved"
+        ).length;
+        const fulfilledCount = allDispatchPlans.filter(
+            (dp) => dp.status === "Completed" || dp.status === "Delivered" || dp.status === "Audited"
+        ).length;
+
+        let concernsAndReturnsCount = 0;
+        try {
+            const [ustCountRes, srCountRes] = await Promise.all([
+                fetch(`${DIRECTUS_URL}/items/unfulfilled_sales_transaction?aggregate[count]=*&limit=1`, { headers: directusHeaders, cache: "no-store" }),
+                fetch(`${DIRECTUS_URL}/items/sales_return?filter[status][_in]=Posted,Completed,Approved&aggregate[count]=*&limit=1`, { headers: directusHeaders, cache: "no-store" }),
+            ]);
+            const ustCount = ustCountRes.ok ? Number((await ustCountRes.json()).data?.[0]?.count || 0) : 0;
+            const srCount = srCountRes.ok ? Number((await srCountRes.json()).data?.[0]?.count || 0) : 0;
+            concernsAndReturnsCount = Math.min(fulfilledCount, ustCount + srCount);
+        } catch {
+            concernsAndReturnsCount = 0;
+        }
+
+        // 7. Paginate candidate plans BEFORE enriching details
+        const totalElements = filteredPlans.length;
+        const totalPages = Math.ceil(totalElements / size) || 1;
+        const paginatedPlans = filteredPlans.slice(page * size, (page + 1) * size);
+
+        if (paginatedPlans.length === 0) {
+            return NextResponse.json({
+                content: [],
+                totalPages,
+                totalElements,
+                page,
+                size,
+                metrics: {
+                    total_dispatched: totalDispatched,
+                    pending_clearance: pendingClearance,
+                    fulfilled_count: fulfilledCount,
+                    concerns_and_returns_count: concernsAndReturnsCount,
+                },
+                branches,
+            });
+        }
+
+        // 8. Fetch details ONLY for the paginated plans
+        const pageDispatchIds = paginatedPlans.map((dp) => Number(dp.dispatch_id)).filter(Boolean);
+
+        const dpDetRes = await fetch(
+            `${DIRECTUS_URL}/items/dispatch_plan_details?filter[dispatch_id][_in]=${pageDispatchIds.join(",")}&limit=-1&fields=detail_id,dispatch_id,sales_order_id`,
+            { headers: directusHeaders, cache: "no-store" }
+        );
+        const dispatchDetails: DirectusDispatchDetail[] = dpDetRes.ok ? (await dpDetRes.json()).data || [] : [];
+
         const dpSoMap = new Map<number, number[]>();
+        const dispatchNoByOrderId = new Map<number, string>();
         for (const dd of dispatchDetails) {
             const dpId = Number(dd.dispatch_id);
             const soId = Number(dd.sales_order_id);
@@ -232,401 +392,79 @@ export async function GET(req: NextRequest) {
                 const list = dpSoMap.get(dpId) || [];
                 list.push(soId);
                 dpSoMap.set(dpId, list);
-            }
-        }
-
-        // Fetch drivers and vehicles for dispatch plan display
-        const driverIds = [...new Set(allDispatchPlans.map((dp) => Number(dp.driver_id)).filter(Boolean))];
-        const vehicleIds = [...new Set(allDispatchPlans.map((dp) => Number(dp.vehicle_id)).filter(Boolean))];
-
-        const driverNameMap = new Map<number, string>();
-        if (driverIds.length > 0) {
-            try {
-                const uRes = await fetch(
-                    `${DIRECTUS_URL}/items/user?filter[user_id][_in]=${driverIds.join(",")}&fields=user_id,user_fname,user_lname,first_name,last_name&limit=-1`,
-                    { headers: directusHeaders, cache: "no-store" }
-                );
-                if (uRes.ok) {
-                    const uData = (await uRes.json()).data || [];
-                    for (const u of uData) {
-                        const name = [u.user_fname || u.first_name, u.user_lname || u.last_name].filter(Boolean).join(" ").trim();
-                        if (name) driverNameMap.set(Number(u.user_id), name);
-                    }
-                }
-            } catch (e) {
-                console.warn("[fulfilment-and-deliveries GET] Error fetching driver users:", e);
-            }
-        }
-
-        const vehicleMap = new Map<number, string>();
-        if (vehicleIds.length > 0) {
-            try {
-                const vRes = await fetch(
-                    `${DIRECTUS_URL}/items/vehicles?filter[vehicle_id][_in]=${vehicleIds.join(",")}&fields=vehicle_id,vehicle_plate,name&limit=-1`,
-                    { headers: directusHeaders, cache: "no-store" }
-                );
-                if (vRes.ok) {
-                    const vData = (await vRes.json()).data || [];
-                    for (const v of vData) {
-                        const vId = Number(v.vehicle_id);
-                        const is3PL =
-                            v.name?.toLowerCase().includes("third party") ||
-                            v.name?.toLowerCase().includes("3rd party") ||
-                            v.vehicle_plate?.toLowerCase().includes("3pl") ||
-                            vId === 245;
-                        const plate = v.vehicle_plate?.trim();
-                        const name = v.name?.trim();
-                        const label = plate
-                            ? (name && name !== plate ? `${plate} — ${name}` : plate)
-                            : (name || (is3PL ? "3PL — Third Party Logistics" : `Vehicle #${vId}`));
-                        vehicleMap.set(vId, label);
-                    }
-                }
-            } catch (e) {
-                console.warn("[fulfilment-and-deliveries GET] Error fetching vehicles:", e);
-            }
-        }
-
-        // 2b. Fetch consolidator trips eligible for clearance (legacy fallback)
-        const consolidatorQs = new URLSearchParams();
-        consolidatorQs.set("limit", "-1");
-        consolidatorQs.set("sort", "-created_at,-id");
-        consolidatorQs.set("filter[is_delete][_eq]", "0");
-        consolidatorQs.set("filter[status][_in]", "Dispatched,Completed,Delivered,Approved,Audited");
-
-        if (branchIdParam && branchIdParam !== "All") {
-            consolidatorQs.set("filter[branch_id][_eq]", branchIdParam);
-        }
-
-        const conRes = await fetch(
-            `${DIRECTUS_URL}/items/consolidator?${consolidatorQs.toString()}`,
-            { headers: directusHeaders, cache: "no-store" }
-        );
-        const allConsolidators: DirectusConsolidator[] = conRes.ok ? (await conRes.json()).data || [] : [];
-        const consolidatorIds = allConsolidators.map((c) => Number(c.id)).filter(Boolean);
-
-        // 3. Fetch BOTH consolidator_details AND consolidator_invoices
-        const consolidatorDetails: DirectusConsolidatorDetail[] = [];
-        const consolidatorInvoices: DirectusConsolidatorInvoice[] = [];
-
-        if (consolidatorIds.length > 0) {
-            const chunkSize = 100;
-            for (let i = 0; i < consolidatorIds.length; i += chunkSize) {
-                const chunk = consolidatorIds.slice(i, i + chunkSize);
-                const [conDetRes, conInvRes] = await Promise.all([
-                    fetch(
-                        `${DIRECTUS_URL}/items/consolidator_details?filter[consolidator_id][_in]=${chunk.join(",")}&limit=-1`,
-                        { headers: directusHeaders, cache: "no-store" }
-                    ),
-                    fetch(
-                        `${DIRECTUS_URL}/items/consolidator_invoices?filter[consolidator_id][_in]=${chunk.join(",")}&limit=-1`,
-                        { headers: directusHeaders, cache: "no-store" }
-                    ),
-                ]);
-
-                if (conDetRes.ok) {
-                    const dData = (await conDetRes.json()).data || [];
-                    consolidatorDetails.push(...dData);
-                }
-                if (conInvRes.ok) {
-                    const iData = (await conInvRes.json()).data || [];
-                    consolidatorInvoices.push(...iData);
+                const plan = paginatedPlans.find((p) => Number(p.dispatch_id) === dpId);
+                if (plan?.dispatch_no) {
+                    dispatchNoByOrderId.set(soId, plan.dispatch_no);
                 }
             }
         }
 
-        // 4. Map consolidator -> sales_order_detail_ids and invoice_ids
-        const conSodMap = new Map<number, number[]>();
-        for (const cd of consolidatorDetails) {
-            const conId = Number(cd.consolidator_id);
-            const sodId = Number(cd.sales_order_detail_id);
-            if (sodId) {
-                const list = conSodMap.get(conId) || [];
-                list.push(sodId);
-                conSodMap.set(conId, list);
-            }
-        }
+        const targetOrderIds = [...new Set(dispatchDetails.map((dd) => Number(dd.sales_order_id)).filter(Boolean))];
 
-        const conInvMap = new Map<number, number[]>();
-        for (const ci of consolidatorInvoices) {
-            const conId = Number(ci.consolidator_id);
-            const invId = Number(ci.invoice_id);
-            if (invId) {
-                const list = conInvMap.get(conId) || [];
-                list.push(invId);
-                conInvMap.set(conId, list);
-            }
-        }
+        // 9. Fetch sales_order, sales_order_details, and sales_invoice strictly for targetOrderIds
+        const [soRes, sodRes] = await Promise.all([
+            targetOrderIds.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/sales_order?filter[order_id][_in]=${targetOrderIds.join(",")}&fields=*&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+            targetOrderIds.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/sales_order_details?filter[order_id][_in]=${targetOrderIds.join(",")}&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+        ]);
 
-        const allSodIds = [
-            ...new Set(consolidatorDetails.map((cd) => Number(cd.sales_order_detail_id)).filter(Boolean)),
-        ];
+        const salesOrders: DirectusSalesOrder[] = soRes && soRes.ok ? (await soRes.json()).data || [] : [];
+        const salesOrderDetails: DirectusSalesOrderDetail[] = sodRes && sodRes.ok ? (await sodRes.json()).data || [] : [];
 
-        // 5. Fetch sales_order_details matching allSodIds
-        const salesOrderDetails: DirectusSalesOrderDetail[] = [];
-        if (allSodIds.length > 0) {
-            const chunkSize = 100;
-            for (let i = 0; i < allSodIds.length; i += chunkSize) {
-                const chunk = allSodIds.slice(i, i + chunkSize);
-                const sodRes = await fetch(
-                    `${DIRECTUS_URL}/items/sales_order_details?filter[detail_id][_in]=${chunk.join(",")}&limit=-1`,
-                    { headers: directusHeaders, cache: "no-store" }
-                );
-                if (sodRes.ok) {
-                    const chunkData = (await sodRes.json()).data || [];
-                    salesOrderDetails.push(...chunkData);
-                }
-            }
-        }
-        const sodDetailMap = new Map<number, DirectusSalesOrderDetail>(
-            salesOrderDetails.map((s) => [Number(s.detail_id), s])
-        );
+        const candidateInvIds = [...new Set(salesOrders.map((s) => Number(s.invoice_id)).filter(Boolean))];
+        const candidateOrderNos = [...new Set(salesOrders.map((s) => s.order_no ? s.order_no.trim() : "").filter(Boolean))];
 
-        // Map consolidator_no by consolidator_id, order_id, invoice_id, and dispatch_no
-        const consolidatorNoById = new Map<number, string>(
-            allConsolidators.map((c) => [Number(c.id), c.consolidator_no || `CON-${c.id}`])
-        );
+        const [invByOrderRes, invByIdRes, invByNoRes, sidByOrderRes] = await Promise.all([
+            targetOrderIds.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/sales_invoice?filter[order_id][_in]=${targetOrderIds.join(",")}&fields=*&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+            candidateInvIds.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/sales_invoice?filter[invoice_id][_in]=${candidateInvIds.join(",")}&fields=*&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+            candidateOrderNos.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/sales_invoice?filter[order_id][_in]=${candidateOrderNos.map(encodeURIComponent).join(",")}&fields=*&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+            targetOrderIds.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/sales_invoice_details?filter[order_id][_in]=${targetOrderIds.join(",")}&fields=detail_id,order_id,invoice_no,product_id,quantity&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+        ]);
 
-        const orderIdToConsolidatorNoMap = new Map<number, string>();
-        for (const cd of consolidatorDetails) {
-            const conId = Number(cd.consolidator_id);
-            const sodId = Number(cd.sales_order_detail_id);
-            const cNo = consolidatorNoById.get(conId);
-            if (cNo && sodId) {
-                const sod = sodDetailMap.get(sodId);
-                if (sod?.order_id) {
-                    orderIdToConsolidatorNoMap.set(Number(sod.order_id), cNo);
-                }
-            }
-        }
+        const invByOrder = invByOrderRes && invByOrderRes.ok ? (await invByOrderRes.json()).data || [] : [];
+        const invById = invByIdRes && invByIdRes.ok ? (await invByIdRes.json()).data || [] : [];
+        const invByNo = invByNoRes && invByNoRes.ok ? (await invByNoRes.json()).data || [] : [];
+        const allInvoices: DirectusInvoice[] = [...invByOrder, ...invById, ...invByNo].filter((v, idx, arr) => arr.findIndex(x => (x.invoice_id || x.id) === (v.invoice_id || v.id)) === idx);
+        const rawSidList: Array<{ detail_id: number; order_id: string | number; invoice_no: number | string; product_id?: number; quantity?: number }> =
+            sidByOrderRes && sidByOrderRes.ok ? (await sidByOrderRes.json()).data || [] : [];
 
-        const invoiceIdToConsolidatorNoMap = new Map<number, string>();
-        for (const ci of consolidatorInvoices) {
-            const conId = Number(ci.consolidator_id);
-            const invId = Number(ci.invoice_id);
-            const cNo = consolidatorNoById.get(conId);
-            if (cNo && invId) {
-                invoiceIdToConsolidatorNoMap.set(Number(invId), cNo);
-            }
-        }
-
-        const dispatchNoToConsolidatorNoMap = new Map<string, string>();
-        const allDispatchNos = allDispatchPlans.map((dp) => dp.dispatch_no).filter(Boolean);
-        if (allDispatchNos.length > 0) {
-            try {
-                const cdRes = await fetch(
-                    `${DIRECTUS_URL}/items/consolidator_dispatches?filter[dispatch_no][_in]=${allDispatchNos.map(encodeURIComponent).join(",")}&limit=-1&fields=consolidator_id,dispatch_no`,
-                    { headers: directusHeaders, cache: "no-store" }
-                );
-                if (cdRes.ok) {
-                    const cdData: Array<{ consolidator_id: number; dispatch_no: string }> = (await cdRes.json()).data || [];
-                    for (const item of cdData) {
-                        const cNo = consolidatorNoById.get(Number(item.consolidator_id));
-                        if (cNo && item.dispatch_no) {
-                            dispatchNoToConsolidatorNoMap.set(item.dispatch_no.trim(), cNo);
-                        }
-                    }
-                }
-            } catch (e) {
-                console.warn("[fulfilment-and-deliveries GET] Error fetching consolidator_dispatches:", e);
-            }
-        }
-
-        // Collect all distinct order_ids & invoice_ids from BOTH dispatch_plan_details and consolidator
-        const dpOrderIds = dispatchDetails.map((dd) => Number(dd.sales_order_id)).filter(Boolean);
-        const sodOrderIds = salesOrderDetails.map((s) => Number(s.order_id)).filter(Boolean);
-        const rawInvIds = consolidatorInvoices.map((ci) => Number(ci.invoice_id)).filter(Boolean);
-
-        const candidateOrderIds = [...new Set([...dpOrderIds, ...sodOrderIds, ...rawInvIds])];
-
-        // 6. Fetch sales_order for all candidate order IDs
-        const salesOrders: DirectusSalesOrder[] = [];
-        if (candidateOrderIds.length > 0) {
-            const chunkSize = 100;
-            for (let i = 0; i < candidateOrderIds.length; i += chunkSize) {
-                const chunk = candidateOrderIds.slice(i, i + chunkSize);
-                const [soRes, sodByOrderRes] = await Promise.all([
-                    fetch(
-                        `${DIRECTUS_URL}/items/sales_order?filter[order_id][_in]=${chunk.join(",")}&fields=*&limit=-1`,
-                        { headers: directusHeaders, cache: "no-store" }
-                    ),
-                    fetch(
-                        `${DIRECTUS_URL}/items/sales_order_details?filter[order_id][_in]=${chunk.join(",")}&limit=-1`,
-                        { headers: directusHeaders, cache: "no-store" }
-                    ),
-                ]);
-                if (soRes.ok) {
-                    const chunkData = (await soRes.json()).data || [];
-                    salesOrders.push(...chunkData);
-                }
-                if (sodByOrderRes.ok) {
-                    const chunkData = (await sodByOrderRes.json()).data || [];
-                    for (const item of chunkData) {
-                        const dId = Number(item.detail_id);
-                        if (dId && !sodDetailMap.has(dId)) {
-                            salesOrderDetails.push(item);
-                            sodDetailMap.set(dId, item);
-                        }
-                    }
-                }
-            }
-        }
-        const salesOrderMap = new Map<number, DirectusSalesOrder>(
-            salesOrders.map((so) => [Number(so.order_id), so])
-        );
-
-        const soOrderIds = salesOrders.map((s) => Number(s.order_id)).filter(Boolean);
-        const soOrderNos = salesOrders.map((s) => (s.order_no ? s.order_no.toString().trim() : "")).filter(Boolean);
-        const allNumericInvOrOrderIds = [...new Set([...sodOrderIds, ...rawInvIds, ...soOrderIds])];
-        const allStringOrderIdentifiers = [...new Set([...soOrderNos, ...allNumericInvOrOrderIds.map(String)])];
-
-        // 7. Fetch sales_invoice matching invoice_id, order_id (numeric & string order_no), invoice_no, and sales_invoice_details
-        const allInvoices: DirectusInvoice[] = [];
-        const candidateNumericIds = [...new Set([...allNumericInvOrOrderIds])];
-        const candidateStringKeys = [...new Set([...allStringOrderIdentifiers])];
-
-        const chunkSize = 100;
-        const fetchPromises: Promise<void>[] = [];
-        const rawSidList: Array<{ detail_id: number; order_id: string | number; invoice_no: number | string; product_id?: number; quantity?: number }> = [];
-
-        // 7a. Unconditional fetch of all invoices (no status filter so NULL transaction_status is never dropped)
-        fetchPromises.push(
-            fetch(
-                `${DIRECTUS_URL}/items/sales_invoice?limit=-1&sort=-invoice_id&fields=*`,
-                { headers: directusHeaders, cache: "no-store" }
-            )
-                .then((res) => (res.ok ? res.json() : { data: [] }))
-                .then((json) => {
-                    if (json.data && Array.isArray(json.data)) {
-                        allInvoices.push(...json.data);
-                    }
-                })
-                .catch((err) => console.warn("[fulfilment-and-deliveries API] Error fetching all invoices:", err))
-        );
-
-        // 7b. Fetch sales_invoice_details to bridge order_id -> invoice_id (stored in detail.invoice_no)
-        for (let i = 0; i < candidateNumericIds.length; i += chunkSize) {
-            const chunk = candidateNumericIds.slice(i, i + chunkSize);
-            fetchPromises.push(
-                fetch(
-                    `${DIRECTUS_URL}/items/sales_invoice_details?filter[order_id][_in]=${chunk.join(",")}&fields=detail_id,order_id,invoice_no,product_id,quantity&limit=-1`,
-                    { headers: directusHeaders, cache: "no-store" }
-                )
-                    .then((res) => (res.ok ? res.json() : { data: [] }))
-                    .then((json) => {
-                        if (json.data && Array.isArray(json.data)) {
-                            rawSidList.push(...json.data);
-                        }
-                    })
-                    .catch((err) => console.warn("[fulfilment-and-deliveries API] Error fetching sales_invoice_details:", err))
-            );
-            fetchPromises.push(
-                fetch(
-                    `${DIRECTUS_URL}/items/sales_invoice?filter[invoice_id][_in]=${chunk.join(",")}&fields=*&limit=-1`,
-                    { headers: directusHeaders, cache: "no-store" }
-                )
-                    .then((res) => (res.ok ? res.json() : { data: [] }))
-                    .then((json) => {
-                        if (json.data && Array.isArray(json.data)) {
-                            allInvoices.push(...json.data);
-                        }
-                    })
-                    .catch((err) => console.warn("[fulfilment-and-deliveries API] Error fetching invoices by invoice_id:", err))
-            );
-            fetchPromises.push(
-                fetch(
-                    `${DIRECTUS_URL}/items/sales_invoice?filter[order_id][_in]=${chunk.join(",")}&fields=*&limit=-1`,
-                    { headers: directusHeaders, cache: "no-store" }
-                )
-                    .then((res) => (res.ok ? res.json() : { data: [] }))
-                    .then((json) => {
-                        if (json.data && Array.isArray(json.data)) {
-                            allInvoices.push(...json.data);
-                        }
-                    })
-                    .catch((err) => console.warn("[fulfilment-and-deliveries API] Error fetching invoices by order_id:", err))
-            );
-        }
-
-        // 7c. Fetch by string order_no and invoice_no with fields=*
-        for (let i = 0; i < candidateStringKeys.length; i += chunkSize) {
-            const chunk = candidateStringKeys.slice(i, i + chunkSize);
-            fetchPromises.push(
-                fetch(
-                    `${DIRECTUS_URL}/items/sales_invoice_details?filter[order_id][_in]=${chunk.map((x) => encodeURIComponent(x)).join(",")}&fields=detail_id,order_id,invoice_no,product_id,quantity&limit=-1`,
-                    { headers: directusHeaders, cache: "no-store" }
-                )
-                    .then((res) => (res.ok ? res.json() : { data: [] }))
-                    .then((json) => {
-                        if (json.data && Array.isArray(json.data)) {
-                            rawSidList.push(...json.data);
-                        }
-                    })
-                    .catch((err) => console.warn("[fulfilment-and-deliveries API] Error fetching sales_invoice_details by string order_id:", err))
-            );
-            fetchPromises.push(
-                fetch(
-                    `${DIRECTUS_URL}/items/sales_invoice?filter[order_id][_in]=${chunk.map((x) => encodeURIComponent(x)).join(",")}&fields=*&limit=-1`,
-                    { headers: directusHeaders, cache: "no-store" }
-                )
-                    .then((res) => (res.ok ? res.json() : { data: [] }))
-                    .then((json) => {
-                        if (json.data && Array.isArray(json.data)) {
-                            allInvoices.push(...json.data);
-                        }
-                    })
-                    .catch((err) => console.warn("[fulfilment-and-deliveries API] Error fetching invoices by order_no:", err))
-            );
-            fetchPromises.push(
-                fetch(
-                    `${DIRECTUS_URL}/items/sales_invoice?filter[invoice_no][_in]=${chunk.map((x) => encodeURIComponent(x)).join(",")}&fields=*&limit=-1`,
-                    { headers: directusHeaders, cache: "no-store" }
-                )
-                    .then((res) => (res.ok ? res.json() : { data: [] }))
-                    .then((json) => {
-                        if (json.data && Array.isArray(json.data)) {
-                            allInvoices.push(...json.data);
-                        }
-                    })
-                    .catch((err) => console.warn("[fulfilment-and-deliveries API] Error fetching invoices by invoice_no:", err))
-            );
-        }
-
-        await Promise.all(fetchPromises);
-
-        // Map order_id -> invoice_id from sales_invoice_details
-        const orderIdToInvoiceIdMap = new Map<string, number>();
-        const additionalInvoiceIdsToFetch: number[] = [];
-        for (const sid of rawSidList) {
-            const ordStr = sid.order_id ? String(sid.order_id).trim() : "";
-            const invId = Number(sid.invoice_no);
-            if (ordStr && invId) {
-                orderIdToInvoiceIdMap.set(ordStr.toLowerCase(), invId);
-                const pNum = Number(ordStr);
-                if (!isNaN(pNum)) orderIdToInvoiceIdMap.set(String(pNum), invId);
-                additionalInvoiceIdsToFetch.push(invId);
-            }
-        }
-
-        // Fetch any missing invoices referenced in sales_invoice_details
+        // Check if any invoice_ids referenced in sales_invoice_details are missing
         const existingInvIds = new Set(allInvoices.map((i) => Number(i.invoice_id || i.id)));
-        const missingInvIds = [...new Set(additionalInvoiceIdsToFetch)].filter((id) => !existingInvIds.has(id));
-        if (missingInvIds.length > 0) {
+        const missingInvIds: number[] = [];
+        for (const sid of rawSidList) {
+            const invId = Number(sid.invoice_no);
+            if (invId && !existingInvIds.has(invId)) {
+                missingInvIds.push(invId);
+            }
+        }
+        const distinctMissingInvIds = [...new Set(missingInvIds)].filter(Boolean);
+        if (distinctMissingInvIds.length > 0) {
             try {
                 const missingRes = await fetch(
-                    `${DIRECTUS_URL}/items/sales_invoice?filter[invoice_id][_in]=${missingInvIds.slice(0, 200).join(",")}&fields=*&limit=-1`,
+                    `${DIRECTUS_URL}/items/sales_invoice?filter[invoice_id][_in]=${distinctMissingInvIds.join(",")}&fields=*&limit=-1`,
                     { headers: directusHeaders, cache: "no-store" }
                 );
                 if (missingRes.ok) {
                     const mData = (await missingRes.json()).data || [];
                     allInvoices.push(...mData);
                 }
-            } catch (mErr) {
-                console.warn("[fulfilment-and-deliveries API] Error fetching missing invoices by SID:", mErr);
+            } catch (e) {
+                console.warn("[fulfilment-and-deliveries] Error fetching missing invoices:", e);
             }
         }
 
-        // Deduplicate and index invoices with relational unwrap
+        // Index invoices
         const invoiceMapById = new Map<number, DirectusInvoice>();
         const invoiceMapByOrderKey = new Map<string, DirectusInvoice>();
         const invoicesByOrderKey = new Map<string, DirectusInvoice[]>();
@@ -646,11 +484,8 @@ export async function GET(req: NextRequest) {
 
         for (const rawInv of allInvoices) {
             const invId = Number(rawInv.invoice_id || rawInv.id);
-            if (invId) {
-                invoiceMapById.set(invId, rawInv);
-            }
+            if (invId) invoiceMapById.set(invId, rawInv);
 
-            // Extract order_id whether primitive or expanded relational object
             let ordIdStr: string | null = null;
             let ordIdNum: number | null = null;
             let ordNoFromRel: string | null = null;
@@ -682,7 +517,6 @@ export async function GET(req: NextRequest) {
                 addInvoiceToOrder(ordNoFromRel, rawInv);
             }
 
-            // Extract invoice_no
             if (rawInv.invoice_no && typeof rawInv.invoice_no === "string") {
                 const invNoLower = rawInv.invoice_no.trim().toLowerCase();
                 if (invNoLower.length > 0) {
@@ -691,75 +525,28 @@ export async function GET(req: NextRequest) {
             }
         }
 
-        // Cross-index invoices linked through sales_invoice_details
-        for (const [orderKey, invId] of orderIdToInvoiceIdMap.entries()) {
-            const targetInv = invoiceMapById.get(invId);
-            if (targetInv) {
-                addInvoiceToOrder(orderKey, targetInv);
-                if (!invoiceMapByOrderKey.has(orderKey)) {
-                    invoiceMapByOrderKey.set(orderKey, targetInv);
+        // Map orderIdToInvoiceIdMap
+        const orderIdToInvoiceIdMap = new Map<string, number>();
+        for (const sid of rawSidList) {
+            const ordStr = sid.order_id ? String(sid.order_id).trim() : "";
+            const invId = Number(sid.invoice_no);
+            if (ordStr && invId) {
+                orderIdToInvoiceIdMap.set(ordStr.toLowerCase(), invId);
+                const pNum = Number(ordStr);
+                if (!isNaN(pNum)) orderIdToInvoiceIdMap.set(String(pNum), invId);
+                const targetInv = invoiceMapById.get(invId);
+                if (targetInv) {
+                    addInvoiceToOrder(ordStr, targetInv);
+                    if (!invoiceMapByOrderKey.has(ordStr)) invoiceMapByOrderKey.set(ordStr, targetInv);
                 }
             }
         }
 
-        // 7d. Fetch sales_invoice_details by invoice_no for all discovered invoices
-        const knownInvIds = Array.from(invoiceMapById.keys());
-        if (knownInvIds.length > 0) {
-            for (let i = 0; i < knownInvIds.length; i += chunkSize) {
-                const chunk = knownInvIds.slice(i, i + chunkSize);
-                try {
-                    const sidByInvRes = await fetch(
-                        `${DIRECTUS_URL}/items/sales_invoice_details?filter[invoice_no][_in]=${chunk.join(",")}&fields=detail_id,order_id,invoice_no,product_id,quantity&limit=-1`,
-                        { headers: directusHeaders, cache: "no-store" }
-                    );
-                    if (sidByInvRes.ok) {
-                        const sData = (await sidByInvRes.json()).data || [];
-                        rawSidList.push(...sData);
-                    }
-                } catch (sidErr) {
-                    console.warn("[fulfilment-and-deliveries API] Error fetching sales_invoice_details by invoice_no:", sidErr);
-                }
-            }
-        }
-
-        // 7e. Fetch sales_invoice_batches for batch/lot traceability
-        interface DirectusInvoiceBatch {
-            id: number;
-            invoice_id: number;
-            invoice_detail_id: number;
-            product_id: number;
-            inventory_lot_id: number;
-            lot_id?: number | null;
-            batch_no?: string | null;
-            quantity: number | string;
-        }
-        const invoiceBatches: DirectusInvoiceBatch[] = [];
-        if (knownInvIds.length > 0) {
-            for (let i = 0; i < knownInvIds.length; i += chunkSize) {
-                const chunk = knownInvIds.slice(i, i + chunkSize);
-                try {
-                    const bRes = await fetch(
-                        `${DIRECTUS_URL}/items/sales_invoice_batches?filter[invoice_id][_in]=${chunk.join(",")}&fields=id,invoice_id,invoice_detail_id,product_id,inventory_lot_id,lot_id,batch_no,quantity&limit=-1`,
-                        { headers: directusHeaders, cache: "no-store" }
-                    );
-                    if (bRes.ok) {
-                        const bData = (await bRes.json()).data || [];
-                        invoiceBatches.push(...bData);
-                    }
-                } catch (bErr) {
-                    console.warn("[fulfilment-and-deliveries API] Error fetching sales_invoice_batches:", bErr);
-                }
-            }
-        }
-
-        // Index invoiced quantities by (invoice_id:product_id) and (order_id:product_id)
-        // Deduplicate rawSidList by detail_id to prevent double-counting across order_id and invoice_no queries
+        // Index invoiced quantities in invoiceProductQtyMap
         const uniqueSidMap = new Map<number | string, (typeof rawSidList)[0]>();
         for (const sid of rawSidList) {
             const sidKey = sid.detail_id ? Number(sid.detail_id) : `${sid.order_id}:${sid.invoice_no}:${sid.product_id}`;
-            if (!uniqueSidMap.has(sidKey)) {
-                uniqueSidMap.set(sidKey, sid);
-            }
+            if (!uniqueSidMap.has(sidKey)) uniqueSidMap.set(sidKey, sid);
         }
 
         const invoiceProductQtyMap = new Map<string, number>();
@@ -787,7 +574,10 @@ export async function GET(req: NextRequest) {
             }
         }
 
-        // Bridge string order_no and numeric order_id across invoiceProductQtyMap
+        const salesOrderMap = new Map<number, DirectusSalesOrder>(
+            salesOrders.map((so) => [Number(so.order_id), so])
+        );
+
         for (const so of salesOrderMap.values()) {
             const numId = Number(so.order_id);
             const strNo = String(so.order_no || "").toLowerCase().trim();
@@ -805,60 +595,15 @@ export async function GET(req: NextRequest) {
             }
         }
 
-        // Index invoice batches by (invoice_id:product_id)
-        // Deduplicate invoice batches by id
-        const uniqueBatchesMap = new Map<number, DirectusInvoiceBatch>();
-        for (const b of invoiceBatches) {
-            const bId = Number(b.id);
-            if (bId && !uniqueBatchesMap.has(bId)) {
-                uniqueBatchesMap.set(bId, b);
-            }
-        }
+        // 10. Fetch sub-entities strictly for discovered orders and invoices
+        const pageInvoiceIds = Array.from(invoiceMapById.keys());
+        const pageSodDetailIds = salesOrderDetails.map((s) => Number(s.detail_id)).filter(Boolean);
+        const pageProductIds = [...new Set(salesOrderDetails.map((s) => Number(s.product_id)).filter(Boolean))];
+        const pageCustomerCodes = [...new Set([
+            ...allInvoices.map((i) => i.customer_code).filter(Boolean),
+            ...salesOrders.map((s) => s.customer_code).filter(Boolean),
+        ])] as string[];
 
-        const invoiceBatchesMap = new Map<string, DirectusInvoiceBatch[]>();
-        for (const b of uniqueBatchesMap.values()) {
-            const key = `${b.invoice_id}:${b.product_id}`;
-            if (!invoiceBatchesMap.has(key)) {
-                invoiceBatchesMap.set(key, []);
-            }
-            invoiceBatchesMap.get(key)!.push(b);
-        }
-
-        // console.log("[fulfilment-and-deliveries API] 🧾 Fetched Invoices Summary:", {
-        //     total_invoices_fetched: allInvoices.length,
-        //     indexed_by_id_count: invoiceMapById.size,
-        //     indexed_by_order_key_count: invoiceMapByOrderKey.size,
-        //     sid_mapped_count: orderIdToInvoiceIdMap.size,
-        //     sample_invoices: allInvoices.slice(0, 5).map((i) => ({
-        //         invoice_id: i.invoice_id,
-        //         order_id: i.order_id,
-        //         invoice_no: i.invoice_no,
-        //         invoice_date: i.invoice_date,
-        //     })),
-        // });
-
-        // 8. Fetch customer names
-        const customerCodes = [
-            ...new Set([
-                ...allInvoices.map((i) => i.customer_code).filter(Boolean),
-                ...salesOrders.map((s) => s.customer_code).filter(Boolean),
-            ]),
-        ];
-        const customerCodeMap = new Map<string, string>();
-        if (customerCodes.length > 0) {
-            const custRes = await fetch(
-                `${DIRECTUS_URL}/items/customer?filter[customer_code][_in]=${customerCodes.slice(0, 300).join(",")}&fields=id,customer_name,customer_code&limit=-1`,
-                { headers: directusHeaders, cache: "no-store" }
-            );
-            if (custRes.ok) {
-                const custList: DirectusCustomer[] = (await custRes.json()).data || [];
-                for (const c of custList) {
-                    if (c.customer_code) customerCodeMap.set(c.customer_code, c.customer_name);
-                }
-            }
-        }
-
-        // 8.5 Fetch salesman metadata
         const extractSalesmanId = (sm: unknown): number | null => {
             if (typeof sm === "object" && sm !== null) {
                 const rec = sm as Record<string, unknown>;
@@ -867,311 +612,29 @@ export async function GET(req: NextRequest) {
             return Number(sm) || null;
         };
 
-        const salesmanIds = [
-            ...new Set([
-                ...allInvoices.map((i) => extractSalesmanId(i.salesman_id)).filter((id): id is number => Boolean(id)),
-                ...salesOrders.map((s) => extractSalesmanId(s.salesman_id)).filter((id): id is number => Boolean(id)),
-            ]),
-        ];
-        const salesmanMap = new Map<number, DirectusSalesman>();
-        if (salesmanIds.length > 0) {
-            const smRes = await fetch(
-                `${DIRECTUS_URL}/items/salesman?filter[id][_in]=${salesmanIds.slice(0, 300).join(",")}&fields=id,salesman_code,salesman_name&limit=-1`,
-                { headers: directusHeaders, cache: "no-store" }
-            );
-            if (smRes.ok) {
-                const smList: DirectusSalesman[] = (await smRes.json()).data || [];
-                for (const sm of smList) {
-                    const smId = Number(sm.id);
-                    if (smId) salesmanMap.set(smId, sm);
-                }
-            }
+        const pageSalesmanIds = [...new Set([
+            ...allInvoices.map((i) => extractSalesmanId(i.salesman_id)).filter((id): id is number => Boolean(id)),
+            ...salesOrders.map((s) => extractSalesmanId(s.salesman_id)).filter((id): id is number => Boolean(id)),
+        ])];
+
+        const candidateReturnKeys = [...new Set([
+            ...allInvoices.map((i) => i.invoice_no?.trim()).filter(Boolean),
+            ...allInvoices.map((i) => String(i.invoice_id || i.id)),
+            ...salesOrders.map((s) => s.order_no?.trim()).filter(Boolean),
+            ...salesOrders.map((s) => String(s.order_id)),
+        ])] as string[];
+
+        interface DirectusInvoiceBatch {
+            id: number;
+            invoice_id: number;
+            invoice_detail_id: number;
+            product_id: number;
+            inventory_lot_id: number;
+            lot_id?: number | null;
+            batch_no?: string | null;
+            quantity: number | string;
         }
 
-        // 9. Fetch product metadata
-        const allProductIds = [
-            ...new Set([
-                ...consolidatorDetails.map((d) => Number(d.product_id)),
-                ...salesOrderDetails.map((d) => Number(d.product_id)),
-            ]),
-        ].filter(Boolean);
-
-        const products: DirectusProduct[] = [];
-        if (allProductIds.length > 0) {
-            const chunkSize = 100;
-            for (let i = 0; i < allProductIds.length; i += chunkSize) {
-                const chunk = allProductIds.slice(i, i + chunkSize);
-                const prodRes = await fetch(
-                    `${DIRECTUS_URL}/items/products?filter[product_id][_in]=${chunk.join(",")}&fields=product_id,product_name,product_code,description,short_description,product_type,product_type.id,product_type.name,unit_of_measurement.unit_shortcut&limit=-1`,
-                    { headers: directusHeaders, cache: "no-store" }
-                );
-                if (prodRes.ok) {
-                    const chunkData = (await prodRes.json()).data || [];
-                    products.push(...chunkData);
-                }
-            }
-        }
-        const productMap = new Map<number, DirectusProduct>();
-        for (const p of products) {
-            const pid = Number(p.product_id || (p as { id?: number }).id);
-            if (pid) productMap.set(pid, p);
-        }
-
-        // Fetch product types for name lookup
-        const productTypeMap = new Map<number, string>();
-        try {
-            const ptRes = await fetch(`${DIRECTUS_URL}/items/product_type?limit=-1&fields=id,name`, {
-                headers: directusHeaders,
-                cache: "no-store",
-            });
-            if (ptRes.ok) {
-                const ptData = (await ptRes.json()).data || [];
-                for (const pt of ptData) {
-                    if (pt.id) productTypeMap.set(Number(pt.id), pt.name);
-                }
-            }
-        } catch (ptErr) {
-            console.warn("[fulfilment-and-deliveries API] Error fetching product types:", ptErr);
-        }
-
-        // 10. Fetch linked sales returns and return line items
-        const allInvoiceNos = Array.from(invoiceMapById.values())
-            .map((inv) => (inv.invoice_no ? inv.invoice_no.toString().trim() : ""))
-            .filter(Boolean);
-        const allInvoiceIds = Array.from(invoiceMapById.keys());
-        const allOrderNos = Array.from(salesOrderMap.values())
-            .map((so) => (so.order_no ? so.order_no.toString().trim() : ""))
-            .filter(Boolean);
-        const allOrderIds = Array.from(salesOrderMap.keys());
-        const allCandidateNos = [
-            ...new Set([
-                ...allInvoiceNos,
-                ...allOrderNos,
-                ...allInvoiceIds.map(String),
-                ...allOrderIds.map(String),
-                ...candidateOrderIds.map(String),
-            ]),
-        ];
-
-        const salesReturnMap = new Map<
-            string,
-            {
-                return_id: number;
-                return_number: string;
-                invoice_no?: string;
-                invoice_id?: number;
-                order_id?: string | number;
-                status: string;
-                is_received?: boolean;
-                return_date?: string | null;
-                total_amount?: number | null;
-            }
-        >();
-        const returnItemQtyMap = new Map<string, number>();
-
-        try {
-            // Check junction sales_invoice_sales_return
-            const junctionReturnIds: number[] = [];
-            const invoiceIdToReturnIdMap = new Map<number, number>();
-            if (allInvoiceIds.length > 0) {
-                try {
-                    const jRes = await fetch(
-                        `${DIRECTUS_URL}/items/sales_invoice_sales_return?filter[invoice_no][_in]=${allInvoiceIds.slice(0, 300).join(",")}&limit=-1&fields=id,invoice_no,return_no`,
-                        { headers: directusHeaders, cache: "no-store" }
-                    );
-                    if (jRes.ok) {
-                        const jData: Array<{ id: number; invoice_no: number | string; return_no: number | string }> =
-                            (await jRes.json()).data || [];
-                        for (const j of jData) {
-                            const invId = Number(j.invoice_no);
-                            const retId = Number(j.return_no);
-                            if (invId && retId) {
-                                junctionReturnIds.push(retId);
-                                invoiceIdToReturnIdMap.set(invId, retId);
-                            }
-                        }
-                    }
-                } catch (jErr) {
-                    console.warn("[fulfilment-and-deliveries GET] Error fetching junction links:", jErr);
-                }
-            }
-
-            const [srByNoRes, srByOrderIdRes, srByJunctionRes, srRecentRes] = await Promise.all([
-                allCandidateNos.length > 0
-                    ? fetch(
-                          `${DIRECTUS_URL}/items/sales_return?filter[invoice_no][_in]=${allCandidateNos
-                              .slice(0, 300)
-                              .map((no) => encodeURIComponent(no))
-                              .join(",")}&fields=return_id,return_number,customer_code,salesman_id,branch_id,return_date,total_amount,remarks,created_by,order_id,invoice_no,status,isPosted,isApplied,isReceived&limit=-1`,
-                          { headers: directusHeaders, cache: "no-store" }
-                      )
-                    : Promise.resolve(null),
-                allCandidateNos.length > 0
-                    ? fetch(
-                          `${DIRECTUS_URL}/items/sales_return?filter[order_id][_in]=${allCandidateNos
-                              .slice(0, 300)
-                              .map((no) => encodeURIComponent(no))
-                              .join(",")}&fields=return_id,return_number,customer_code,salesman_id,branch_id,return_date,total_amount,remarks,created_by,order_id,invoice_no,status,isPosted,isApplied,isReceived&limit=-1`,
-                          { headers: directusHeaders, cache: "no-store" }
-                      )
-                    : Promise.resolve(null),
-                junctionReturnIds.length > 0
-                    ? fetch(
-                          `${DIRECTUS_URL}/items/sales_return?filter[return_id][_in]=${junctionReturnIds
-                              .slice(0, 300)
-                              .join(",")}&fields=return_id,return_number,customer_code,salesman_id,branch_id,return_date,total_amount,remarks,created_by,order_id,invoice_no,status,isPosted,isApplied,isReceived&limit=-1`,
-                          { headers: directusHeaders, cache: "no-store" }
-                      )
-                    : Promise.resolve(null),
-                fetch(
-                    `${DIRECTUS_URL}/items/sales_return?limit=250&sort=-return_id&fields=return_id,return_number,customer_code,salesman_id,branch_id,return_date,total_amount,remarks,created_by,order_id,invoice_no,status,isPosted,isApplied,isReceived`,
-                    { headers: directusHeaders, cache: "no-store" }
-                ),
-            ]);
-
-            const rawSrList: Array<{
-                return_id: number;
-                return_number: string;
-                invoice_no?: string;
-                order_id?: string | number;
-                status: string;
-                isReceived?: number | boolean;
-                is_received?: number | boolean;
-                return_date?: string | null;
-                total_amount?: number | null;
-            }> = [];
-
-            if (srByNoRes && srByNoRes.ok) {
-                const d = (await srByNoRes.json()).data || [];
-                rawSrList.push(...d);
-            }
-            if (srByOrderIdRes && srByOrderIdRes.ok) {
-                const d = (await srByOrderIdRes.json()).data || [];
-                rawSrList.push(...d);
-            }
-            if (srByJunctionRes && srByJunctionRes.ok) {
-                const d = (await srByJunctionRes.json()).data || [];
-                rawSrList.push(...d);
-            }
-            if (srRecentRes && srRecentRes.ok) {
-                const d = (await srRecentRes.json()).data || [];
-                rawSrList.push(...d);
-            }
-
-            // Deduplicate by return_id
-            const uniqueSrMap = new Map<number, (typeof rawSrList)[0]>();
-            for (const sr of rawSrList) {
-                if (sr.return_id) uniqueSrMap.set(Number(sr.return_id), sr);
-            }
-            const allSrData = Array.from(uniqueSrMap.values());
-
-            for (const sr of allSrData) {
-                const isReceived =
-                    sr.status === "Received" ||
-                    sr.status === "Approved" ||
-                    sr.isReceived === 1 ||
-                    sr.isReceived === true ||
-                    sr.is_received === 1 ||
-                    sr.is_received === true;
-
-                const returnInfo = {
-                    return_id: Number(sr.return_id),
-                    return_number: sr.return_number || `SR-${sr.return_id}`,
-                    invoice_no: sr.invoice_no ? sr.invoice_no.toString().trim() : undefined,
-                    order_id: sr.order_id ? sr.order_id.toString().trim() : undefined,
-                    status: sr.status || "Pending",
-                    is_received: isReceived,
-                    return_date: sr.return_date || null,
-                    total_amount: sr.total_amount ? Number(sr.total_amount) : null,
-                };
-                if (sr.return_id) {
-                    salesReturnMap.set(String(sr.return_id), returnInfo);
-                }
-                if (sr.return_number) {
-                    salesReturnMap.set(sr.return_number.toString().trim().toLowerCase(), returnInfo);
-                }
-                if (sr.invoice_no) {
-                    salesReturnMap.set(sr.invoice_no.toString().trim().toLowerCase(), returnInfo);
-                }
-                if (sr.order_id) {
-                    salesReturnMap.set(sr.order_id.toString().trim().toLowerCase(), returnInfo);
-                }
-            }
-
-            // Map junction links to returnInfo
-            for (const [invId, retId] of invoiceIdToReturnIdMap.entries()) {
-                const retInfo = salesReturnMap.get(String(retId));
-                if (retInfo) {
-                    salesReturnMap.set(`inv_id:${invId}`, retInfo);
-                    salesReturnMap.set(String(invId), retInfo);
-                }
-            }
-
-            // Fetch details for all found sales returns
-            const distinctReturnNos = [
-                ...new Set([
-                    ...allSrData.map((s) => s.return_number).filter(Boolean),
-                    ...allSrData.map((s) => String(s.return_id)).filter(Boolean),
-                ]),
-            ];
-
-            if (distinctReturnNos.length > 0) {
-                const srDetRes = await fetch(
-                    `${DIRECTUS_URL}/items/sales_return_details?filter[return_no][_in]=${distinctReturnNos
-                        .slice(0, 300)
-                        .map((r) => encodeURIComponent(r))
-                        .join(",")}&limit=-1&fields=detail_id,return_no,product_id,quantity`,
-                    { headers: directusHeaders, cache: "no-store" }
-                );
-                if (srDetRes.ok) {
-                    const srDetails: Array<{ detail_id: number; return_no: string; product_id: number | { product_id?: number; id?: number }; quantity: number }> =
-                        (await srDetRes.json()).data || [];
-
-                    // Map return_no to associated return info
-                    const returnHeaderByNo = new Map<string, (typeof allSrData)[0]>();
-                    for (const sr of allSrData) {
-                        if (sr.return_number) {
-                            returnHeaderByNo.set(sr.return_number.toString().trim(), sr);
-                        }
-                        if (sr.return_id) {
-                            returnHeaderByNo.set(String(sr.return_id), sr);
-                        }
-                    }
-
-                    for (const srd of srDetails) {
-                        const rawPid = srd.product_id;
-                        const pId = typeof rawPid === "object" && rawPid !== null
-                            ? Number((rawPid as { product_id?: number; id?: number }).product_id || (rawPid as { product_id?: number; id?: number }).id)
-                            : Number(rawPid);
-
-                        const qty = Number(srd.quantity || 0);
-                        const retNo = srd.return_no ? srd.return_no.toString().trim() : "";
-
-                        if (pId && retNo) {
-                            returnItemQtyMap.set(`${retNo}:${pId}`, qty);
-                            returnItemQtyMap.set(`${retNo.toLowerCase()}:${pId}`, qty);
-
-                            const header = returnHeaderByNo.get(retNo);
-                            if (header) {
-                                if (header.return_number) {
-                                    returnItemQtyMap.set(`${header.return_number.toString().trim().toLowerCase()}:${pId}`, qty);
-                                }
-                                if (header.invoice_no) {
-                                    returnItemQtyMap.set(`${header.invoice_no.toString().trim().toLowerCase()}:${pId}`, qty);
-                                }
-                                if (header.order_id) {
-                                    returnItemQtyMap.set(`${header.order_id.toString().trim().toLowerCase()}:${pId}`, qty);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (err) {
-            console.warn("[fulfilment-and-deliveries GET] Error fetching sales_return links:", err);
-        }
-
-        // 10a. Fetch unfulfilled sales transactions and details for clearance auditing
         interface DirectusUstRecord {
             id: number;
             sales_invoice_id: number;
@@ -1182,6 +645,7 @@ export async function GET(req: NextRequest) {
             date_created?: string;
             variance_amount?: number;
         }
+
         interface DirectusUstDetailRecord {
             id: number;
             unfulfilled_sales_transaction_id: number;
@@ -1192,782 +656,784 @@ export async function GET(req: NextRequest) {
             missing_quantity?: number;
         }
 
-        const ustList: DirectusUstRecord[] = [];
-        const ustDetailList: DirectusUstDetailRecord[] = [];
-
-        if (allInvoiceIds.length > 0) {
-            try {
-                const chunkSize = 100;
-                for (let i = 0; i < allInvoiceIds.length; i += chunkSize) {
-                    const chunk = allInvoiceIds.slice(i, i + chunkSize);
-                    const ustRes = await fetch(
-                        `${DIRECTUS_URL}/items/unfulfilled_sales_transaction?filter[sales_invoice_id][_in]=${chunk.join(",")}&limit=-1&fields=id,sales_invoice_id,nte,isCleared,checked_by,date_acknowledged,date_created,variance_amount`,
-                        { headers: directusHeaders, cache: "no-store" }
-                    );
-                    if (ustRes.ok) {
-                        const data: DirectusUstRecord[] = (await ustRes.json()).data || [];
-                        ustList.push(...data);
-                    }
-                }
-
-                const ustIds = ustList.map((u) => u.id).filter(Boolean);
-                if (ustIds.length > 0) {
-                    for (let i = 0; i < ustIds.length; i += chunkSize) {
-                        const chunk = ustIds.slice(i, i + chunkSize);
-                        const ustdRes = await fetch(
-                            `${DIRECTUS_URL}/items/unfulfilled_sales_transaction_details?filter[unfulfilled_sales_transaction_id][_in]=${chunk.join(",")}&limit=-1&fields=id,unfulfilled_sales_transaction_id,sales_invoice_detail_id,inventory_lot_id,product_id,returned_quantity,missing_quantity`,
-                            { headers: directusHeaders, cache: "no-store" }
-                        );
-                        if (ustdRes.ok) {
-                            const data: DirectusUstDetailRecord[] = (await ustdRes.json()).data || [];
-                            ustDetailList.push(...data);
-                        }
-                    }
-                }
-            } catch (ustErr) {
-                console.warn("[fulfilment-and-deliveries GET] Error fetching unfulfilled_sales_transaction:", ustErr);
-            }
-        }
-
-        // 10b. Fetch sales_order_reservation, mm_inventory_lots, and mm_lots for all salesOrderDetails
         interface RawInventoryLotRecord {
             inventory_lot_id?: number | string;
             lot_id?: number | string | { lot_id?: number | string; lot_name?: string };
             batch_no?: string;
             expiry_date?: string;
         }
+
         interface RawLotRecord {
             lot_id?: number | string;
             lot_name?: string;
         }
 
-        const allSodDetailIds = [...new Set(salesOrderDetails.map((s) => Number(s.detail_id)).filter(Boolean))];
-        const sodReservationMap = new Map<number, LineItemReservation[]>();
-        const invLotMap = new Map<number, RawInventoryLotRecord>();
-        const lotMap = new Map<number, RawLotRecord>();
-
-        if (allSodDetailIds.length > 0 || invoiceBatches.length > 0) {
-            try {
-                const chunkSize = 100;
-                interface RawReservationRecord {
-                    reservation_id?: number | string;
-                    id?: number | string;
-                    sales_order_detail_id?: number | string;
-                    product_id?: number | string;
-                    inventory_lot_id?: number | string;
-                    reserved_quantity?: number | string;
-                    picked_quantity?: number | string;
-                    status?: string;
-                    created_at?: string;
-                }
-
-                const rawReservations: RawReservationRecord[] = [];
-                for (let i = 0; i < allSodDetailIds.length; i += chunkSize) {
-                    const chunk = allSodDetailIds.slice(i, i + chunkSize);
-                    const resvRes = await fetch(
-                        `${DIRECTUS_URL}/items/sales_order_reservation?filter[sales_order_detail_id][_in]=${chunk.join(",")}&filter[status][_in]=Picked,Consumed,Reserved&fields=reservation_id,sales_order_detail_id,product_id,inventory_lot_id,reserved_quantity,picked_quantity,status,created_at&limit=-1`,
-                        { headers: directusHeaders, cache: "no-store" }
-                    );
-                    if (resvRes.ok) {
-                        const chunkData = ((await resvRes.json()).data || []) as RawReservationRecord[];
-                        rawReservations.push(...chunkData);
-                    }
-                }
-
-                // Collect distinct inventory_lot_ids from reservations and invoice batches
-                const invLotIds = [
-                    ...new Set([
-                        ...rawReservations.map((r) => Number(r.inventory_lot_id)),
-                        ...invoiceBatches.map((b) => Number(b.inventory_lot_id)),
-                    ].filter(Boolean)),
-                ];
-                if (invLotIds.length > 0) {
-                    for (let i = 0; i < invLotIds.length; i += chunkSize) {
-                        const chunk = invLotIds.slice(i, i + chunkSize);
-                        const invRes = await fetch(
-                            `${DIRECTUS_URL}/items/mm_inventory_lots?filter[inventory_lot_id][_in]=${chunk.join(",")}&fields=inventory_lot_id,lot_id.lot_id,lot_id.lot_name,batch_no,expiry_date&limit=-1`,
-                            { headers: directusHeaders, cache: "no-store" }
-                        );
-                        if (invRes.ok) {
-                            const chunkData = ((await invRes.json()).data || []) as RawInventoryLotRecord[];
-                            for (const inv of chunkData) {
-                                invLotMap.set(Number(inv.inventory_lot_id), inv);
-                            }
-                        }
-                    }
-                }
-
-                // Collect distinct lot_ids from invLotMap for fallback lookup
-                const lotIds = [
-                    ...new Set(
-                        Array.from(invLotMap.values())
-                            .map((inv) => {
-                                if (typeof inv.lot_id === "object" && inv.lot_id !== null) {
-                                    return Number(inv.lot_id.lot_id);
-                                }
-                                return Number(inv.lot_id);
-                            })
-                            .filter(Boolean)
-                    ),
-                ];
-                if (lotIds.length > 0) {
-                    for (let i = 0; i < lotIds.length; i += chunkSize) {
-                        const chunk = lotIds.slice(i, i + chunkSize);
-                        const lotRes = await fetch(
-                            `${DIRECTUS_URL}/items/mm_lots?filter[lot_id][_in]=${chunk.join(",")}&fields=lot_id,lot_name&limit=-1`,
-                            { headers: directusHeaders, cache: "no-store" }
-                        );
-                        if (lotRes.ok) {
-                            const chunkData = ((await lotRes.json()).data || []) as RawLotRecord[];
-                            for (const lot of chunkData) {
-                                lotMap.set(Number(lot.lot_id), lot);
-                            }
-                        }
-                    }
-                }
-
-                // Map reservations to sales_order_detail_id
-                for (const r of rawReservations) {
-                    const sodId = Number(r.sales_order_detail_id);
-                    const invLot = invLotMap.get(Number(r.inventory_lot_id));
-
-                    let resolvedLotId: number | undefined = undefined;
-                    let resolvedLotName: string | undefined = undefined;
-
-                    if (invLot) {
-                        if (typeof invLot.lot_id === "object" && invLot.lot_id !== null) {
-                            resolvedLotId = invLot.lot_id.lot_id ? Number(invLot.lot_id.lot_id) : undefined;
-                            resolvedLotName = invLot.lot_id.lot_name || undefined;
-                        } else if (invLot.lot_id) {
-                            resolvedLotId = Number(invLot.lot_id);
-                        }
-                    }
-
-                    if (!resolvedLotName && resolvedLotId) {
-                        resolvedLotName = lotMap.get(resolvedLotId)?.lot_name;
-                    }
-
-                    const mapped: LineItemReservation = {
-                        reservation_id: Number(r.reservation_id || r.id),
-                        sales_order_detail_id: sodId,
-                        product_id: Number(r.product_id),
-                        inventory_lot_id: Number(r.inventory_lot_id),
-                        lot_id: resolvedLotId,
-                        lot_name: resolvedLotName,
-                        batch_no: invLot?.batch_no || undefined,
-                        reserved_quantity: Number(r.reserved_quantity || 0),
-                        picked_quantity: Number(r.picked_quantity || 0),
-                        status: r.status || "Reserved",
-                        created_at: r.created_at ? String(r.created_at) : undefined,
-                    };
-
-                    const existing = sodReservationMap.get(sodId) || [];
-                    existing.push(mapped);
-                    sodReservationMap.set(sodId, existing);
-                }
-            } catch (resvErr) {
-            console.warn("[fulfilment-and-deliveries GET] Error fetching reservations:", resvErr);
+        interface RawReservationRecord {
+            reservation_id?: number | string;
+            id?: number | string;
+            sales_order_detail_id?: number | string;
+            product_id?: number | string;
+            inventory_lot_id?: number | string;
+            reserved_quantity?: number | string;
+            picked_quantity?: number | string;
+            status?: string;
+            created_at?: string;
         }
-    }
 
-        // 10c. Batch fetch dispatch_plan_details to link dispatch_no for all orders
-        const dispatchNoByOrderId = new Map<number, string>();
-        if (allNumericInvOrOrderIds.length > 0) {
+        const [
+            batchRes,
+            resvRes,
+            prodRes,
+            ptRes,
+            custRes,
+            smRes,
+            srRes,
+            ustRes,
+        ] = await Promise.all([
+            pageInvoiceIds.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/sales_invoice_batches?filter[invoice_id][_in]=${pageInvoiceIds.join(",")}&fields=id,invoice_id,invoice_detail_id,product_id,inventory_lot_id,lot_id,batch_no,quantity&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+            pageSodDetailIds.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/sales_order_reservation?filter[sales_order_detail_id][_in]=${pageSodDetailIds.join(",")}&filter[status][_in]=Picked,Consumed,Reserved&fields=reservation_id,sales_order_detail_id,product_id,inventory_lot_id,reserved_quantity,picked_quantity,status,created_at&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+            pageProductIds.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/products?filter[product_id][_in]=${pageProductIds.join(",")}&fields=product_id,product_name,product_code,description,short_description,product_type,unit_of_measurement.unit_shortcut&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+            fetch(`${DIRECTUS_URL}/items/product_type?limit=-1&fields=id,name`, { headers: directusHeaders, cache: "no-store" }).catch(() => null),
+            pageCustomerCodes.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/customer?filter[customer_code][_in]=${pageCustomerCodes.map(encodeURIComponent).join(",")}&fields=id,customer_name,customer_code&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+            pageSalesmanIds.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/salesman?filter[id][_in]=${pageSalesmanIds.join(",")}&fields=id,salesman_code,salesman_name&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+            candidateReturnKeys.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/sales_return?filter[order_id][_in]=${candidateReturnKeys.map(encodeURIComponent).join(",")}&fields=return_id,return_number,customer_code,salesman_id,branch_id,return_date,total_amount,remarks,created_by,order_id,invoice_no,status,isPosted,isApplied,isReceived&limit=-1`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+            pageInvoiceIds.length > 0
+                ? fetch(`${DIRECTUS_URL}/items/unfulfilled_sales_transaction?filter[sales_invoice_id][_in]=${pageInvoiceIds.join(",")}&limit=-1&fields=id,sales_invoice_id,nte,isCleared,checked_by,date_acknowledged,date_created,variance_amount`, { headers: directusHeaders, cache: "no-store" })
+                : Promise.resolve(null),
+        ]);
+
+        const invoiceBatches: DirectusInvoiceBatch[] = batchRes && batchRes.ok ? (await batchRes.json()).data || [] : [];
+        const rawReservations: RawReservationRecord[] = resvRes && resvRes.ok ? (await resvRes.json()).data || [] : [];
+        const products: DirectusProduct[] = prodRes && prodRes.ok ? (await prodRes.json()).data || [] : [];
+        const productTypes: Array<{ id: number; name: string }> = ptRes && ptRes.ok ? (await ptRes.json()).data || [] : [];
+        const customerList: DirectusCustomer[] = custRes && custRes.ok ? (await custRes.json()).data || [] : [];
+        const salesmanList: DirectusSalesman[] = smRes && smRes.ok ? (await smRes.json()).data || [] : [];
+        const salesReturnsRaw = srRes && srRes.ok ? (await srRes.json()).data || [] : [];
+        const ustList: DirectusUstRecord[] = ustRes && ustRes.ok ? (await ustRes.json()).data || [] : [];
+
+        // Fetch UST details if any ustList records exist
+        const ustIds = ustList.map((u) => u.id).filter(Boolean);
+        let ustDetailList: DirectusUstDetailRecord[] = [];
+        if (ustIds.length > 0) {
             try {
-                const chunkSize = 100;
-                for (let i = 0; i < allNumericInvOrOrderIds.length; i += chunkSize) {
-                    const chunk = allNumericInvOrOrderIds.slice(i, i + chunkSize);
-                    const dpdRes = await fetch(
-                        `${DIRECTUS_URL}/items/dispatch_plan_details?filter[sales_order_id][_in]=${chunk.join(",")}&fields=sales_order_id,dispatch_id.dispatch_no&limit=-1`,
-                        { headers: directusHeaders, cache: "no-store" }
-                    );
-                    if (dpdRes.ok) {
-                        const dpdData = (await dpdRes.json()).data || [];
-                        for (const row of dpdData) {
-                            const soId = Number(row.sales_order_id);
-                            const dispNo = typeof row.dispatch_id === "object" && row.dispatch_id !== null
-                                ? (row.dispatch_id as { dispatch_no?: string }).dispatch_no
-                                : row.dispatch_id;
-                            if (soId && dispNo) {
-                                dispatchNoByOrderId.set(soId, String(dispNo));
-                            }
-                        }
-                    }
+                const ustdRes = await fetch(
+                    `${DIRECTUS_URL}/items/unfulfilled_sales_transaction_details?filter[unfulfilled_sales_transaction_id][_in]=${ustIds.join(",")}&limit=-1&fields=id,unfulfilled_sales_transaction_id,sales_invoice_detail_id,inventory_lot_id,product_id,returned_quantity,missing_quantity`,
+                    { headers: directusHeaders, cache: "no-store" }
+                );
+                if (ustdRes.ok) {
+                    ustDetailList = (await ustdRes.json()).data || [];
                 }
-            } catch (dpdErr) {
-                console.warn("[fulfilment-and-deliveries GET] Error fetching dispatch_plan_details:", dpdErr);
+            } catch (e) {
+                console.warn("[fulfilment-and-deliveries] Error fetching ust details:", e);
             }
         }
 
-        // 10d. Helper to assemble child orders for a trip (Dispatch Plan or Consolidator)
+        // Fetch mm_inventory_lots & mm_lots only for discovered lot IDs
+        const targetInvLotIds = [...new Set([
+            ...rawReservations.map((r) => Number(r.inventory_lot_id)),
+            ...invoiceBatches.map((b) => Number(b.inventory_lot_id)),
+        ].filter(Boolean))];
+
+        const invLotMap = new Map<number, RawInventoryLotRecord>();
+        const lotMap = new Map<number, RawLotRecord>();
+
+        if (targetInvLotIds.length > 0) {
+            try {
+                const invRes = await fetch(
+                    `${DIRECTUS_URL}/items/mm_inventory_lots?filter[inventory_lot_id][_in]=${targetInvLotIds.join(",")}&fields=inventory_lot_id,lot_id.lot_id,lot_id.lot_name,batch_no,expiry_date&limit=-1`,
+                    { headers: directusHeaders, cache: "no-store" }
+                );
+                if (invRes.ok) {
+                    const chunkData = ((await invRes.json()).data || []) as RawInventoryLotRecord[];
+                    for (const inv of chunkData) {
+                        invLotMap.set(Number(inv.inventory_lot_id), inv);
+                    }
+                }
+
+                const targetLotIds = [...new Set(
+                    Array.from(invLotMap.values())
+                        .map((inv) => (typeof inv.lot_id === "object" && inv.lot_id !== null ? Number(inv.lot_id.lot_id) : Number(inv.lot_id)))
+                        .filter(Boolean)
+                )];
+
+                if (targetLotIds.length > 0) {
+                    const lotRes = await fetch(
+                        `${DIRECTUS_URL}/items/mm_lots?filter[lot_id][_in]=${targetLotIds.join(",")}&fields=lot_id,lot_name&limit=-1`,
+                        { headers: directusHeaders, cache: "no-store" }
+                    );
+                    if (lotRes.ok) {
+                        const lotData = ((await lotRes.json()).data || []) as RawLotRecord[];
+                        for (const lot of lotData) {
+                            lotMap.set(Number(lot.lot_id), lot);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn("[fulfilment-and-deliveries] Error fetching lot data:", e);
+            }
+        }
+
+        // Index product, product type, customer, salesman maps
+        const productMap = new Map<number, DirectusProduct>();
+        for (const p of products) {
+            const pid = Number(p.product_id || (p as { id?: number }).id);
+            if (pid) productMap.set(pid, p);
+        }
+
+        const productTypeMap = new Map<number, string>();
+        for (const pt of productTypes) {
+            if (pt.id) productTypeMap.set(Number(pt.id), pt.name);
+        }
+
+        const customerCodeMap = new Map<string, string>();
+        for (const c of customerList) {
+            if (c.customer_code) customerCodeMap.set(c.customer_code, c.customer_name);
+        }
+
+        const salesmanMap = new Map<number, DirectusSalesman>();
+        for (const sm of salesmanList) {
+            const smId = Number(sm.id);
+            if (smId) salesmanMap.set(smId, sm);
+        }
+
+        // Index reservations
+        const sodReservationMap = new Map<number, LineItemReservation[]>();
+        for (const r of rawReservations) {
+            const sodId = Number(r.sales_order_detail_id);
+            const invLot = invLotMap.get(Number(r.inventory_lot_id));
+
+            let resolvedLotId: number | undefined = undefined;
+            let resolvedLotName: string | undefined = undefined;
+
+            if (invLot) {
+                if (typeof invLot.lot_id === "object" && invLot.lot_id !== null) {
+                    resolvedLotId = invLot.lot_id.lot_id ? Number(invLot.lot_id.lot_id) : undefined;
+                    resolvedLotName = invLot.lot_id.lot_name || undefined;
+                } else if (invLot.lot_id) {
+                    resolvedLotId = Number(invLot.lot_id);
+                }
+            }
+
+            if (!resolvedLotName && resolvedLotId) {
+                resolvedLotName = lotMap.get(resolvedLotId)?.lot_name;
+            }
+
+            const mapped: LineItemReservation = {
+                reservation_id: Number(r.reservation_id || r.id),
+                sales_order_detail_id: sodId,
+                product_id: Number(r.product_id),
+                inventory_lot_id: Number(r.inventory_lot_id),
+                lot_id: resolvedLotId,
+                lot_name: resolvedLotName,
+                batch_no: invLot?.batch_no || undefined,
+                reserved_quantity: Number(r.reserved_quantity || 0),
+                picked_quantity: Number(r.picked_quantity || 0),
+                status: r.status || "Reserved",
+                created_at: r.created_at ? String(r.created_at) : undefined,
+            };
+
+            const existing = sodReservationMap.get(sodId) || [];
+            existing.push(mapped);
+            sodReservationMap.set(sodId, existing);
+        }
+
+        // Index invoice batches
+        const invoiceBatchesMap = new Map<string, DirectusInvoiceBatch[]>();
+        for (const b of invoiceBatches) {
+            const key = `${b.invoice_id}:${b.product_id}`;
+            if (!invoiceBatchesMap.has(key)) {
+                invoiceBatchesMap.set(key, []);
+            }
+            invoiceBatchesMap.get(key)!.push(b);
+        }
+
+        // Index returns
+        const salesReturnMap = new Map<string, {
+            return_id: number;
+            return_number: string;
+            status: string;
+            is_received?: boolean;
+            return_date?: string | null;
+            total_amount?: number | null;
+            invoice_no?: string;
+            order_id?: string | number;
+        }>();
+        const returnItemQtyMap = new Map<string, number>();
+
+        for (const sr of salesReturnsRaw) {
+            const entry = {
+                return_id: Number(sr.return_id),
+                return_number: sr.return_number || `SR-${sr.return_id}`,
+                status: sr.status || "Completed",
+                is_received: Boolean(sr.isReceived || sr.is_received),
+                return_date: sr.return_date || null,
+                total_amount: sr.total_amount ? Number(sr.total_amount) : null,
+                invoice_no: sr.invoice_no ? String(sr.invoice_no).trim() : undefined,
+                order_id: sr.order_id,
+            };
+            if (sr.return_number) salesReturnMap.set(sr.return_number.toLowerCase(), entry);
+            if (sr.return_id) salesReturnMap.set(String(sr.return_id), entry);
+            if (sr.invoice_no) salesReturnMap.set(String(sr.invoice_no).toLowerCase().trim(), entry);
+            if (sr.order_id) salesReturnMap.set(String(sr.order_id).toLowerCase().trim(), entry);
+        }
+
+        // Helper to assemble child orders for a trip
         const buildChildOrdersForTrip = (
             distinctOrderIds: number[],
             tripCreatedAt: string | null | undefined,
             tripDispatchNo: string | null | undefined,
             isTripCleared: boolean,
-            fallbackStatus: string,
-            conId?: number
+            fallbackStatus: string
         ): ConsolidatedSalesOrderRecord[] => {
-                        const childOrders: ConsolidatedSalesOrderRecord[] = [];
+            const childOrders: ConsolidatedSalesOrderRecord[] = [];
 
-                        for (const orderId of distinctOrderIds) {
-                            const so = salesOrderMap.get(orderId);
-                            const sidInvId =
-                                orderIdToInvoiceIdMap.get(String(orderId)) ||
-                                (so?.order_id ? orderIdToInvoiceIdMap.get(String(so.order_id)) : null) ||
-                                (so?.order_no ? orderIdToInvoiceIdMap.get(so.order_no.trim().toLowerCase()) : null) ||
-                                null;
+            for (const orderId of distinctOrderIds) {
+                const so = salesOrderMap.get(orderId);
+                const sidInvId =
+                    orderIdToInvoiceIdMap.get(String(orderId)) ||
+                    (so?.order_id ? orderIdToInvoiceIdMap.get(String(so.order_id)) : null) ||
+                    (so?.order_no ? orderIdToInvoiceIdMap.get(so.order_no.trim().toLowerCase()) : null) ||
+                    null;
 
-                            const inv =
-                                (sidInvId ? invoiceMapById.get(sidInvId) : null) ||
-                                (so?.order_id ? invoiceMapByOrderKey.get(String(so.order_id).toLowerCase()) : null) ||
-                                (so?.order_no ? invoiceMapByOrderKey.get(so.order_no.trim().toLowerCase()) : null) ||
-                                (so?.order_no ? invoiceMapByInvoiceNo.get(so.order_no.trim().toLowerCase()) : null) ||
-                                invoiceMapByOrderKey.get(String(orderId).toLowerCase()) ||
-                                invoiceMapById.get(orderId) ||
-                                null;
+                const inv =
+                    (sidInvId ? invoiceMapById.get(sidInvId) : null) ||
+                    (so?.order_id ? invoiceMapByOrderKey.get(String(so.order_id).toLowerCase()) : null) ||
+                    (so?.order_no ? invoiceMapByOrderKey.get(so.order_no.trim().toLowerCase()) : null) ||
+                    (so?.order_no ? invoiceMapByInvoiceNo.get(so.order_no.trim().toLowerCase()) : null) ||
+                    invoiceMapByOrderKey.get(String(orderId).toLowerCase()) ||
+                    invoiceMapById.get(orderId) ||
+                    null;
 
-                            if (!so && !inv) {
-                                childOrders.push({
-                                    order_id: orderId,
-                                    order_no: `SO-${orderId}`,
-                                    order_status: fallbackStatus || "Dispatched",
-                                    dispatch_no: tripDispatchNo || null,
-                                    invoice_id: 0,
-                                    invoice_no: "---",
-                                    invoice_date: tripCreatedAt || new Date().toISOString(),
-                                    customer_code: "-",
-                                    customer_name: "-",
-                                    salesman_id: null,
-                                    salesman_code: null,
-                                    salesman_name: null,
-                                    amount: 0,
-                                    remarks: "",
-                                    fulfillment_status: isTripCleared ? "Fulfilled" : "Pending",
-                                    is_cleared: isTripCleared,
-                                    cleared_at: null,
-                                    cleared_by: null,
-                                    linked_sales_return: null,
-                                    items: [],
-                                });
-                                continue;
+                if (!so && !inv) {
+                    childOrders.push({
+                        order_id: orderId,
+                        order_no: `SO-${orderId}`,
+                        order_status: fallbackStatus || "Dispatched",
+                        dispatch_no: tripDispatchNo || null,
+                        consolidator_no: null,
+                        invoice_id: 0,
+                        invoice_no: "---",
+                        invoice_date: tripCreatedAt || new Date().toISOString(),
+                        customer_code: "-",
+                        customer_name: "-",
+                        salesman_id: null,
+                        salesman_code: null,
+                        salesman_name: null,
+                        amount: 0,
+                        remarks: "",
+                        fulfillment_status: isTripCleared ? "Fulfilled" : "Pending",
+                        is_cleared: isTripCleared,
+                        cleared_at: null,
+                        cleared_by: null,
+                        linked_sales_return: null,
+                        items: [],
+                    });
+                    continue;
+                }
+
+                const allInvoicesForOrder: DirectusInvoice[] = [
+                    ...(so?.order_id ? invoicesByOrderKey.get(String(so.order_id).toLowerCase()) || [] : []),
+                    ...(so?.order_no ? invoicesByOrderKey.get(so.order_no.trim().toLowerCase()) || [] : []),
+                    ...(invoicesByOrderKey.get(String(orderId).toLowerCase()) || []),
+                    ...(inv ? [inv] : []),
+                ].filter((v, idx, arr) => arr.findIndex((x) => Number(x.invoice_id || x.id) === Number(v.invoice_id || v.id)) === idx);
+
+                const targetInvoices: Array<DirectusInvoice | null> =
+                    allInvoicesForOrder.length > 0 ? allInvoicesForOrder : (inv ? [inv] : [null]);
+
+                const relevantSodDetails = salesOrderDetails.filter(
+                    (sod) => Number(sod.order_id) === orderId
+                );
+
+                for (const curInv of targetInvoices) {
+                    const invoiceNo = curInv?.invoice_no || inv?.invoice_no || so?.invoice_no || "---";
+                    const invoiceId = curInv?.invoice_id ? Number(curInv.invoice_id) : (inv?.invoice_id ? Number(inv.invoice_id) : (so?.invoice_id ? Number(so.invoice_id) : null));
+                    const invoiceDate = curInv?.invoice_date || inv?.invoice_date || allInvoicesForOrder[0]?.invoice_date || null;
+                    const invoiceAmount = curInv ? Number(curInv.total_amount || curInv.net_amount || 0) : Number(so?.total_amount || 0);
+
+                    const hasSpecificInvoice = Boolean(invoiceNo && invoiceNo !== "---");
+                    const linkedSr =
+                        (hasSpecificInvoice ? salesReturnMap.get(invoiceNo.toLowerCase()) : null) ||
+                        (invoiceId ? salesReturnMap.get(String(invoiceId)) : null) ||
+                        (invoiceId ? salesReturnMap.get(`inv_id:${invoiceId}`) : null) ||
+                        (!hasSpecificInvoice && targetInvoices.length === 1 && so?.order_no ? salesReturnMap.get(so.order_no.toLowerCase()) : null) ||
+                        (!hasSpecificInvoice && targetInvoices.length === 1 ? salesReturnMap.get(String(orderId)) : null) ||
+                        (!hasSpecificInvoice && targetInvoices.length === 1 && so?.order_id ? salesReturnMap.get(String(so.order_id)) : null) ||
+                        null;
+
+                    const effectiveInvId = invoiceId || inv?.invoice_id || so?.invoice_id || null;
+
+                    const matchingUst = isTripCleared && effectiveInvId
+                        ? ustList.find((u) => Number(u.sales_invoice_id) === Number(effectiveInvId)) || null
+                        : null;
+
+                    const ustDetailsForMatching = matchingUst
+                        ? ustDetailList.filter((d) => Number(d.unfulfilled_sales_transaction_id) === Number(matchingUst.id))
+                        : [];
+
+                    let sodLinesToUse = relevantSodDetails;
+                    if (targetInvoices.length > 1 && curInv) {
+                        const curInvIdNum = Number(curInv.invoice_id || curInv.id);
+                        const invSpecificLines = relevantSodDetails.filter((sod) => {
+                            const pId = Number(sod.product_id);
+                            const q1 = invoiceProductQtyMap.get(`${curInvIdNum}:${pId}`);
+                            const q2 = curInv.invoice_no ? invoiceProductQtyMap.get(`${String(curInv.invoice_no).trim().toLowerCase()}:${pId}`) : undefined;
+                            return (q1 !== undefined && q1 > 0) || (q2 !== undefined && q2 > 0);
+                        });
+                        if (invSpecificLines.length > 0) {
+                            sodLinesToUse = invSpecificLines;
+                        }
+                    }
+
+                    let isCleared = false;
+                    let orderFulfillmentStatus:
+                        | "Pending"
+                        | "Fulfilled"
+                        | "Fulfilled with Concerns"
+                        | "Fulfilled with Returns"
+                        | "Unfulfilled / Returns" = "Pending";
+                    let orderRemarks = "";
+                    let linkedSrToReturn: typeof linkedSr | null = null;
+                    let items: Array<{
+                        detail_id: number;
+                        product_id: number;
+                        product_code: string;
+                        product_name: string;
+                        product_description: string;
+                        uom: string;
+                        ordered_quantity: number;
+                        invoiced_quantity?: number;
+                        received_quantity: number;
+                        returned_quantity: number;
+                        unit_price: number;
+                        has_concern: boolean;
+                        concern_notes: string;
+                        line_status: "Fulfilled" | "Fulfilled with Returns" | "Unfulfilled / Returns";
+                        reservations: LineItemReservation[];
+                    }> = [];
+
+                    if (!isTripCleared) {
+                        isCleared = false;
+                        orderFulfillmentStatus = "Pending";
+
+                        items = sodLinesToUse.map((sod) => {
+                            const prod = productMap.get(Number(sod.product_id));
+                            const prodName = prod?.description || prod?.product_name || `Product #${sod.product_id}`;
+                            const prodCode = prod?.product_code || `SKU-${sod.product_id}`;
+                            const prodDesc = prod?.short_description || (prod?.description && prod?.description !== prod?.product_name ? prod?.description : "") || "";
+                            const ordered = Number(sod.ordered_quantity || 0);
+
+                            const rawLineReservations = sodReservationMap.get(Number(sod.detail_id)) || [];
+                            const lineReservations = rawLineReservations;
+                            const totalPickedFromRes = lineReservations.reduce((s, r) => s + (Number(r.picked_quantity) || 0), 0);
+                            const sodAllocated = sod.allocated_quantity !== undefined && sod.allocated_quantity !== null ? Number(sod.allocated_quantity) : null;
+                            const actualDispatched = totalPickedFromRes > 0
+                                ? totalPickedFromRes
+                                : sodAllocated !== null
+                                ? sodAllocated
+                                : 0;
+
+                            let invoicedQty: number | undefined = undefined;
+                            const curInvIdNum = curInv ? Number(curInv.invoice_id || curInv.id) : null;
+
+                            if (curInvIdNum) {
+                                const fromInv = invoiceProductQtyMap.get(`${curInvIdNum}:${sod.product_id}`);
+                                if (fromInv !== undefined) invoicedQty = fromInv;
+                            }
+                            if (invoicedQty === undefined && curInv?.invoice_no) {
+                                const fromInvNo = invoiceProductQtyMap.get(`${String(curInv.invoice_no).trim().toLowerCase()}:${sod.product_id}`);
+                                if (fromInvNo !== undefined) invoicedQty = fromInvNo;
+                            }
+                            if (invoicedQty === undefined && targetInvoices.length === 1) {
+                                if (allInvoicesForOrder.length > 0) {
+                                    let sum = 0;
+                                    let found = false;
+                                    for (const oInv of allInvoicesForOrder) {
+                                        const oInvId = Number(oInv.invoice_id || oInv.id);
+                                        const fromInv = invoiceProductQtyMap.get(`${oInvId}:${sod.product_id}`);
+                                        if (fromInv !== undefined) {
+                                            sum += fromInv;
+                                            found = true;
+                                        }
+                                    }
+                                    if (found) invoicedQty = sum;
+                                }
+                                if (invoicedQty === undefined && inv?.invoice_id) {
+                                    const fromInv = invoiceProductQtyMap.get(`${inv.invoice_id}:${sod.product_id}`);
+                                    if (fromInv !== undefined) invoicedQty = fromInv;
+                                }
+                                if (invoicedQty === undefined) {
+                                    const fromOrdNo = so?.order_no ? invoiceProductQtyMap.get(`${so.order_no.trim().toLowerCase()}:${sod.product_id}`) : undefined;
+                                    if (fromOrdNo !== undefined) {
+                                        invoicedQty = fromOrdNo;
+                                    } else {
+                                        const fromOrd = invoiceProductQtyMap.get(`${orderId}:${sod.product_id}`);
+                                        if (fromOrd !== undefined) invoicedQty = fromOrd;
+                                    }
+                                }
                             }
 
-                            const allInvoicesForOrder: DirectusInvoice[] = [
-                                ...(so?.order_id ? invoicesByOrderKey.get(String(so.order_id).toLowerCase()) || [] : []),
-                                ...(so?.order_no ? invoicesByOrderKey.get(so.order_no.trim().toLowerCase()) || [] : []),
-                                ...(invoicesByOrderKey.get(String(orderId).toLowerCase()) || []),
-                                ...(inv ? [inv] : []),
-                            ].filter((v, idx, arr) => arr.findIndex((x) => Number(x.invoice_id || x.id) === Number(v.invoice_id || v.id)) === idx);
+                            let sibList: DirectusInvoiceBatch[] | undefined = undefined;
+                            if (curInvIdNum) {
+                                sibList = invoiceBatchesMap.get(`${curInvIdNum}:${sod.product_id}`);
+                            }
+                            if (!sibList && targetInvoices.length === 1 && inv?.invoice_id) {
+                                sibList = invoiceBatchesMap.get(`${inv.invoice_id}:${sod.product_id}`);
+                            }
 
-                            const targetInvoices: Array<DirectusInvoice | null> =
-                                allInvoicesForOrder.length > 0 ? allInvoicesForOrder : (inv ? [inv] : [null]);
+                            const effectiveReservations: LineItemReservation[] = (sibList && sibList.length > 0)
+                                ? sibList.map((sib) => {
+                                    const invLot = invLotMap.get(Number(sib.inventory_lot_id));
+                                    const lotId = Number(sib.lot_id || (typeof invLot?.lot_id === "object" ? invLot.lot_id?.lot_id : invLot?.lot_id) || 0);
+                                    const lot = lotMap.get(lotId);
+                                    const lotName = (typeof invLot?.lot_id === "object" ? invLot.lot_id?.lot_name : undefined) || lot?.lot_name || `Lot #${lotId}`;
+                                    return {
+                                        reservation_id: Number(sib.id),
+                                        sales_order_detail_id: Number(sod.detail_id),
+                                        inventory_lot_id: Number(sib.inventory_lot_id),
+                                        product_id: Number(sod.product_id),
+                                        lot_id: lotId,
+                                        lot_name: lotName,
+                                        lot_number: lotName,
+                                        batch_no: sib.batch_no || invLot?.batch_no || "",
+                                        reserved_quantity: Number(sib.quantity || 0),
+                                        picked_quantity: Number(sib.quantity || 0),
+                                        returned_quantity: 0,
+                                        status: "Dispatched",
+                                    };
+                                })
+                                : lineReservations;
 
-                            const relevantSodDetails = salesOrderDetails.filter(
-                                (sod) => Number(sod.order_id) === orderId
+                            const hasInvoice = Boolean(curInv?.invoice_id) || allInvoicesForOrder.length > 0 || Boolean(inv?.invoice_id);
+                            const baseDeliverable = invoicedQty !== undefined
+                                ? invoicedQty
+                                : (hasInvoice ? 0 : Math.min(ordered, actualDispatched));
+
+                            const rawPt = prod?.product_type;
+                            const productTypeId =
+                                typeof rawPt === "object" && rawPt !== null
+                                    ? (rawPt.id ?? (rawPt as { id?: number | string; type_id?: number | string }).type_id)
+                                    : rawPt;
+                            const productTypeName =
+                                typeof rawPt === "object" && rawPt !== null
+                                    ? rawPt.name || null
+                                    : (productTypeId ? productTypeMap.get(Number(productTypeId)) || null : null);
+                            const prodUom =
+                                typeof prod?.unit_of_measurement === "object" && prod?.unit_of_measurement !== null
+                                    ? prod.unit_of_measurement.unit_shortcut || ""
+                                    : "";
+
+                            return {
+                                detail_id: Number(sod.detail_id),
+                                product_id: Number(sod.product_id),
+                                product_code: prodCode,
+                                product_name: prodName,
+                                product_description: prodDesc,
+                                uom: prodUom,
+                                ordered_quantity: invoicedQty !== undefined ? invoicedQty : ordered,
+                                invoiced_quantity: invoicedQty,
+                                received_quantity: baseDeliverable,
+                                returned_quantity: 0,
+                                unit_price: Number(sod.unit_price || 0),
+                                has_concern: false,
+                                concern_notes: "",
+                                line_status: "Fulfilled" as const,
+                                reservations: effectiveReservations,
+                                product_type: productTypeId ? Number(productTypeId) : null,
+                                product_type_name: productTypeName,
+                            };
+                        });
+
+                        orderRemarks = "";
+                        linkedSrToReturn = null;
+                    } else {
+                        isCleared = true;
+
+                        const invTxStatus = String(curInv?.transaction_status || "").trim();
+                        const isInvoiceNotDelivered = invTxStatus === "Not Delivered";
+                        const isInvoiceWithConcerns = invTxStatus === "Completed with Concerns" || invTxStatus === "Fulfilled with Concerns";
+                        const isInvoiceWithReturns = invTxStatus === "Completed with Returns" || invTxStatus === "Fulfilled with Returns";
+
+                        items = sodLinesToUse.map((sod) => {
+                            const prod = productMap.get(Number(sod.product_id));
+                            const prodName = prod?.description || prod?.product_name || `Product #${sod.product_id}`;
+                            const prodCode = prod?.product_code || `SKU-${sod.product_id}`;
+                            const prodDesc = prod?.short_description || (prod?.description && prod?.description !== prod?.product_name ? prod?.description : "") || "";
+                            const ordered = Number(sod.ordered_quantity || 0);
+
+                            const rawLineReservations = sodReservationMap.get(Number(sod.detail_id)) || [];
+                            const lineReservations = rawLineReservations;
+                            const totalPickedFromRes = lineReservations.reduce((s, r) => s + (Number(r.picked_quantity) || 0), 0);
+                            const sodAllocated = sod.allocated_quantity !== undefined && sod.allocated_quantity !== null ? Number(sod.allocated_quantity) : null;
+                            const actualDispatched = totalPickedFromRes > 0
+                                ? totalPickedFromRes
+                                : sodAllocated !== null
+                                ? sodAllocated
+                                : 0;
+
+                            let invoicedQty: number | undefined = undefined;
+                            const curInvIdNum = curInv ? Number(curInv.invoice_id || curInv.id) : null;
+
+                            if (curInvIdNum) {
+                                const fromInv = invoiceProductQtyMap.get(`${curInvIdNum}:${sod.product_id}`);
+                                if (fromInv !== undefined) invoicedQty = fromInv;
+                            }
+                            if (invoicedQty === undefined && curInv?.invoice_no) {
+                                const fromInvNo = invoiceProductQtyMap.get(`${String(curInv.invoice_no).trim().toLowerCase()}:${sod.product_id}`);
+                                if (fromInvNo !== undefined) invoicedQty = fromInvNo;
+                            }
+                            if (invoicedQty === undefined && targetInvoices.length === 1) {
+                                if (allInvoicesForOrder.length > 0) {
+                                    let sum = 0;
+                                    let found = false;
+                                    for (const oInv of allInvoicesForOrder) {
+                                        const oInvId = Number(oInv.invoice_id || oInv.id);
+                                        const fromInv = invoiceProductQtyMap.get(`${oInvId}:${sod.product_id}`);
+                                        if (fromInv !== undefined) {
+                                            sum += fromInv;
+                                            found = true;
+                                        }
+                                    }
+                                    if (found) invoicedQty = sum;
+                                }
+                                if (invoicedQty === undefined && inv?.invoice_id) {
+                                    const fromInv = invoiceProductQtyMap.get(`${inv.invoice_id}:${sod.product_id}`);
+                                    if (fromInv !== undefined) invoicedQty = fromInv;
+                                }
+                                if (invoicedQty === undefined) {
+                                    const fromOrdNo = so?.order_no ? invoiceProductQtyMap.get(`${so.order_no.trim().toLowerCase()}:${sod.product_id}`) : undefined;
+                                    if (fromOrdNo !== undefined) {
+                                        invoicedQty = fromOrdNo;
+                                    } else {
+                                        const fromOrd = invoiceProductQtyMap.get(`${orderId}:${sod.product_id}`);
+                                        if (fromOrd !== undefined) invoicedQty = fromOrd;
+                                    }
+                                }
+                            }
+
+                            let sibList: DirectusInvoiceBatch[] | undefined = undefined;
+                            if (curInvIdNum) {
+                                sibList = invoiceBatchesMap.get(`${curInvIdNum}:${sod.product_id}`);
+                            }
+                            if (!sibList && targetInvoices.length === 1 && inv?.invoice_id) {
+                                sibList = invoiceBatchesMap.get(`${inv.invoice_id}:${sod.product_id}`);
+                            }
+
+                            const effectiveReservations: LineItemReservation[] = (sibList && sibList.length > 0)
+                                ? sibList.map((sib) => {
+                                    const invLot = invLotMap.get(Number(sib.inventory_lot_id));
+                                    const lotId = Number(sib.lot_id || (typeof invLot?.lot_id === "object" ? invLot.lot_id?.lot_id : invLot?.lot_id) || 0);
+                                    const lot = lotMap.get(lotId);
+                                    const lotName = (typeof invLot?.lot_id === "object" ? invLot.lot_id?.lot_name : undefined) || lot?.lot_name || `Lot #${lotId}`;
+                                    return {
+                                        reservation_id: Number(sib.id),
+                                        sales_order_detail_id: Number(sod.detail_id),
+                                        inventory_lot_id: Number(sib.inventory_lot_id),
+                                        product_id: Number(sod.product_id),
+                                        lot_id: lotId,
+                                        lot_name: lotName,
+                                        lot_number: lotName,
+                                        batch_no: sib.batch_no || invLot?.batch_no || "",
+                                        reserved_quantity: Number(sib.quantity || 0),
+                                        picked_quantity: Number(sib.quantity || 0),
+                                        returned_quantity: 0,
+                                        status: "Dispatched",
+                                    };
+                                })
+                                : lineReservations;
+
+                            const hasInvoice = Boolean(curInv?.invoice_id) || allInvoicesForOrder.length > 0 || Boolean(inv?.invoice_id);
+                            const baseDeliverable = invoicedQty !== undefined
+                                ? invoicedQty
+                                : (hasInvoice ? 0 : Math.min(ordered, actualDispatched));
+
+                            const srReturned = linkedSr
+                                ? returnItemQtyMap.get(`${linkedSr.return_number.toLowerCase()}:${sod.product_id}`) ||
+                                  returnItemQtyMap.get(`${linkedSr.return_number}:${sod.product_id}`) ||
+                                  returnItemQtyMap.get(`${String(linkedSr.return_id)}:${sod.product_id}`) ||
+                                  returnItemQtyMap.get(`${invoiceNo.toLowerCase()}:${sod.product_id}`) ||
+                                  returnItemQtyMap.get(`${String(orderId)}:${sod.product_id}`) ||
+                                  0
+                                : 0;
+
+                            const matchingUstDetails = ustDetailsForMatching.filter(
+                                (d) => Number(d.product_id) === Number(sod.product_id)
+                            );
+                            const ustReturnedSum = matchingUstDetails.reduce(
+                                (sum, d) => sum + (Number(d.returned_quantity !== undefined && d.returned_quantity !== null ? d.returned_quantity : d.missing_quantity) || 0),
+                                0
                             );
 
-                            for (const curInv of targetInvoices) {
-                                const invoiceNo = curInv?.invoice_no || inv?.invoice_no || so?.invoice_no || "---";
-                                const invoiceId = curInv?.invoice_id ? Number(curInv.invoice_id) : (inv?.invoice_id ? Number(inv.invoice_id) : (so?.invoice_id ? Number(so.invoice_id) : null));
-                                const invoiceDate = curInv?.invoice_date || inv?.invoice_date || allInvoicesForOrder[0]?.invoice_date || null;
-                                const invoiceAmount = curInv ? Number(curInv.total_amount || curInv.net_amount || 0) : Number(so?.total_amount || 0);
+                            const mappedReservations: LineItemReservation[] = effectiveReservations.map((r) => {
+                                const matchByLot = matchingUstDetails.find(
+                                    (d) => Number(d.inventory_lot_id) === Number(r.inventory_lot_id)
+                                );
+                                const rRet = matchByLot
+                                    ? Number(matchByLot.returned_quantity !== undefined && matchByLot.returned_quantity !== null ? matchByLot.returned_quantity : matchByLot.missing_quantity || 0)
+                                    : (matchingUstDetails.length === 1 && !matchingUstDetails[0].inventory_lot_id ? ustReturnedSum : Number(r.returned_quantity || 0));
+                                return {
+                                    ...r,
+                                    returned_quantity: rRet,
+                                };
+                            });
 
-                                const hasSpecificInvoice = Boolean(invoiceNo && invoiceNo !== "---");
-                                const linkedSr =
-                                    (hasSpecificInvoice ? salesReturnMap.get(invoiceNo.toLowerCase()) : null) ||
-                                    (invoiceId ? salesReturnMap.get(String(invoiceId)) : null) ||
-                                    (invoiceId ? salesReturnMap.get(`inv_id:${invoiceId}`) : null) ||
-                                    (!hasSpecificInvoice && targetInvoices.length === 1 && so?.order_no ? salesReturnMap.get(so.order_no.toLowerCase()) : null) ||
-                                    (!hasSpecificInvoice && targetInvoices.length === 1 ? salesReturnMap.get(String(orderId)) : null) ||
-                                    (!hasSpecificInvoice && targetInvoices.length === 1 && so?.order_id ? salesReturnMap.get(String(so.order_id)) : null) ||
-                                    null;
+                            let recQty = baseDeliverable;
+                            let retQty = 0;
+                            let lineStatus: "Fulfilled" | "Fulfilled with Returns" | "Unfulfilled / Returns" = "Fulfilled";
 
-                                const effectiveInvId = invoiceId || inv?.invoice_id || so?.invoice_id || null;
-
-                                const matchingUst = isTripCleared && effectiveInvId
-                                    ? ustList.find((u) => Number(u.sales_invoice_id) === Number(effectiveInvId)) || null
-                                    : null;
-
-                                const ustDetailsForMatching = matchingUst
-                                    ? ustDetailList.filter((d) => Number(d.unfulfilled_sales_transaction_id) === Number(matchingUst.id))
-                                    : [];
-
-                                let sodLinesToUse = relevantSodDetails;
-                                if (targetInvoices.length > 1 && curInv) {
-                                    const curInvIdNum = Number(curInv.invoice_id || curInv.id);
-                                    const invSpecificLines = relevantSodDetails.filter((sod) => {
-                                        const pId = Number(sod.product_id);
-                                        const q1 = invoiceProductQtyMap.get(`${curInvIdNum}:${pId}`);
-                                        const q2 = curInv.invoice_no ? invoiceProductQtyMap.get(`${String(curInv.invoice_no).trim().toLowerCase()}:${pId}`) : undefined;
-                                        return (q1 !== undefined && q1 > 0) || (q2 !== undefined && q2 > 0);
-                                    });
-                                    if (invSpecificLines.length > 0) {
-                                        sodLinesToUse = invSpecificLines;
-                                    }
-                                }
-
-                                let isCleared = false;
-                                let orderFulfillmentStatus:
-                                    | "Pending"
-                                    | "Fulfilled"
-                                    | "Fulfilled with Concerns"
-                                    | "Fulfilled with Returns"
-                                    | "Unfulfilled / Returns" = "Pending";
-                                let orderRemarks = "";
-                                let linkedSrToReturn: typeof linkedSr | null = null;
-                                let items: Array<{
-                                    detail_id: number;
-                                    product_id: number;
-                                    product_code: string;
-                                    product_name: string;
-                                    product_description: string;
-                                    uom: string;
-                                    ordered_quantity: number;
-                                    invoiced_quantity?: number;
-                                    received_quantity: number;
-                                    returned_quantity: number;
-                                    unit_price: number;
-                                    has_concern: boolean;
-                                    concern_notes: string;
-                                    line_status: "Fulfilled" | "Fulfilled with Returns" | "Unfulfilled / Returns";
-                                    reservations: LineItemReservation[];
-                                }> = [];
-
-                                if (!isTripCleared) {
-                                    isCleared = false;
-                                    orderFulfillmentStatus = "Pending";
-
-                                    items = sodLinesToUse.map((sod) => {
-                                        const prod = productMap.get(Number(sod.product_id));
-                                        const prodName = prod?.description || prod?.product_name || `Product #${sod.product_id}`;
-                                        const prodCode = prod?.product_code || `SKU-${sod.product_id}`;
-                                        const prodDesc = prod?.short_description || (prod?.description && prod?.description !== prod?.product_name ? prod?.description : "") || "";
-                                        const ordered = Number(sod.ordered_quantity || 0);
-
-                                        const rawLineReservations = sodReservationMap.get(Number(sod.detail_id)) || [];
-                                        const lineReservations = rawLineReservations;
-                                        const totalPickedFromRes = lineReservations.reduce((s, r) => s + (Number(r.picked_quantity) || 0), 0);
-                                        const conDetail = consolidatorDetails.find(
-                                            (cd) => Number(cd.consolidator_id) === (conId || 0) && Number(cd.sales_order_detail_id) === Number(sod.detail_id)
-                                        );
-                                        const conPicked = conDetail ? Number(conDetail.picked_quantity !== undefined ? conDetail.picked_quantity : conDetail.applied_quantity || 0) : 0;
-                                        const sodAllocated = sod.allocated_quantity !== undefined && sod.allocated_quantity !== null ? Number(sod.allocated_quantity) : null;
-                                        const actualDispatched = totalPickedFromRes > 0
-                                            ? totalPickedFromRes
-                                            : conPicked > 0
-                                            ? conPicked
-                                            : sodAllocated !== null
-                                            ? sodAllocated
-                                            : 0;
-
-                                        let invoicedQty: number | undefined = undefined;
-                                        const curInvIdNum = curInv ? Number(curInv.invoice_id || curInv.id) : null;
-
-                                        if (curInvIdNum) {
-                                            const fromInv = invoiceProductQtyMap.get(`${curInvIdNum}:${sod.product_id}`);
-                                            if (fromInv !== undefined) invoicedQty = fromInv;
-                                        }
-                                        if (invoicedQty === undefined && curInv?.invoice_no) {
-                                            const fromInvNo = invoiceProductQtyMap.get(`${String(curInv.invoice_no).trim().toLowerCase()}:${sod.product_id}`);
-                                            if (fromInvNo !== undefined) invoicedQty = fromInvNo;
-                                        }
-                                        if (invoicedQty === undefined && targetInvoices.length === 1) {
-                                            if (allInvoicesForOrder.length > 0) {
-                                                let sum = 0;
-                                                let found = false;
-                                                for (const oInv of allInvoicesForOrder) {
-                                                    const oInvId = Number(oInv.invoice_id || oInv.id);
-                                                    const fromInv = invoiceProductQtyMap.get(`${oInvId}:${sod.product_id}`);
-                                                    if (fromInv !== undefined) {
-                                                        sum += fromInv;
-                                                        found = true;
-                                                    }
-                                                }
-                                                if (found) invoicedQty = sum;
-                                            }
-                                            if (invoicedQty === undefined && inv?.invoice_id) {
-                                                const fromInv = invoiceProductQtyMap.get(`${inv.invoice_id}:${sod.product_id}`);
-                                                if (fromInv !== undefined) invoicedQty = fromInv;
-                                            }
-                                            if (invoicedQty === undefined) {
-                                                const fromOrdNo = so?.order_no ? invoiceProductQtyMap.get(`${so.order_no.trim().toLowerCase()}:${sod.product_id}`) : undefined;
-                                                if (fromOrdNo !== undefined) {
-                                                    invoicedQty = fromOrdNo;
-                                                } else {
-                                                    const fromOrd = invoiceProductQtyMap.get(`${orderId}:${sod.product_id}`);
-                                                    if (fromOrd !== undefined) invoicedQty = fromOrd;
-                                                }
-                                            }
-                                        }
-
-                                        let sibList: DirectusInvoiceBatch[] | undefined = undefined;
-                                        if (curInvIdNum) {
-                                            sibList = invoiceBatchesMap.get(`${curInvIdNum}:${sod.product_id}`);
-                                        }
-                                        if (!sibList && targetInvoices.length === 1 && inv?.invoice_id) {
-                                            sibList = invoiceBatchesMap.get(`${inv.invoice_id}:${sod.product_id}`);
-                                        }
-
-                                        const effectiveReservations: LineItemReservation[] = (sibList && sibList.length > 0)
-                                            ? sibList.map((sib) => {
-                                                const invLot = invLotMap.get(Number(sib.inventory_lot_id));
-                                                const lotId = Number(sib.lot_id || (typeof invLot?.lot_id === "object" ? invLot.lot_id?.lot_id : invLot?.lot_id) || 0);
-                                                const lot = lotMap.get(lotId);
-                                                const lotName = (typeof invLot?.lot_id === "object" ? invLot.lot_id?.lot_name : undefined) || lot?.lot_name || `Lot #${lotId}`;
-                                                return {
-                                                    reservation_id: Number(sib.id),
-                                                    sales_order_detail_id: Number(sod.detail_id),
-                                                    inventory_lot_id: Number(sib.inventory_lot_id),
-                                                    product_id: Number(sod.product_id),
-                                                    lot_id: lotId,
-                                                    lot_name: lotName,
-                                                    lot_number: lotName,
-                                                    batch_no: sib.batch_no || invLot?.batch_no || "",
-                                                    reserved_quantity: Number(sib.quantity || 0),
-                                                    picked_quantity: Number(sib.quantity || 0),
-                                                    returned_quantity: 0,
-                                                    status: "Dispatched",
-                                                };
-                                            })
-                                            : lineReservations;
-
-                                        const hasInvoice = Boolean(curInv?.invoice_id) || allInvoicesForOrder.length > 0 || Boolean(inv?.invoice_id);
-                                        const baseDeliverable = invoicedQty !== undefined
-                                            ? invoicedQty
-                                            : (hasInvoice ? 0 : Math.min(ordered, actualDispatched));
-
-                                        const rawPt = prod?.product_type;
-                                        const productTypeId =
-                                            typeof rawPt === "object" && rawPt !== null
-                                                ? (rawPt.id ?? (rawPt as { id?: number | string; type_id?: number | string }).type_id)
-                                                : rawPt;
-                                        const productTypeName =
-                                            typeof rawPt === "object" && rawPt !== null
-                                                ? rawPt.name || null
-                                                : (productTypeId ? productTypeMap.get(Number(productTypeId)) || null : null);
-                                        const prodUom =
-                                            typeof prod?.unit_of_measurement === "object" && prod?.unit_of_measurement !== null
-                                                ? prod.unit_of_measurement.unit_shortcut || ""
-                                                : "";
-
-                                        return {
-                                            detail_id: Number(sod.detail_id),
-                                            product_id: Number(sod.product_id),
-                                            product_code: prodCode,
-                                            product_name: prodName,
-                                            product_description: prodDesc,
-                                            uom: prodUom,
-                                            ordered_quantity: invoicedQty !== undefined ? invoicedQty : ordered,
-                                            invoiced_quantity: invoicedQty,
-                                            received_quantity: baseDeliverable,
-                                            returned_quantity: 0,
-                                            unit_price: Number(sod.unit_price || 0),
-                                            has_concern: false,
-                                            concern_notes: "",
-                                            line_status: "Fulfilled" as const,
-                                            reservations: effectiveReservations,
-                                            product_type: productTypeId ? Number(productTypeId) : null,
-                                            product_type_name: productTypeName,
-                                        };
-                                    });
-
-                                    orderRemarks = "";
-                                    linkedSrToReturn = null;
+                            if (isInvoiceNotDelivered) {
+                                recQty = 0;
+                                retQty = matchingUstDetails.length > 0 ? ustReturnedSum : baseDeliverable;
+                                lineStatus = "Unfulfilled / Returns";
+                            } else if (matchingUst) {
+                                const totalDiscrepancy = Math.max(0, ustReturnedSum);
+                                if (totalDiscrepancy >= baseDeliverable && baseDeliverable > 0) {
+                                    recQty = 0;
+                                    retQty = baseDeliverable;
+                                    lineStatus = "Unfulfilled / Returns";
+                                } else if (totalDiscrepancy > 0) {
+                                    retQty = totalDiscrepancy;
+                                    recQty = Math.max(0, baseDeliverable - totalDiscrepancy);
+                                    lineStatus = "Fulfilled with Returns";
                                 } else {
-                                    isCleared = true;
-
-                                    const invTxStatus = String(curInv?.transaction_status || "").trim();
-                                    const isInvoiceNotDelivered = invTxStatus === "Not Delivered";
-                                    const isInvoiceWithConcerns = invTxStatus === "Completed with Concerns" || invTxStatus === "Fulfilled with Concerns";
-                                    const isInvoiceWithReturns = invTxStatus === "Completed with Returns" || invTxStatus === "Fulfilled with Returns";
-
-                                    items = sodLinesToUse.map((sod) => {
-                                        const prod = productMap.get(Number(sod.product_id));
-                                        const prodName = prod?.description || prod?.product_name || `Product #${sod.product_id}`;
-                                        const prodCode = prod?.product_code || `SKU-${sod.product_id}`;
-                                        const prodDesc = prod?.short_description || (prod?.description && prod?.description !== prod?.product_name ? prod?.description : "") || "";
-                                        const ordered = Number(sod.ordered_quantity || 0);
-
-                                        const rawLineReservations = sodReservationMap.get(Number(sod.detail_id)) || [];
-                                        const lineReservations = rawLineReservations;
-                                        const totalPickedFromRes = lineReservations.reduce((s, r) => s + (Number(r.picked_quantity) || 0), 0);
-                                        const conDetail = consolidatorDetails.find(
-                                            (cd) => Number(cd.consolidator_id) === (conId || 0) && Number(cd.sales_order_detail_id) === Number(sod.detail_id)
-                                        );
-                                        const conPicked = conDetail ? Number(conDetail.picked_quantity !== undefined ? conDetail.picked_quantity : conDetail.applied_quantity || 0) : 0;
-                                        const sodAllocated = sod.allocated_quantity !== undefined && sod.allocated_quantity !== null ? Number(sod.allocated_quantity) : null;
-                                        const actualDispatched = totalPickedFromRes > 0
-                                            ? totalPickedFromRes
-                                            : conPicked > 0
-                                            ? conPicked
-                                            : sodAllocated !== null
-                                            ? sodAllocated
-                                            : 0;
-
-                                        let invoicedQty: number | undefined = undefined;
-                                        const curInvIdNum = curInv ? Number(curInv.invoice_id || curInv.id) : null;
-
-                                        if (curInvIdNum) {
-                                            const fromInv = invoiceProductQtyMap.get(`${curInvIdNum}:${sod.product_id}`);
-                                            if (fromInv !== undefined) invoicedQty = fromInv;
-                                        }
-                                        if (invoicedQty === undefined && curInv?.invoice_no) {
-                                            const fromInvNo = invoiceProductQtyMap.get(`${String(curInv.invoice_no).trim().toLowerCase()}:${sod.product_id}`);
-                                            if (fromInvNo !== undefined) invoicedQty = fromInvNo;
-                                        }
-                                        if (invoicedQty === undefined && targetInvoices.length === 1) {
-                                            if (allInvoicesForOrder.length > 0) {
-                                                let sum = 0;
-                                                let found = false;
-                                                for (const oInv of allInvoicesForOrder) {
-                                                    const oInvId = Number(oInv.invoice_id || oInv.id);
-                                                    const fromInv = invoiceProductQtyMap.get(`${oInvId}:${sod.product_id}`);
-                                                    if (fromInv !== undefined) {
-                                                        sum += fromInv;
-                                                        found = true;
-                                                    }
-                                                }
-                                                if (found) invoicedQty = sum;
-                                            }
-                                            if (invoicedQty === undefined && inv?.invoice_id) {
-                                                const fromInv = invoiceProductQtyMap.get(`${inv.invoice_id}:${sod.product_id}`);
-                                                if (fromInv !== undefined) invoicedQty = fromInv;
-                                            }
-                                            if (invoicedQty === undefined) {
-                                                const fromOrdNo = so?.order_no ? invoiceProductQtyMap.get(`${so.order_no.trim().toLowerCase()}:${sod.product_id}`) : undefined;
-                                                if (fromOrdNo !== undefined) {
-                                                    invoicedQty = fromOrdNo;
-                                                } else {
-                                                    const fromOrd = invoiceProductQtyMap.get(`${orderId}:${sod.product_id}`);
-                                                    if (fromOrd !== undefined) invoicedQty = fromOrd;
-                                                }
-                                            }
-                                        }
-
-                                        let sibList: DirectusInvoiceBatch[] | undefined = undefined;
-                                        if (curInvIdNum) {
-                                            sibList = invoiceBatchesMap.get(`${curInvIdNum}:${sod.product_id}`);
-                                        }
-                                        if (!sibList && targetInvoices.length === 1 && inv?.invoice_id) {
-                                            sibList = invoiceBatchesMap.get(`${inv.invoice_id}:${sod.product_id}`);
-                                        }
-
-                                        const effectiveReservations: LineItemReservation[] = (sibList && sibList.length > 0)
-                                            ? sibList.map((sib) => {
-                                                const invLot = invLotMap.get(Number(sib.inventory_lot_id));
-                                                const lotId = Number(sib.lot_id || (typeof invLot?.lot_id === "object" ? invLot.lot_id?.lot_id : invLot?.lot_id) || 0);
-                                                const lot = lotMap.get(lotId);
-                                                const lotName = (typeof invLot?.lot_id === "object" ? invLot.lot_id?.lot_name : undefined) || lot?.lot_name || `Lot #${lotId}`;
-                                                return {
-                                                    reservation_id: Number(sib.id),
-                                                    sales_order_detail_id: Number(sod.detail_id),
-                                                    inventory_lot_id: Number(sib.inventory_lot_id),
-                                                    product_id: Number(sod.product_id),
-                                                    lot_id: lotId,
-                                                    lot_name: lotName,
-                                                    lot_number: lotName,
-                                                    batch_no: sib.batch_no || invLot?.batch_no || "",
-                                                    reserved_quantity: Number(sib.quantity || 0),
-                                                    picked_quantity: Number(sib.quantity || 0),
-                                                    returned_quantity: 0,
-                                                    status: "Dispatched",
-                                                };
-                                            })
-                                            : lineReservations;
-
-                                        const hasInvoice = Boolean(curInv?.invoice_id) || allInvoicesForOrder.length > 0 || Boolean(inv?.invoice_id);
-                                        const baseDeliverable = invoicedQty !== undefined
-                                            ? invoicedQty
-                                            : (hasInvoice ? 0 : Math.min(ordered, actualDispatched));
-
-                                        const srReturned = linkedSr
-                                            ? returnItemQtyMap.get(`${linkedSr.return_number.toLowerCase()}:${sod.product_id}`) ||
-                                              returnItemQtyMap.get(`${linkedSr.return_number}:${sod.product_id}`) ||
-                                              returnItemQtyMap.get(`${String(linkedSr.return_id)}:${sod.product_id}`) ||
-                                              returnItemQtyMap.get(`${invoiceNo.toLowerCase()}:${sod.product_id}`) ||
-                                              returnItemQtyMap.get(`${String(orderId)}:${sod.product_id}`) ||
-                                              0
-                                            : 0;
-
-                                        const matchingUstDetails = ustDetailsForMatching.filter(
-                                            (d) => Number(d.product_id) === Number(sod.product_id)
-                                        );
-                                        const ustReturnedSum = matchingUstDetails.reduce(
-                                            (sum, d) => sum + (Number(d.returned_quantity !== undefined && d.returned_quantity !== null ? d.returned_quantity : d.missing_quantity) || 0),
-                                            0
-                                        );
-
-                                        const mappedReservations: LineItemReservation[] = effectiveReservations.map((r) => {
-                                            const matchByLot = matchingUstDetails.find(
-                                                (d) => Number(d.inventory_lot_id) === Number(r.inventory_lot_id)
-                                            );
-                                            const rRet = matchByLot
-                                                ? Number(matchByLot.returned_quantity !== undefined && matchByLot.returned_quantity !== null ? matchByLot.returned_quantity : matchByLot.missing_quantity || 0)
-                                                : (matchingUstDetails.length === 1 && !matchingUstDetails[0].inventory_lot_id ? ustReturnedSum : Number(r.returned_quantity || 0));
-                                            return {
-                                                ...r,
-                                                returned_quantity: rRet,
-                                            };
-                                        });
-
-                                        let recQty = baseDeliverable;
-                                        let retQty = 0;
-                                        let lineStatus: "Fulfilled" | "Fulfilled with Returns" | "Unfulfilled / Returns" = "Fulfilled";
-
-                                        if (isInvoiceNotDelivered) {
-                                            recQty = 0;
-                                            retQty = matchingUstDetails.length > 0 ? ustReturnedSum : baseDeliverable;
-                                            lineStatus = "Unfulfilled / Returns";
-                                        } else if (matchingUst) {
-                                            const ustMissing = ustReturnedSum;
-                                            const totalDiscrepancy = Math.max(0, ustMissing);
-
-                                            if (totalDiscrepancy >= baseDeliverable && baseDeliverable > 0) {
-                                                recQty = 0;
-                                                retQty = baseDeliverable;
-                                                lineStatus = "Unfulfilled / Returns";
-                                            } else if (totalDiscrepancy > 0) {
-                                                retQty = totalDiscrepancy;
-                                                recQty = Math.max(0, baseDeliverable - totalDiscrepancy);
-                                                lineStatus = "Fulfilled with Returns";
-                                            } else {
-                                                recQty = baseDeliverable;
-                                                retQty = 0;
-                                                lineStatus = "Fulfilled";
-                                            }
-                                        } else if (srReturned > 0) {
-                                            retQty = Math.min(srReturned, baseDeliverable);
-                                            recQty = Math.max(0, baseDeliverable - retQty);
-                                            lineStatus = recQty === 0 ? "Unfulfilled / Returns" : "Fulfilled with Returns";
-                                        } else {
-                                            recQty = baseDeliverable;
-                                            retQty = 0;
-                                            lineStatus = "Fulfilled";
-                                        }
-
-                                        const rawPt = prod?.product_type;
-                                        const productTypeId =
-                                            typeof rawPt === "object" && rawPt !== null
-                                                ? (rawPt.id ?? (rawPt as { id?: number | string; type_id?: number | string }).type_id)
-                                                : rawPt;
-                                        const productTypeName =
-                                            typeof rawPt === "object" && rawPt !== null
-                                                ? rawPt.name || null
-                                                : (productTypeId ? productTypeMap.get(Number(productTypeId)) || null : null);
-                                        const prodUom =
-                                            typeof prod?.unit_of_measurement === "object" && prod?.unit_of_measurement !== null
-                                                ? prod.unit_of_measurement.unit_shortcut || ""
-                                                : "";
-
-                                        return {
-                                            detail_id: Number(sod.detail_id),
-                                            product_id: Number(sod.product_id),
-                                            product_code: prodCode,
-                                            product_name: prodName,
-                                            product_description: prodDesc,
-                                            uom: prodUom,
-                                            ordered_quantity: invoicedQty !== undefined ? invoicedQty : ordered,
-                                            invoiced_quantity: invoicedQty,
-                                            received_quantity: recQty,
-                                            returned_quantity: retQty,
-                                            unit_price: Number(sod.unit_price || 0),
-                                            has_concern: isInvoiceWithConcerns,
-                                            concern_notes: isInvoiceWithConcerns ? ((curInv?.remarks as string) || (so?.remarks as string) || "") : "",
-                                            line_status: lineStatus,
-                                            reservations: mappedReservations,
-                                            product_type: productTypeId ? Number(productTypeId) : null,
-                                            product_type_name: productTypeName,
-                                        };
-                                    });
-
-                                    const allUnfulfilled = items.length > 0 && items.every((i) => i.received_quantity === 0 && i.returned_quantity > 0);
-                                    const anyReturns = items.some((i) => i.returned_quantity > 0);
-
-                                    if (isInvoiceNotDelivered || (matchingUst && allUnfulfilled)) {
-                                        orderFulfillmentStatus = "Unfulfilled / Returns";
-                                        orderRemarks = (curInv?.remarks as string) || matchingUst?.nte || "";
-                                        linkedSrToReturn = null;
-                                    } else if (isInvoiceWithConcerns) {
-                                        orderFulfillmentStatus = "Fulfilled with Concerns";
-                                        orderRemarks = (curInv?.remarks as string) || "";
-                                        linkedSrToReturn = null;
-                                    } else if (isInvoiceWithReturns || (linkedSr && anyReturns) || (matchingUst && anyReturns)) {
-                                        orderFulfillmentStatus = "Fulfilled with Returns";
-                                        orderRemarks = (curInv?.remarks as string) || matchingUst?.nte || "";
-                                        linkedSrToReturn = linkedSr;
-                                    } else if (invTxStatus === "Completed" || fallbackStatus === "Delivered" || fallbackStatus === "Completed") {
-                                        orderFulfillmentStatus = "Fulfilled";
-                                        orderRemarks = (curInv?.remarks as string) || "";
-                                        linkedSrToReturn = null;
-                                    } else {
-                                        orderFulfillmentStatus = "Fulfilled";
-                                        orderRemarks = (curInv?.remarks as string) || "";
-                                        linkedSrToReturn = null;
-                                    }
+                                    recQty = baseDeliverable;
+                                    retQty = 0;
+                                    lineStatus = "Fulfilled";
                                 }
-
-                                const custCode = curInv?.customer_code || so?.customer_code || "";
-                                const custName =
-                                    (custCode ? customerCodeMap.get(custCode.toLowerCase()) : undefined) ||
-                                    (custCode ? customerCodeMap.get(custCode) : undefined) ||
-                                    custCode ||
-                                    "---";
-
-                                const salesmanId: number | string | null =
-                                    (curInv?.salesman_id ? (typeof curInv.salesman_id === "object" ? Number((curInv.salesman_id as Record<string, unknown>).id || (curInv.salesman_id as Record<string, unknown>).salesman_id) || null : (curInv.salesman_id as number | string)) : null) ||
-                                    (so?.salesman_id ? (typeof so.salesman_id === "object" ? Number((so.salesman_id as Record<string, unknown>).id || (so.salesman_id as Record<string, unknown>).salesman_id) || null : (so.salesman_id as number | string)) : null) ||
-                                    null;
-
-                                const smFromMap = salesmanId ? salesmanMap.get(Number(salesmanId)) : undefined;
-                                const salesmanName =
-                                    smFromMap?.salesman_name ||
-                                    (typeof so?.salesman_name === "string" ? so.salesman_name : null) ||
-                                    (typeof curInv?.salesman_name === "string" ? curInv.salesman_name : null) ||
-                                    null;
-                                const salesmanCode = smFromMap?.salesman_code || (typeof curInv?.salesman_code === "string" ? curInv.salesman_code : null) || null;
-
-                                const tripConsolidatorNo = conId
-                                    ? consolidatorNoById.get(conId)
-                                    : (tripDispatchNo ? dispatchNoToConsolidatorNoMap.get(tripDispatchNo) : null);
-                                const resolvedConNo =
-                                    (effectiveInvId ? invoiceIdToConsolidatorNoMap.get(Number(effectiveInvId)) : null) ||
-                                    orderIdToConsolidatorNoMap.get(Number(so?.order_id || orderId)) ||
-                                    tripConsolidatorNo ||
-                                    null;
-
-                                childOrders.push({
-                                    order_id: Number(so?.order_id || orderId),
-                                    order_no: so?.order_no || `SO-${orderId}`,
-                                    order_status: so?.order_status || fallbackStatus || "Dispatched",
-                                    dispatch_no: tripDispatchNo || dispatchNoByOrderId.get(Number(so?.order_id || orderId)) || null,
-                                    consolidator_no: resolvedConNo,
-                                    invoice_id: invoiceId || 0,
-                                    invoice_no: invoiceNo,
-                                    invoice_date: invoiceDate ? String(invoiceDate) : "",
-                                    customer_code: custCode,
-                                    customer_name: custName,
-                                    salesman_id: salesmanId,
-                                    salesman_code: salesmanCode,
-                                    salesman_name: salesmanName,
-                                    amount: invoiceAmount > 0
-                                        ? invoiceAmount
-                                        : Number(so?.net_amount || so?.total_amount || inv?.net_amount || inv?.total_amount || 0),
-                                    remarks: orderRemarks,
-                                    fulfillment_status: orderFulfillmentStatus,
-                                    is_cleared: isCleared,
-                                    linked_sales_return: linkedSrToReturn,
-                                    items,
-                                });
+                            } else if (srReturned > 0) {
+                                retQty = Math.min(srReturned, baseDeliverable);
+                                recQty = Math.max(0, baseDeliverable - retQty);
+                                lineStatus = recQty === 0 ? "Unfulfilled / Returns" : "Fulfilled with Returns";
+                            } else {
+                                recQty = baseDeliverable;
+                                retQty = 0;
+                                lineStatus = "Fulfilled";
                             }
-                        }
 
+                            const rawPt = prod?.product_type;
+                            const productTypeId =
+                                typeof rawPt === "object" && rawPt !== null
+                                    ? (rawPt.id ?? (rawPt as { id?: number | string; type_id?: number | string }).type_id)
+                                    : rawPt;
+                            const productTypeName =
+                                typeof rawPt === "object" && rawPt !== null
+                                    ? rawPt.name || null
+                                    : (productTypeId ? productTypeMap.get(Number(productTypeId)) || null : null);
+                            const prodUom =
+                                typeof prod?.unit_of_measurement === "object" && prod?.unit_of_measurement !== null
+                                    ? prod.unit_of_measurement.unit_shortcut || ""
+                                    : "";
+
+                            return {
+                                detail_id: Number(sod.detail_id),
+                                product_id: Number(sod.product_id),
+                                product_code: prodCode,
+                                product_name: prodName,
+                                product_description: prodDesc,
+                                uom: prodUom,
+                                ordered_quantity: invoicedQty !== undefined ? invoicedQty : ordered,
+                                invoiced_quantity: invoicedQty,
+                                received_quantity: recQty,
+                                returned_quantity: retQty,
+                                unit_price: Number(sod.unit_price || 0),
+                                has_concern: isInvoiceWithConcerns,
+                                concern_notes: isInvoiceWithConcerns ? ((curInv?.remarks as string) || (so?.remarks as string) || "") : "",
+                                line_status: lineStatus,
+                                reservations: mappedReservations,
+                                product_type: productTypeId ? Number(productTypeId) : null,
+                                product_type_name: productTypeName,
+                            };
+                        });
+
+                        const allUnfulfilled = items.length > 0 && items.every((i) => i.received_quantity === 0 && i.returned_quantity > 0);
+                        const anyReturns = items.some((i) => i.returned_quantity > 0);
+
+                        if (isInvoiceNotDelivered || (matchingUst && allUnfulfilled)) {
+                            orderFulfillmentStatus = "Unfulfilled / Returns";
+                            orderRemarks = (curInv?.remarks as string) || matchingUst?.nte || "";
+                            linkedSrToReturn = null;
+                        } else if (isInvoiceWithConcerns) {
+                            orderFulfillmentStatus = "Fulfilled with Concerns";
+                            orderRemarks = (curInv?.remarks as string) || "";
+                            linkedSrToReturn = null;
+                        } else if (isInvoiceWithReturns || (linkedSr && anyReturns) || (matchingUst && anyReturns)) {
+                            orderFulfillmentStatus = "Fulfilled with Returns";
+                            orderRemarks = (curInv?.remarks as string) || matchingUst?.nte || "";
+                            linkedSrToReturn = linkedSr;
+                        } else if (invTxStatus === "Completed" || fallbackStatus === "Delivered" || fallbackStatus === "Completed") {
+                            orderFulfillmentStatus = "Fulfilled";
+                            orderRemarks = (curInv?.remarks as string) || "";
+                            linkedSrToReturn = null;
+                        } else {
+                            orderFulfillmentStatus = "Fulfilled";
+                            orderRemarks = (curInv?.remarks as string) || "";
+                            linkedSrToReturn = null;
+                        }
+                    }
+
+                    const custCode = curInv?.customer_code || so?.customer_code || "";
+                    const custName =
+                        (custCode ? customerCodeMap.get(custCode.toLowerCase()) : undefined) ||
+                        (custCode ? customerCodeMap.get(custCode) : undefined) ||
+                        custCode ||
+                        "---";
+
+                    const salesmanId: number | string | null =
+                        (curInv?.salesman_id ? (typeof curInv.salesman_id === "object" ? Number((curInv.salesman_id as Record<string, unknown>).id || (curInv.salesman_id as Record<string, unknown>).salesman_id) || null : (curInv.salesman_id as number | string)) : null) ||
+                        (so?.salesman_id ? (typeof so.salesman_id === "object" ? Number((so.salesman_id as Record<string, unknown>).id || (so.salesman_id as Record<string, unknown>).salesman_id) || null : (so.salesman_id as number | string)) : null) ||
+                        null;
+
+                    const smFromMap = salesmanId ? salesmanMap.get(Number(salesmanId)) : undefined;
+                    const salesmanName =
+                        smFromMap?.salesman_name ||
+                        (typeof so?.salesman_name === "string" ? so.salesman_name : null) ||
+                        (typeof curInv?.salesman_name === "string" ? curInv.salesman_name : null) ||
+                        null;
+                    const salesmanCode = smFromMap?.salesman_code || (typeof curInv?.salesman_code === "string" ? curInv.salesman_code : null) || null;
+
+                    childOrders.push({
+                        order_id: Number(so?.order_id || orderId),
+                        order_no: so?.order_no || `SO-${orderId}`,
+                        order_status: so?.order_status || fallbackStatus || "Dispatched",
+                        dispatch_no: tripDispatchNo || dispatchNoByOrderId.get(Number(so?.order_id || orderId)) || null,
+                        consolidator_no: null,
+                        invoice_id: invoiceId || 0,
+                        invoice_no: invoiceNo,
+                        invoice_date: invoiceDate ? String(invoiceDate) : "",
+                        customer_code: custCode,
+                        customer_name: custName,
+                        salesman_id: salesmanId,
+                        salesman_code: salesmanCode,
+                        salesman_name: salesmanName,
+                        amount: invoiceAmount > 0
+                            ? invoiceAmount
+                            : Number(so?.net_amount || so?.total_amount || inv?.net_amount || inv?.total_amount || 0),
+                        remarks: orderRemarks,
+                        fulfillment_status: orderFulfillmentStatus,
+                        is_cleared: isCleared,
+                        linked_sales_return: linkedSrToReturn,
+                        items,
+                    });
+                }
+            }
 
             return childOrders;
         };
 
-        // 11a. Primary Grouping: Transform each Dispatch Plan into a ConsolidatedDeliveryRecord
-        const dispatchRecords: ConsolidatedDeliveryRecord[] = allDispatchPlans
+        // 11. Assemble final ConsolidatedDeliveryRecord for each paginated plan
+        const dispatchRecords: ConsolidatedDeliveryRecord[] = paginatedPlans
             .map((dp) => {
                 const dpId = Number(dp.dispatch_id);
                 const branchId = Number(dp.branch_id || 1);
@@ -1999,7 +1465,7 @@ export async function GET(req: NextRequest) {
                 if (distinctOrderIds.length > 0) {
                     childOrders = buildChildOrdersForTrip(
                         distinctOrderIds,
-                        dp.dispatch_date || dp.departure_date || dp.created_at,
+                        dp.dispatch_date || dp.created_at,
                         dp.dispatch_no,
                         isTripCleared,
                         effectiveTripStatus
@@ -2014,7 +1480,7 @@ export async function GET(req: NextRequest) {
                             consolidator_no: null,
                             invoice_id: 0,
                             invoice_no: "---",
-                            invoice_date: dp.dispatch_date || dp.departure_date || dp.created_at || new Date().toISOString(),
+                            invoice_date: dp.dispatch_date || dp.created_at || new Date().toISOString(),
                             customer_code: "-",
                             customer_name: "-",
                             salesman_id: null,
@@ -2073,7 +1539,7 @@ export async function GET(req: NextRequest) {
                     status: effectiveTripStatus,
                     branch_id: branchId,
                     branch_name: branchName,
-                    dispatch_date: dp.dispatch_date || dp.departure_date || dp.created_at || new Date().toISOString(),
+                    dispatch_date: dp.dispatch_date || dp.created_at || new Date().toISOString(),
                     total_orders: totalOrdersCount,
                     total_items: totalItemsCount,
                     total_amount: totalAmount,
@@ -2085,206 +1551,10 @@ export async function GET(req: NextRequest) {
             })
             .filter((r): r is NonNullable<typeof r> => r !== null && r.total_orders > 0);
 
-        // 11b. Legacy Fallback: Retain unconsolidated Consolidator trips if not covered by a dispatch plan
-        const coveredOrderIds = new Set(dispatchRecords.flatMap((r) => r.orders.map((o) => o.order_id)));
-
-        const legacyRecords: ConsolidatedDeliveryRecord[] = allConsolidators
-            .map((con) => {
-                const conId = Number(con.id);
-                const branchId = Number(con.branch_id || 1);
-                const branchName = branchMap.get(branchId)?.branch_name || `Branch #${branchId}`;
-
-                const conSodList = conSodMap.get(conId) || [];
-                const conOrderIdsFromDetails = conSodList
-                    .map((sodId) => sodDetailMap.get(sodId)?.order_id)
-                    .filter((id): id is number => id !== undefined && id > 0);
-
-                const conInvList = conInvMap.get(conId) || [];
-                const conOrderIdsFromInvoices = conInvList.map((invId) => {
-                    const inv = invoiceMapById.get(invId);
-                    return inv ? Number(inv.order_id) : invId;
-                });
-
-                const distinctOrderIds = [...new Set([...conOrderIdsFromDetails, ...conOrderIdsFromInvoices])]
-                    .filter((id) => !coveredOrderIds.has(id));
-
-                if (distinctOrderIds.length === 0) return null;
-
-                const allConOrdersCleared = distinctOrderIds.length > 0 && distinctOrderIds.every((oId) => {
-                    const so = salesOrderMap.get(oId);
-                    const sidInvId =
-                        orderIdToInvoiceIdMap.get(String(oId)) ||
-                        (so?.order_id ? orderIdToInvoiceIdMap.get(String(so.order_id)) : null) ||
-                        (so?.order_no ? orderIdToInvoiceIdMap.get(so.order_no.trim().toLowerCase()) : null) ||
-                        null;
-                    const inv =
-                        (sidInvId ? invoiceMapById.get(sidInvId) : null) ||
-                        (so?.order_id ? invoiceMapByOrderKey.get(String(so.order_id).toLowerCase()) : null) ||
-                        (so?.order_no ? invoiceMapByOrderKey.get(so.order_no.trim().toLowerCase()) : null) ||
-                        (so?.order_no ? invoiceMapByInvoiceNo.get(so.order_no.trim().toLowerCase()) : null) ||
-                        invoiceMapByOrderKey.get(String(oId).toLowerCase()) ||
-                        invoiceMapById.get(oId) ||
-                        null;
-                    const isSoDelivered = Boolean(so?.isDelivered === 1 || so?.isDelivered === true || so?.order_status === "Delivered" || so?.order_status === "Partially Delivered");
-                    const isInvDelivered = Boolean(inv?.isDelivered === 1 || inv?.isDelivered === true || inv?.transaction_status === "Completed" || inv?.transaction_status === "Completed with Concerns" || inv?.transaction_status === "Completed with Returns");
-                    return isSoDelivered || isInvDelivered;
-                });
-
-                const isManifestCleared = con.status === "Completed" || allConOrdersCleared;
-                const effectiveConStatus = isManifestCleared ? "Completed" : (con.status || "Dispatched");
-
-                let hasUninvoicedOrder = false;
-                if (!isManifestCleared) {
-                    for (const orderId of distinctOrderIds) {
-                        const so = salesOrderMap.get(orderId);
-                        const sidInvId =
-                            orderIdToInvoiceIdMap.get(String(orderId)) ||
-                            (so?.order_id ? orderIdToInvoiceIdMap.get(String(so.order_id)) : null) ||
-                            (so?.order_no ? orderIdToInvoiceIdMap.get(so.order_no.trim().toLowerCase()) : null) ||
-                            null;
-
-                        const inv =
-                            (sidInvId ? invoiceMapById.get(sidInvId) : null) ||
-                            (so?.order_id ? invoiceMapByOrderKey.get(String(so.order_id).toLowerCase()) : null) ||
-                            (so?.order_no ? invoiceMapByOrderKey.get(so.order_no.trim().toLowerCase()) : null) ||
-                            (so?.order_no ? invoiceMapByInvoiceNo.get(so.order_no.trim().toLowerCase()) : null) ||
-                            invoiceMapByOrderKey.get(String(orderId).toLowerCase()) ||
-                            invoiceMapById.get(orderId) ||
-                            null;
-
-                        if (
-                            so?.order_status === "For Consolidation" ||
-                            so?.order_status === "For Loading" ||
-                            so?.order_status === "For Shipping"
-                        ) {
-                            hasUninvoicedOrder = true;
-                            break;
-                        }
-
-                        const isInvoicedStatus =
-                            so &&
-                            so.order_status !== "For Consolidation" &&
-                            so.order_status !== "For Invoicing" &&
-                            so.order_status !== "For Loading" &&
-                            so.order_status !== "For Shipping" &&
-                            so.order_status !== "Draft" &&
-                            so.order_status !== "Pending" &&
-                            so.order_status !== "For Approval" &&
-                            so.order_status !== "For Picking" &&
-                            so.order_status !== "For Production";
-
-                        const hasValidInvoice = inv && inv.invoice_id;
-
-                        if (!isInvoicedStatus && !hasValidInvoice) {
-                            hasUninvoicedOrder = true;
-                            break;
-                        }
-                    }
-
-                    if (hasUninvoicedOrder) {
-                        return null;
-                    }
-                }
-
-                const childOrders = buildChildOrdersForTrip(distinctOrderIds, con.created_at, null, isManifestCleared, effectiveConStatus, conId);
-                if (childOrders.length === 0) return null;
-
-                const totalOrdersCount = childOrders.length;
-                const totalItemsCount = childOrders.reduce((sum, o) => sum + o.items.length, 0);
-                const totalAmount = childOrders.reduce((sum, o) => sum + o.amount, 0);
-
-                const hasAnyReturns = childOrders.some((o) => o.fulfillment_status === "Fulfilled with Returns" || o.fulfillment_status === "Unfulfilled / Returns" || Boolean(o.linked_sales_return));
-                const hasAnyConcerns = childOrders.some((o) => o.fulfillment_status === "Fulfilled with Concerns");
-                const isAllUnfulfilled = childOrders.length > 0 && childOrders.every((o) => o.fulfillment_status === "Unfulfilled / Returns");
-
-                let conFulfillmentStatus: "Pending" | "Fulfilled" | "Fulfilled with Concerns" | "Fulfilled with Returns" | "Unfulfilled / Returns" = "Pending";
-                if (!isManifestCleared) {
-                    conFulfillmentStatus = "Pending";
-                } else if (isAllUnfulfilled) {
-                    conFulfillmentStatus = "Unfulfilled / Returns";
-                } else if (hasAnyReturns) {
-                    conFulfillmentStatus = "Fulfilled with Returns";
-                } else if (hasAnyConcerns) {
-                    conFulfillmentStatus = "Fulfilled with Concerns";
-                } else {
-                    conFulfillmentStatus = "Fulfilled";
-                }
-
-                return {
-                    consolidator_id: conId,
-                    consolidator_no: con.consolidator_no || `CON-${conId}`,
-                    dispatch_id: undefined,
-                    dispatch_no: undefined,
-                    driver_name: "-",
-                    vehicle_name: "-",
-                    status: effectiveConStatus,
-                    branch_id: branchId,
-                    branch_name: branchName,
-                    dispatch_date: con.created_at || new Date().toISOString(),
-                    total_orders: totalOrdersCount,
-                    total_items: totalItemsCount,
-                    total_amount: totalAmount,
-                    route_value: totalAmount,
-                    fulfillment_status: conFulfillmentStatus,
-                    is_cleared: isManifestCleared,
-                    orders: childOrders,
-                };
-            })
-            .filter((r): r is NonNullable<typeof r> => r !== null && r.total_orders > 0 && (r.status === "Dispatched" || r.status === "Delivered" || r.status === "Completed" || r.status === "Approved" || r.status === "Audited"));
-
-        const records = dispatchRecords.length > 0 ? dispatchRecords : legacyRecords;
-
-        // 12. Compute Overall Metrics across entire dispatch trips dataset
-        const totalDispatched = records.length;
-        const pendingClearance = records.filter((r) => r.fulfillment_status === "Pending").length;
-        const fulfilledCount = records.filter((r) => r.fulfillment_status === "Fulfilled").length;
-        const concernsAndReturnsCount = records.filter(
-            (r) =>
-                r.fulfillment_status === "Fulfilled with Concerns" ||
-                r.fulfillment_status === "Fulfilled with Returns" ||
-                r.fulfillment_status === "Unfulfilled / Returns"
-        ).length;
-
-        // 13. Filter records by search and status
-        const filtered = records.filter((r) => {
-            const matchesSearch =
-                !search ||
-                (r.dispatch_no && r.dispatch_no.toLowerCase().includes(search)) ||
-                r.consolidator_no.toLowerCase().includes(search) ||
-                r.branch_name.toLowerCase().includes(search) ||
-                (r.driver_name && r.driver_name.toLowerCase().includes(search)) ||
-                (r.vehicle_name && r.vehicle_name.toLowerCase().includes(search)) ||
-                r.orders.some(
-                    (o) =>
-                        o.order_no.toLowerCase().includes(search) ||
-                        o.invoice_no.toLowerCase().includes(search) ||
-                        o.customer_name.toLowerCase().includes(search)
-                );
-
-            const matchesStatus =
-                statusFilter === "All" ||
-                r.status.toLowerCase() === statusFilter.toLowerCase() ||
-                (statusFilter === "Completed" && (r.status === "Completed" || r.status === "Delivered")) ||
-                (statusFilter === "Dispatched" && r.status === "Dispatched") ||
-                (statusFilter === "Approved" && r.status === "Approved") ||
-                (statusFilter === "Audited" && r.status === "Audited") ||
-                (statusFilter === "Pending" && r.fulfillment_status === "Pending") ||
-                (statusFilter === "Fulfilled" && r.fulfillment_status === "Fulfilled") ||
-                (statusFilter === "Fulfilled with Concerns" && r.fulfillment_status === "Fulfilled with Concerns") ||
-                (statusFilter === "Fulfilled with Returns" && r.fulfillment_status === "Fulfilled with Returns") ||
-                (statusFilter === "Unfulfilled / Returns" && r.fulfillment_status === "Unfulfilled / Returns");
-
-            return matchesSearch && matchesStatus;
-        });
-
-        // 14. Paginate
-        const paginatedRecords = filtered.slice(page * size, (page + 1) * size);
-        const totalPages = Math.ceil(filtered.length / size) || 1;
-
         return NextResponse.json({
-            content: paginatedRecords,
+            content: dispatchRecords,
             totalPages,
-            totalElements: filtered.length,
+            totalElements,
             page,
             size,
             metrics: {
