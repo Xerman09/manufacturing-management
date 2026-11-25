@@ -21,6 +21,14 @@ import type {
 
 type DirectusRecord = Record<string, unknown>;
 
+function isRecord(value: unknown): value is DirectusRecord {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nestedRecord(value: unknown): DirectusRecord | null {
+    return isRecord(value) ? value : null;
+}
+
 const STORED_STATUS_VARIANTS: Record<CanonicalJobOrderStatus, string[]> = {
     [JOB_ORDER_STATUS.DRAFT]: ["Draft", "Planned", "Planning", "Shortage"],
     [JOB_ORDER_STATUS.FOR_PICKING]: ["For Picking", "Released", "Proceed"],
@@ -307,7 +315,7 @@ export async function buildQualityIntelligenceReport(params: {
             signal
         ).catch(() => []);
         const matchingJoIds = routeMatchingJoRows
-            .map((r) => Number(typeof r.job_order_id === "object" ? r.job_order_id?.job_order_id : r.job_order_id))
+            .map((r) => Number(isRecord(r.job_order_id) ? r.job_order_id.job_order_id : r.job_order_id))
             .filter((id) => Number.isInteger(id) && id > 0);
 
         if (matchingJoIds.length > 0) {
@@ -470,7 +478,7 @@ export async function buildQualityIntelligenceReport(params: {
     >();
 
     for (const yr of yieldRows) {
-        const jid = Number(typeof yr.job_order_id === "object" ? yr.job_order_id?.job_order_id : yr.job_order_id);
+        const jid = Number(isRecord(yr.job_order_id) ? yr.job_order_id.job_order_id : yr.job_order_id);
         if (!jid) continue;
 
         const cur = yieldByJo.get(jid) || {
@@ -514,7 +522,7 @@ export async function buildQualityIntelligenceReport(params: {
     const finishedBatchesByJo = new Map<number, Set<string>>();
     const genealogyByJo = new Map<number, ComponentGenealogyItem[]>();
     for (const g of genealogyRows) {
-        const jid = Number(typeof g.job_order_id === "object" ? g.job_order_id?.job_order_id : g.job_order_id);
+        const jid = Number(isRecord(g.job_order_id) ? g.job_order_id.job_order_id : g.job_order_id);
         if (!jid) continue;
 
         if (g.batch_no && String(g.batch_no).trim()) {
@@ -525,7 +533,7 @@ export async function buildQualityIntelligenceReport(params: {
 
         const compLot = resolveLotName(g.component_mm_lot_id, g.component_lot_id, lotNameMap);
         const list = genealogyByJo.get(jid) || [];
-        const prod = typeof g.component_product_id === "object" && g.component_product_id ? g.component_product_id : null;
+        const prod = nestedRecord(g.component_product_id);
         list.push({
             componentProductId: prod ? Number(prod.product_id) : safeNumber(g.component_product_id),
             componentProductName: prod ? String(prod.product_name || "Component Item") : `Product #${g.component_product_id}`,
@@ -550,14 +558,15 @@ export async function buildQualityIntelligenceReport(params: {
     // Authoritative routing and work center mapping from manufacturing_job_order_routes
     const routesByJo = new Map<number, Array<{ workCenterId: number; workCenterName: string; sequence: number }>>();
     for (const r of jobOrderRoutes) {
-        const jid = Number(typeof r.job_order_id === "object" ? r.job_order_id?.job_order_id : r.job_order_id);
+        const jid = Number(isRecord(r.job_order_id) ? r.job_order_id.job_order_id : r.job_order_id);
         if (!jid) continue;
 
         let wcId = 0;
         let wcName = "";
-        if (r.work_center_id && typeof r.work_center_id === "object") {
-            wcId = Number(r.work_center_id.work_center_id || r.work_center_id.id);
-            wcName = String(r.work_center_id.work_center_name || r.work_center_id.name || "").trim();
+        const wcObj = nestedRecord(r.work_center_id);
+        if (wcObj) {
+            wcId = Number(wcObj.work_center_id || wcObj.id);
+            wcName = String(wcObj.work_center_name || wcObj.name || "").trim();
         } else if (r.work_center_id) {
             wcId = Number(r.work_center_id);
         }
@@ -579,10 +588,11 @@ export async function buildQualityIntelligenceReport(params: {
     // Operator mapping per Job Order
     const operatorsByJo = new Map<number, Set<string>>();
     for (const ro of routeOperators) {
-        const jid = Number(ro.jo_route_id?.job_order_id);
+        const joRoute = nestedRecord(ro.jo_route_id);
+        const jid = Number(joRoute?.job_order_id);
         if (!jid) continue;
-        const u = ro.operator_id;
-        const name = u ? [u.user_fname, u.user_lname].filter(Boolean).join(" ") : null;
+        const u = nestedRecord(ro.operator_id);
+        const name = u ? [u.user_fname, u.user_lname].filter(Boolean).map(String).join(" ") : null;
         if (!name) continue;
         const cur = operatorsByJo.get(jid) || new Set<string>();
         cur.add(name);
@@ -592,8 +602,8 @@ export async function buildQualityIntelligenceReport(params: {
     // 4. Assemble Lot Trace Rows
     const lotTrace: QualityLotTraceRow[] = rawJobOrders.map((jo) => {
         const id = Number(jo.job_order_id);
-        const prod = typeof jo.product_id === "object" && jo.product_id ? jo.product_id : null;
-        const wc = typeof jo.primary_work_center_id === "object" && jo.primary_work_center_id ? jo.primary_work_center_id : null;
+        const prod = nestedRecord(jo.product_id);
+        const wc = nestedRecord(jo.primary_work_center_id);
 
         const yInfo = yieldByJo.get(id);
         const target = safeNumber(jo.target_quantity);
@@ -695,8 +705,9 @@ export async function buildQualityIntelligenceReport(params: {
     // Also include in-process QA failed records
     for (const qr of qaRecords) {
         if (!parseBitBoolean(qr.is_passed)) {
-            const label = String(qr.parameter_id?.test_name || "Parameter Inspection Failure").trim();
-            const isCrit = parseBitBoolean(qr.parameter_id?.is_critical);
+            const param = nestedRecord(qr.parameter_id);
+            const label = String(param?.test_name || "Parameter Inspection Failure").trim();
+            const isCrit = parseBitBoolean(param?.is_critical);
             const cur = defectCountMap.get(label) || { qty: 0, count: 0, isCrit: false };
             cur.qty += 1; // 1 unit defect observation
             cur.count += 1;
@@ -892,7 +903,7 @@ export async function buildQualityIntelligenceReport(params: {
 
     const workCenterLabel =
         filters.workCenterId && filters.workCenterId !== "all"
-            ? allWorkCenters.find((w) => String(w.work_center_id) === filters.workCenterId)?.work_center_name || "Selected Station"
+            ? String(allWorkCenters.find((w) => String(w.work_center_id) === filters.workCenterId)?.work_center_name || "Selected Station")
             : "All Work Centers";
 
     return {
@@ -1007,8 +1018,9 @@ export async function fetchQualityJobOrderDetail(
     const joRouteNames: string[] = [];
     for (const r of routeRows) {
         let name = "";
-        if (r.work_center_id && typeof r.work_center_id === "object") {
-            name = String(r.work_center_id.work_center_name || r.work_center_id.name || "").trim();
+        const wcObj = nestedRecord(r.work_center_id);
+        if (wcObj) {
+            name = String(wcObj.work_center_name || wcObj.name || "").trim();
         } else if (r.work_center_id) {
             const id = Number(r.work_center_id);
             name = detailWcNameMap.get(id) || `Station #${id}`;
@@ -1043,7 +1055,7 @@ export async function fetchQualityJobOrderDetail(
     return {
         jobOrderId,
         jobOrderNo: String(jo.job_order_no || `JO-${jobOrderId}`),
-        productName: String(jo.product_id?.product_name || "Finished Good"),
+        productName: String(nestedRecord(jo.product_id)?.product_name || "Finished Good"),
         status: displayJobOrderStatus(jo.status),
         targetQty: safeNumber(jo.target_quantity),
         actualQtyProduced: safeNumberOrNull(jo.actual_quantity_produced),
@@ -1065,20 +1077,23 @@ export async function fetchQualityJobOrderDetail(
                 qaStatus: String(yr.qa_status || "Passed"),
                 loggedAt: manilaTimestampOrDash(yr.logged_at),
                 lotNumber: resolvedLot,
-                workCenterName: yr.work_center_id?.work_center_name ? String(yr.work_center_id.work_center_name) : null
+                workCenterName: nestedRecord(yr.work_center_id)?.work_center_name ? String(nestedRecord(yr.work_center_id)?.work_center_name) : null
             };
         }),
-        genealogy: genealogyRows.map((g) => ({
-            componentProductId: Number(g.component_product_id?.product_id || g.component_product_id),
-            componentProductName: String(g.component_product_id?.product_name || "Raw Material"),
-            componentBatchNo: String(g.component_batch_no || "-").trim(),
-            componentLotName: resolveLotName(g.component_mm_lot_id, g.component_lot_id, lotNameMap),
-            consumedQty: safeNumber(g.consumed_quantity),
-            componentLotId: g.component_lot_id ? Number(g.component_lot_id) : null,
-            componentMmLotId: g.component_mm_lot_id ? Number(g.component_mm_lot_id) : null
-        })),
+        genealogy: genealogyRows.map((g) => {
+            const compProd = nestedRecord(g.component_product_id);
+            return {
+                componentProductId: Number(compProd?.product_id || g.component_product_id),
+                componentProductName: String(compProd?.product_name || "Raw Material"),
+                componentBatchNo: String(g.component_batch_no || "-").trim(),
+                componentLotName: resolveLotName(g.component_mm_lot_id, g.component_lot_id, lotNameMap),
+                consumedQty: safeNumber(g.consumed_quantity),
+                componentLotId: g.component_lot_id ? Number(g.component_lot_id) : null,
+                componentMmLotId: g.component_mm_lot_id ? Number(g.component_mm_lot_id) : null
+            };
+        }),
         qaRecords: qaRows.map((qr) => {
-            const p = qr.parameter_id || {};
+            const p = nestedRecord(qr.parameter_id) || {};
             let valueLabel = "-";
             if (qr.value_numeric !== null && qr.value_numeric !== undefined) {
                 valueLabel = String(qr.value_numeric);

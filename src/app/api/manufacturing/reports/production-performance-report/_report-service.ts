@@ -24,6 +24,14 @@ import type {
 
 type DirectusRecord = Record<string, unknown>;
 
+function isRecord(value: unknown): value is DirectusRecord {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nestedRecord(value: unknown): DirectusRecord | null {
+    return isRecord(value) ? value : null;
+}
+
 /**
  * Rows written before the canonical status contract landed still carry legacy
  * spellings, so an equality filter on one canonical value under-counts.
@@ -463,7 +471,7 @@ export async function buildProductionPerformanceReport(params: {
     // Map yield ledger per job order
     const joYieldMap = new Map<number, { yieldQty: number; scrapQty: number; rejectedQty: number }>();
     for (const yr of yieldRows) {
-        const jid = Number(typeof yr.job_order_id === "object" ? yr.job_order_id?.job_order_id : yr.job_order_id);
+        const jid = Number(isRecord(yr.job_order_id) ? yr.job_order_id.job_order_id : yr.job_order_id);
         if (!jid) continue;
         const cur = joYieldMap.get(jid) || { yieldQty: 0, scrapQty: 0, rejectedQty: 0 };
         cur.yieldQty += safeNumber(yr.yield_quantity);
@@ -475,7 +483,7 @@ export async function buildProductionPerformanceReport(params: {
     // Map QA pass rate per job order
     const joQaMap = new Map<number, { total: number; passed: number }>();
     for (const qr of qaRecords) {
-        const jid = Number(typeof qr.job_order_id === "object" ? qr.job_order_id?.job_order_id : qr.job_order_id);
+        const jid = Number(isRecord(qr.job_order_id) ? qr.job_order_id.job_order_id : qr.job_order_id);
         if (!jid) continue;
         const cur = joQaMap.get(jid) || { total: 0, passed: 0 };
         cur.total += 1;
@@ -515,14 +523,14 @@ export async function buildProductionPerformanceReport(params: {
 
         let cycleTimeHrs: number | null = null;
         if (jo.production_started_at && jo.production_completed_at) {
-            const startMs = new Date(jo.production_started_at).getTime();
-            const endMs = new Date(jo.production_completed_at).getTime();
+            const startMs = new Date(String(jo.production_started_at)).getTime();
+            const endMs = new Date(String(jo.production_completed_at)).getTime();
             if (endMs > startMs) {
                 cycleTimeHrs = Number(((endMs - startMs) / (1000 * 3600)).toFixed(1));
             }
         }
 
-        const prodObj = typeof jo.product_id === "object" && jo.product_id ? jo.product_id : null;
+        const prodObj = nestedRecord(jo.product_id);
         const station = resolveWorkCenter(jo.primary_work_center_id);
 
         return {
@@ -590,8 +598,8 @@ export async function buildProductionPerformanceReport(params: {
     let totalDowntimeHrs = 0;
 
     for (const dt of rawDowntime) {
-        const start = dt.started_at ? new Date(dt.started_at) : null;
-        const end = dt.ended_at ? new Date(dt.ended_at) : new Date();
+        const start = dt.started_at ? new Date(String(dt.started_at)) : null;
+        const end = dt.ended_at ? new Date(String(dt.ended_at)) : new Date();
         if (!start) continue;
 
         let durationHrs = 0;
@@ -601,9 +609,10 @@ export async function buildProductionPerformanceReport(params: {
 
         totalDowntimeHrs += durationHrs;
 
-        const assetObj = typeof dt.asset_id === "object" && dt.asset_id ? dt.asset_id : null;
+        const assetObj = nestedRecord(dt.asset_id);
+        const itemId = assetObj ? nestedRecord(assetObj.item_id) : null;
         const assetName = assetObj
-            ? String(assetObj.item_id?.item_name || assetObj.serial || `Asset #${assetObj.id}`)
+            ? String(itemId?.item_name || assetObj.serial || `Asset #${assetObj.id}`)
             : "Production Equipment";
 
         downtimeEvents.push({
@@ -970,13 +979,13 @@ export async function buildProductionPerformanceReport(params: {
     }
 
     for (const qr of qaRecords) {
-        const pObj = typeof qr.parameter_id === "object" && qr.parameter_id ? qr.parameter_id : null;
+        const pObj = nestedRecord(qr.parameter_id);
         const pid = pObj ? Number(pObj.parameter_id) : Number(qr.parameter_id);
         if (!pid) continue;
 
         const cur = paramStatsMap.get(pid) || {
             id: pid,
-            name: pObj?.test_name || `Param #${pid}`,
+            name: String(pObj?.test_name || `Param #${pid}`),
             isCrit: parseBitBoolean(pObj?.is_critical),
             total: 0,
             passed: 0,
@@ -1056,7 +1065,7 @@ export async function buildProductionPerformanceReport(params: {
 
     const workCenterLabel =
         filters.workCenterId && filters.workCenterId !== "all"
-            ? allWorkCenters.find((w) => String(w.work_center_id) === filters.workCenterId)?.work_center_name || "Specific Station"
+            ? String(allWorkCenters.find((w) => String(w.work_center_id) === filters.workCenterId)?.work_center_name || "Specific Station")
             : "All Work Centers";
 
     const statusLabel =
@@ -1133,7 +1142,7 @@ export async function fetchJobOrderDetail(
     return {
         jobOrderId,
         jobOrderNo: String(jo.job_order_no || `JO-${jobOrderId}`),
-        productName: String(jo.product_id?.product_name || "Finished Good"),
+        productName: String(nestedRecord(jo.product_id)?.product_name || "Finished Good"),
         status: displayJobOrderStatus(jo.status),
         targetQty: safeNumber(jo.target_quantity),
         actualQtyProduced: safeNumberOrNull(jo.actual_quantity_produced),
@@ -1146,7 +1155,7 @@ export async function fetchJobOrderDetail(
             rejectedQty: safeNumber(yr.rejected_quantity),
             qaStatus: String(yr.qa_status || "Passed"),
             loggedAt: manilaTimestampOrDash(yr.logged_at),
-            workCenterName: yr.work_center_id?.work_center_name ? String(yr.work_center_id.work_center_name) : null,
+            workCenterName: nestedRecord(yr.work_center_id)?.work_center_name ? String(nestedRecord(yr.work_center_id)?.work_center_name) : null,
             lotNumber: yr.lot_number ? String(yr.lot_number) : null
         })),
         bomVariance: matRows.map((mr) => {
@@ -1156,16 +1165,16 @@ export async function fetchJobOrderDetail(
             const varPct = theo !== null && theo > 0 ? Number(((varQty! / theo) * 100).toFixed(1)) : null;
 
             return {
-                materialName: String(mr.product_id?.product_name || "Material"),
+                materialName: String(nestedRecord(mr.product_id)?.product_name || "Material"),
                 theoreticalQty: theo,
                 actualConsumedQty: act,
                 varianceQty: varQty,
                 variancePct: varPct,
-                uomLabel: String(mr.uom_id?.unit_name || "units")
+                uomLabel: String(nestedRecord(mr.uom_id)?.unit_name || "units")
             };
         }),
         qaRecords: qaRows.map((qr) => {
-            const p = qr.parameter_id || {};
+            const p = nestedRecord(qr.parameter_id) || {};
             let valueLabel = "-";
             if (qr.value_numeric !== null && qr.value_numeric !== undefined) {
                 valueLabel = String(qr.value_numeric);
@@ -1187,8 +1196,8 @@ export async function fetchJobOrderDetail(
             };
         }),
         statusTimeline: timelineRows.map((tr) => {
-            const u = tr.changed_by || {};
-            const name = [u.user_fname, u.user_lname].filter(Boolean).join(" ");
+            const u = nestedRecord(tr.changed_by) || {};
+            const name = [u.user_fname, u.user_lname].filter(Boolean).map(String).join(" ");
             return {
                 historyId: Number(tr.history_id),
                 oldStatus: tr.old_status ? String(tr.old_status) : null,
