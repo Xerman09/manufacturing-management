@@ -273,8 +273,12 @@ export const ReportFilterBar: React.FC<ReportFilterBarProps> = ({
                                 : "bg-muted text-muted-foreground cursor-default"
                         }`}
                     >
-                        <Filter className="h-3.5 w-3.5" />
-                        <span>{hasUnappliedChanges ? "Apply Filters" : "Applied"}</span>
+                        {isLoading ? (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                            <Filter className="h-3.5 w-3.5" />
+                        )}
+                        <span>{isLoading ? "Applying..." : hasUnappliedChanges ? "Apply Filters" : "Applied"}</span>
                     </Button>
 
                     <Button
