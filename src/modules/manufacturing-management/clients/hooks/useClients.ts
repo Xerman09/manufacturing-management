@@ -47,10 +47,12 @@ const EMPTY_CLIENT_FORM_DATA: ClientFormData = {
     brgy: "",
     latitude: "",
     longitude: "",
-    isActive: true
+    isActive: true,
+    isVAT: false,
+    isEWT: false
 };
 
-export function useClients() {
+export function useClients(showTaxFlags: boolean) {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [customerPage, setCustomerPage] = useState(1);
     const [customerPageSize, setCustomerPageSize] = useState<number>(CUSTOMER_PAGE_SIZE_OPTIONS[0]);
@@ -368,7 +370,9 @@ export function useClients() {
             brgy: c.brgy || "",
             latitude: c.latitude !== undefined && c.latitude !== null ? String(c.latitude) : "",
             longitude: c.longitude !== undefined && c.longitude !== null ? String(c.longitude) : "",
-            isActive: c.isActive === 1 || c.isActive === true
+            isActive: c.isActive === 1 || c.isActive === true,
+            isVAT: c.isVAT === 1 || c.isVAT === true,
+            isEWT: c.isEWT === 1 || c.isEWT === true
         });
         
         // Open modal first to ensure instant UI response
@@ -499,7 +503,11 @@ export function useClients() {
             brgy: brgyName.trim() || undefined,
             latitude: parsedLatitude !== null && !isNaN(parsedLatitude) ? parsedLatitude : null,
             longitude: parsedLongitude !== null && !isNaN(parsedLongitude) ? parsedLongitude : null,
-            isActive: formData.isActive ? 1 : 0
+            isActive: formData.isActive ? 1 : 0,
+            ...(showTaxFlags && {
+                isVAT: formData.isVAT ? 1 : 0,
+                isEWT: formData.isEWT ? 1 : 0
+            })
         };
 
         try {
