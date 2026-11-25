@@ -6,12 +6,11 @@ import {
     Activity,
     AlertCircle,
     CheckCircle2,
-    Clock,
-    FileSpreadsheet,
+
     Layers,
     ListTree,
     ShieldCheck,
-    X,
+
     XCircle
 } from "lucide-react";
 import {

@@ -19,7 +19,7 @@ interface ExportRequestBody {
 
 function buildPrintableHtml(
     report: ProductionPerformanceReportPayload,
-    aiAnalysis?: ProductionAIAnalysisPayload | null
+
 ): string {
     const kpis = report.kpis;
     const dateStr = new Date().toLocaleDateString("en-PH", {
@@ -377,7 +377,7 @@ export async function POST(request: Request) {
         });
 
         if (format === "pdf") {
-            const html = buildPrintableHtml(report, aiAnalysis);
+            const html = buildPrintableHtml(report);
             return new NextResponse(html, {
                 headers: {
                     "Content-Type": "text/html; charset=utf-8",

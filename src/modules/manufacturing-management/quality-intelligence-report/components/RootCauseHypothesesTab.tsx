@@ -108,7 +108,7 @@ const byDefectiveQtyDesc = (a: QualityRootCauseRow, b: QualityRootCauseRow) =>
 export const RootCauseHypothesesTab: React.FC<RootCauseHypothesesTabProps> = ({
     payload,
     aiCommentary,
-    onOpenAiDrawer
+  
 }) => {
     const correlations = payload.rootCauseCorrelations || [];
 

@@ -29,7 +29,15 @@ function wrapLabel(text: string): string[] {
     return clamped.map((l) => (l.length > TICK_WRAP_CHARS + 2 ? `${l.slice(0, TICK_WRAP_CHARS)}…` : l));
 }
 
-export function WrappedAxisTick({ x = 0, y = 0, payload }: any) {
+interface WrappedAxisTickProps {
+    x?: number;
+    y?: number;
+    payload?: {
+        value?: string | number;
+    };
+}
+
+export function WrappedAxisTick({ x = 0, y = 0, payload }: WrappedAxisTickProps) {
     const full = String(payload?.value ?? "");
     return (
         <g transform={`translate(${x},${y})`}>

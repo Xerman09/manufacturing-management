@@ -24,32 +24,7 @@ export interface LineItemReservation {
     created_at?: string;
 }
 
-interface DirectusConsolidator {
-    id: number;
-    consolidator_no: string;
-    status: string;
-    branch_id: number;
-    created_at: string;
-    updated_at: string;
-    created_by?: number;
-    checked_by?: number | null;
-}
 
-interface DirectusConsolidatorInvoice {
-    id: number;
-    consolidator_id: number;
-    invoice_id: number;
-}
-
-interface DirectusConsolidatorDetail {
-    id: number;
-    consolidator_id: number;
-    sales_order_detail_id?: number | null;
-    product_id: number;
-    ordered_quantity: number;
-    picked_quantity: number;
-    applied_quantity: number;
-}
 
 interface DirectusInvoice {
     id?: number;

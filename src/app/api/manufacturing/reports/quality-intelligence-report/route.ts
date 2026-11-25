@@ -20,7 +20,7 @@ export async function GET(request: Request) {
         productId: searchParams.get("productId") || "all",
         workCenterId: searchParams.get("workCenterId") || "all",
         shiftName: searchParams.get("shiftName") || "all",
-        status: (searchParams.get("status") || "all") as any
+        status: (searchParams.get("status") || "all") as QualityFilters["status"]
     };
 
     try {

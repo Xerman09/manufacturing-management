@@ -12,7 +12,7 @@ import {
     XAxis,
     YAxis
 } from "recharts";
-import { AlertOctagon, ArrowRight, Gauge, Wrench } from "lucide-react";
+import {  Wrench } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { WrappedAxisTick } from "./WrappedAxisTick";

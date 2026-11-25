@@ -6,7 +6,7 @@ import {
     AlertTriangle,
     Boxes,
     CheckCircle2,
-    Layers,
+
     Repeat,
     ShieldAlert,
     TrendingDown
@@ -35,7 +35,7 @@ const itemVariants = {
     show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
 
-export const KpiSummaryStrip: React.FC<KpiSummaryStripProps> = ({ kpis, isLoading }) => {
+export const KpiSummaryStrip: React.FC<KpiSummaryStripProps> = ({ kpis }) => {
     // Determine color badges
     const getDefectRateColor = (rate: number | null) => {
         if (rate === null) return "text-muted-foreground";

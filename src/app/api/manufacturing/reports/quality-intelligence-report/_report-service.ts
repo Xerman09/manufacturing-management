@@ -19,7 +19,7 @@ import type {
     QualityTrendPoint
 } from "@/modules/manufacturing-management/quality-intelligence-report/types";
 
-type DirectusRecord = Record<string, any>;
+type DirectusRecord = Record<string, unknown>;
 
 const STORED_STATUS_VARIANTS: Record<CanonicalJobOrderStatus, string[]> = {
     [JOB_ORDER_STATUS.DRAFT]: ["Draft", "Planned", "Planning", "Shortage"],
@@ -103,24 +103,37 @@ function manilaTimestampOrDash(value: unknown): string {
     return Number.isNaN(date.getTime()) ? "-" : manilaTimestamp(date);
 }
 
+interface LotFieldObject {
+    lot_id?: unknown;
+    lot_name?: unknown;
+}
+
 function resolveLotName(
     mmLotField: unknown,
     lotField: unknown,
     lotMap: Map<number, string>
 ): string | null {
-    if (mmLotField && typeof mmLotField === "object" && "lot_name" in (mmLotField as any)) {
-        const name = String((mmLotField as any).lot_name || "").trim();
+    if (mmLotField && typeof mmLotField === "object" && "lot_name" in mmLotField) {
+        const name = String((mmLotField as LotFieldObject).lot_name || "").trim();
         if (name) return name;
     }
-    const mmLotId = Number(typeof mmLotField === "object" ? (mmLotField as any)?.lot_id : mmLotField);
+    const mmLotId = Number(
+        typeof mmLotField === "object" && mmLotField !== null
+            ? (mmLotField as LotFieldObject).lot_id
+            : mmLotField
+    );
     if (Number.isInteger(mmLotId) && mmLotId > 0 && lotMap.has(mmLotId)) {
         return lotMap.get(mmLotId)!;
     }
-    if (lotField && typeof lotField === "object" && "lot_name" in (lotField as any)) {
-        const name = String((lotField as any).lot_name || "").trim();
+    if (lotField && typeof lotField === "object" && "lot_name" in lotField) {
+        const name = String((lotField as LotFieldObject).lot_name || "").trim();
         if (name) return name;
     }
-    const lotId = Number(typeof lotField === "object" ? (lotField as any)?.lot_id : lotField);
+    const lotId = Number(
+        typeof lotField === "object" && lotField !== null
+            ? (lotField as LotFieldObject).lot_id
+            : lotField
+    );
     if (Number.isInteger(lotId) && lotId > 0 && lotMap.has(lotId)) {
         return lotMap.get(lotId)!;
     }
@@ -269,7 +282,7 @@ export async function buildQualityIntelligenceReport(params: {
     }
 
     // 1. Build filter for Job Orders
-    const joFilter: Record<string, any> = {};
+    const joFilter: Record<string, unknown> = {};
 
     if (filters.dateFrom && filters.dateTo) {
         joFilter._or = [
@@ -333,7 +346,7 @@ export async function buildQualityIntelligenceReport(params: {
     const scoped = jobOrderIds.length > 0;
 
     // 2. Fetch related data in parallel
-    const yieldFilter: Record<string, any> = scoped ? { job_order_id: { _in: jobOrderIds } } : {};
+    const yieldFilter: Record<string, unknown> = scoped ? { job_order_id: { _in: jobOrderIds } } : {};
     if (filters.shiftName && filters.shiftName !== "all") {
         yieldFilter.shift_name = { _eq: filters.shiftName };
     }
@@ -348,7 +361,6 @@ export async function buildQualityIntelligenceReport(params: {
         mmLotsRows,
         lotsRows,
         allWorkCenters,
-        allQaParams,
         aiTier
     ] = await Promise.all([
         scoped
@@ -426,12 +438,6 @@ export async function buildQualityIntelligenceReport(params: {
         fetchDirectusRows(
             `${directusBase}/items/manufacturing_work_centers?fields=work_center_id,work_center_name&limit=-1`,
             "manufacturing_work_centers",
-            signal
-        ).catch(() => []),
-
-        fetchDirectusRows(
-            `${directusBase}/items/quality_inspection_parameters?fields=parameter_id,test_name,is_critical&limit=-1`,
-            "quality_inspection_parameters",
             signal
         ).catch(() => []),
 
@@ -1094,7 +1100,7 @@ export async function fetchQualityJobOrderDetail(
             };
         }),
         dispositions: dispoRows.map((d) => {
-            let failedParams: any[] = [];
+            let failedParams: Array<{ test_name?: string }> = [];
             if (typeof d.failed_parameters === "string") {
                 try {
                     failedParams = JSON.parse(d.failed_parameters);
@@ -1102,7 +1108,7 @@ export async function fetchQualityJobOrderDetail(
                     failedParams = [];
                 }
             } else if (Array.isArray(d.failed_parameters)) {
-                failedParams = d.failed_parameters;
+                failedParams = d.failed_parameters as Array<{ test_name?: string }>;
             }
             return {
                 id: String(d.id),

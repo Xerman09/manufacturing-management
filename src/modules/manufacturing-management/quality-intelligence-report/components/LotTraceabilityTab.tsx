@@ -72,8 +72,8 @@ export const LotTraceabilityTab: React.FC<LotTraceabilityTabProps> = ({
     // Sorting
     const sortedRows = useMemo(() => {
         return [...filteredRows].sort((a, b) => {
-            let valA: any = a[sortField];
-            let valB: any = b[sortField];
+            let valA: unknown = a[sortField];
+            let valB: unknown = b[sortField];
 
             if (valA === null || valA === undefined) valA = "";
             if (valB === null || valB === undefined) valB = "";

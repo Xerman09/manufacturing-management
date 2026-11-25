@@ -22,7 +22,7 @@ import type {
     ProductionPerformanceReportPayload
 } from "@/modules/manufacturing-management/production-performance-report/types";
 
-type DirectusRecord = Record<string, any>;
+type DirectusRecord = Record<string, unknown>;
 
 /**
  * Rows written before the canonical status contract landed still carry legacy
@@ -293,7 +293,7 @@ export async function buildProductionPerformanceReport(params: {
     }
 
     // Build filter for job orders
-    const joFilter: Record<string, any> = {};
+    const joFilter: Record<string, unknown> = {};
 
     if (filters.dateFrom && filters.dateTo) {
         joFilter._or = [
@@ -335,10 +335,10 @@ export async function buildProductionPerformanceReport(params: {
     const jobOrderIds = rawJobOrders.map((j) => Number(j.job_order_id)).filter((id) => Number.isInteger(id) && id > 0);
 
     // Parallel fetch related tables: yield ledger, QA records, work centers, downtime events
-    const yieldLedgerFilter: Record<string, any> =
+    const yieldLedgerFilter: Record<string, unknown> =
         jobOrderIds.length > 0 ? { job_order_id: { _in: jobOrderIds } } : {};
 
-    const qaRecordsFilter: Record<string, any> = jobOrderIds.length > 0 ? { job_order_id: { _in: jobOrderIds } } : {};
+    const qaRecordsFilter: Record<string, unknown> = jobOrderIds.length > 0 ? { job_order_id: { _in: jobOrderIds } } : {};
 
     // Maintenance episodes belong to the Job Orders that triggered them, so the
     // same scope plus period applies; unscoped episodes would pin availability at 100%.
