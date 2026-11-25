@@ -304,7 +304,7 @@ Produce the full comprehensive executive report matching this exact structure:
 `;
 
         const domainSystemInstruction = `
-You are the AI Executive Copilot for Plant Operations in a Manufacturing Management System.
+You are the AI Insight Executive for Plant Operations in a Manufacturing Management System.
 Analyze the provided sanitized KPI cards and operational scope.
 Write in clear, professional business English.
 Do NOT include bracketed tags like [VERIFIED FACT] or [HYPOTHESIS / ESTIMATE] in your text; state factual metrics directly and present deductions professionally.

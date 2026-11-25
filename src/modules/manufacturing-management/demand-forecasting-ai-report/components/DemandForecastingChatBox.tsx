@@ -202,24 +202,7 @@ export const DemandForecastingChatBox: React.FC<Props> = ({ payload, assumptions
                                         : "bg-violet-600 text-white"
                                 }`}
                             >
-                                {isAssistant && (
-                                    <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-border/40">
-                                        <span className="text-[10px] font-bold text-foreground flex items-center gap-1.5">
-                                            Executive Copilot
-                                        </span>
-                                        <span
-                                            className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${
-                                                m.modelUsed?.toLowerCase().includes("gemini")
-                                                    ? "bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/25"
-                                                    : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25"
-                                            }`}
-                                        >
-                                            {m.modelUsed?.toLowerCase().includes("gemini")
-                                                ? `✨ ${m.modelUsed}`
-                                                : "⚙️ Offline Rule Engine"}
-                                        </span>
-                                    </div>
-                                )}
+                                
                                 <div className="space-y-0.5">{renderFormattedText(m.content)}</div>
                                 <div
                                     className={`text-[9px] mt-1.5 text-right ${
