@@ -162,21 +162,6 @@ function buildPrintableHtml(
         </div>
     </div>
 
-    ${
-        aiAnalysis
-            ? `<div class="ai-box">
-        <div class="ai-title">AI Production Performance Insights & Corrective Actions</div>
-        <p style="margin: 0 0 8px 0;">${aiAnalysis.executiveSummary}</p>
-        <strong>Proposed Corrective Actions:</strong>
-        <ul style="margin: 4px 0 0 0; padding-left: 20px;">
-            ${aiAnalysis.correctiveActions
-                .map((a) => `<li><strong>${a.title}</strong> (${a.targetMetric}) — ${a.description} <em>[${a.expectedImprovement}]</em></li>`)
-                .join("")}
-        </ul>
-    </div>`
-            : ""
-    }
-
     <div class="section-title">Job Orders Production Performance (${report.jobOrders.length} orders)</div>
     <table>
         <thead>
@@ -355,21 +340,19 @@ async function buildExcelWorkbook(
 
     // Sheet 5: AI Recommendations
     if (aiAnalysis) {
-        const s5 = wb.addWorksheet("AI Actions");
+        const s5 = wb.addWorksheet(aiAnalysis.meta.isFallback ? "Rule Actions" : "AI Actions");
         s5.columns = [
             { header: "Title", key: "title", width: 32 },
             { header: "Target Metric", key: "metric", width: 20 },
             { header: "Priority", key: "priority", width: 14 },
-            { header: "Action Description", key: "desc", width: 48 },
-            { header: "Expected Improvement", key: "improvement", width: 36 }
+            { header: "Action Description", key: "desc", width: 48 }
         ];
         for (const act of aiAnalysis.correctiveActions) {
             s5.addRow({
                 title: act.title,
                 metric: act.targetMetric,
                 priority: act.priority.toUpperCase(),
-                desc: act.description,
-                improvement: act.expectedImprovement
+                desc: act.description
             });
         }
     }

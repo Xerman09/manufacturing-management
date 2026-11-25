@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { authorizeProductionPerformanceReport } from "../auth";
+import { resolveServerAiTier } from "../_report-service";
 import { runCoreAiAnalysis, parseJsonSafe } from "@/lib/ai";
+import type { GlobalAiTierSlug } from "@/lib/ai";
 import type {
     PPRBottleneckItem,
     PPRCorrectiveActionItem,
@@ -37,21 +39,40 @@ function buildDeterministicAnalysis(report: ProductionPerformanceReportPayload):
     const qaLabel = kpis.qaPassRatePct !== null ? `${kpis.qaPassRatePct}%` : "undetermined";
     const oeeLabel = kpis.oeePct !== null ? `${kpis.oeePct}%` : "undetermined";
 
-    const executiveSummary = `During this reporting window (${report.meta.dateLabel}), production operated at an estimated OEE of ${oeeLabel} and maintained an overall yield rate of ${yieldLabel} against an average scrap rate of ${scrapLabel} and a QA pass rate of ${qaLabel}. Primary loss concentration occurred across ${
-        topLoss.map((l) => `${l.label} (${l.lossQty.toLocaleString()} units)`).join(", ") || "standard operations"
-    }. Recommended interventions focus on bottleneck station scrap reduction, preventive asset maintenance, and critical parameter control.`;
+    const measured = [
+        kpis.oeePct !== null && `estimated OEE ${oeeLabel}`,
+        kpis.avgYieldRatePct !== null && `yield rate ${yieldLabel}`,
+        kpis.avgScrapRatePct !== null && `scrap rate ${scrapLabel}`,
+        kpis.qaPassRatePct !== null && `QA pass rate ${qaLabel}`
+    ]
+        .filter(Boolean)
+        .join(", ");
+
+    const executiveSummary = `For ${report.meta.dateLabel}, ${kpis.totalJobOrders} job orders were evaluated${
+        measured ? `, returning ${measured}.` : ", and none of the headline rates could be derived from the recorded data."
+    } ${
+        topLoss.length > 0
+            ? `Recorded loss concentrates in ${topLoss
+                  .map((l) => `${l.label} (${l.lossQty.toLocaleString()} units)`)
+                  .join(", ")}.`
+            : "No scrap or rejected quantities were recorded in this scope."
+    }`;
 
     const keyObservations: string[] = [
-        `Production reached an estimated OEE of ${oeeLabel} with an average yield rate of ${yieldLabel} across ${kpis.totalJobOrders} evaluated job orders.`,
-        kpis.avgScrapRatePct !== null && kpis.avgScrapRatePct > 3
-            ? `Scrap rate (${scrapLabel}) exceeds standard tolerance of 3.0%, representing significant raw material variance.`
-            : `Scrap rate remained controlled within operational tolerance at ${scrapLabel}.`,
-        worstWorkCenter
+        kpis.totalJobOrders > 0
+            ? `${kpis.totalJobOrders} job orders evaluated: OEE ${oeeLabel}, average yield ${yieldLabel}.`
+            : "No job orders fell within the selected scope.",
+        kpis.avgScrapRatePct !== null
+            ? `Scrap measured at ${scrapLabel} across ${kpis.totalJobOrders} evaluated job orders.`
+            : "Scrap rate undetermined — no yield ledger rows in the selected scope.",
+        worstWorkCenter?.avgScrapRatePct != null
             ? `Work center '${worstWorkCenter.workCenterName}' exhibited the highest scrap intensity at ${worstWorkCenter.avgScrapRatePct}%.`
-            : "Work center distribution showed balanced operational throughput.",
+            : "No work center recorded scrap in the selected scope.",
         criticalFails.length > 0
-            ? `${criticalFails.length} critical QA parameters encountered inspection failures requiring immediate calibration.`
-            : "Zero critical QA parameters failed during final or in-process verification."
+            ? `${criticalFails.length} critical QA parameters encountered inspection failures: ${criticalFails
+                  .map((c) => c.parameterName)
+                  .join(", ")}.`
+            : "No critical QA parameters recorded a failed check in the selected scope."
     ];
 
     const bottlenecks: PPRBottleneckItem[] = [];
@@ -86,42 +107,49 @@ function buildDeterministicAnalysis(report: ProductionPerformanceReportPayload):
         });
     }
 
-    const correctiveActions: PPRCorrectiveActionItem[] = [
-        {
+    const correctiveActions: PPRCorrectiveActionItem[] = [];
+
+    if (worstWorkCenter) {
+        correctiveActions.push({
             id: "act-1",
-            title: `Station Recalibration for ${worstWorkCenter?.workCenterName || "Primary Routing"}`,
+            title: `Station Recalibration for ${worstWorkCenter.workCenterName}`,
             description:
-                "Conduct mechanical inspection, tooling alignment, and speed calibration on machinery to eliminate station-specific scrap generation.",
-            priority: "high",
-            targetMetric: "Scrap Rate",
-            expectedImprovement: "Expected 1.5% to 2.5% scrap rate reduction within 14 days."
-        },
-        {
-            id: "act-2",
-            title: "Standardize Operator In-Process QA Gateways",
-            description:
-                "Enforce mandatory check frequency at critical routing steps prior to final batch completion to prevent late-stage batch quarantine.",
-            priority: criticalFails.length > 0 ? "critical" : "medium",
-            targetMetric: "QA Pass Rate",
-            expectedImprovement: "Target 99.0%+ first-pass yield and zero critical quarantine holds."
-        },
-        {
+                "Inspect mechanical condition, tooling alignment and feed speed on the station carrying the highest recorded scrap share.",
+            priority: worstWorkCenter.avgScrapRatePct && worstWorkCenter.avgScrapRatePct > 5 ? "critical" : "high",
+            targetMetric: "Scrap Rate"
+        });
+    }
+
+    correctiveActions.push({
+        id: "act-2",
+        title: "Review In-Process QA Check Frequency",
+        description: criticalFails.length > 0
+            ? `Increase check frequency at the steps producing ${criticalFails
+                  .map((c) => c.parameterName)
+                  .join(", ")} so failures are caught before batch completion.`
+            : "Confirm in-process checks are being recorded at each routing step before final batch completion.",
+        priority: criticalFails.length > 0 ? "critical" : "medium",
+        targetMetric: "QA Pass Rate"
+    });
+
+    if (kpis.totalDowntimeHrs && kpis.totalDowntimeHrs > 0) {
+        correctiveActions.push({
             id: "act-3",
-            title: "Targeted Preventive Maintenance on High-Hour Assets",
-            description:
-                "Schedule off-shift preventive maintenance routines on frequently halted equipment to prevent unplanned cycle downtime.",
-            priority: "medium",
-            targetMetric: "Asset Uptime",
-            expectedImprovement: "Reduce total downtime hours by 30% next cycle."
-        }
-    ];
+            title: "Schedule Preventive Maintenance on Halted Assets",
+            description: `Plan off-shift maintenance for the ${
+                report.downtimeEvents.length
+            } assets logged with breakdown events totalling ${kpis.totalDowntimeHrs} hours.`,
+            priority: kpis.totalDowntimeHrs > 10 ? "high" : "medium",
+            targetMetric: "Asset Uptime"
+        });
+    }
 
     const riskFlags: PPRRiskFlagItem[] = [];
     if (kpis.avgScrapRatePct && kpis.avgScrapRatePct > 5) {
         riskFlags.push({
             id: "risk-1",
             flag: "Excess Material Scrap Loss",
-            detail: "Current scrap rate exceeds industry safety tolerance, driving unabsorbed BOM cost variance.",
+            detail: `Scrap measured at ${kpis.avgScrapRatePct}% of production volume for ${report.meta.dateLabel}.`,
             severity: "high"
         });
     }
@@ -137,7 +165,7 @@ function buildDeterministicAnalysis(report: ProductionPerformanceReportPayload):
         riskFlags.push({
             id: "risk-3",
             flag: "Below-Target Yield Completion",
-            detail: "Job order completion rates are lagging target requirements, presenting delivery schedule risk.",
+            detail: `Average yield of ${kpis.avgYieldRatePct}% is below the 85% level this report colours as attention.`,
             severity: "medium"
         });
     }
@@ -165,13 +193,27 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "Invalid report payload provided." }, { status: 400 });
         }
 
+        // Server-side AI tier verification (never trust client-supplied tier)
+        const tierInfo = await resolveServerAiTier(request.signal);
+        if (!tierInfo.assigned || tierInfo.tierLevel === 0 || tierInfo.tierSlug === "unassigned") {
+            return NextResponse.json(
+                { error: "AI Operations & Quality Insight is not assigned to this module." },
+                { status: 403 }
+            );
+        }
+
+        const requestedTier: GlobalAiTierSlug =
+            tierInfo.tierSlug === "executive" || tierInfo.tierSlug === "pro" || tierInfo.tierSlug === "basic"
+                ? tierInfo.tierSlug
+                : "basic";
+
         const domainSystemInstruction = `
 You are an expert Manufacturing Operations & Production Performance AI Analyst.
 Analyze the provided manufacturing production report containing job orders, yield rates, scrap rates, work center throughput, downtime events, and QA inspection parameters.
 Analyze production trends, identify bottlenecks and loss drivers, and propose high-impact corrective actions.
 
 Rules:
-1. Reference ONLY numbers, names, work centers, and parameters present in the payload. Do not invent metrics.
+1. Reference ONLY numbers, names, work centers, and parameters present in the payload. Do not invent metrics, tolerance thresholds, or forecasted improvement percentages.
 2. Return ONLY clean JSON matching this exact structure:
 {
   "executiveSummary": "2-3 sentences synthesizing production health, yield, scrap trends, and OEE",
@@ -191,8 +233,7 @@ Rules:
       "title": "Actionable title",
       "description": "Specific action to take",
       "priority": "critical" | "high" | "medium" | "low",
-      "targetMetric": "Yield Rate | Scrap Rate | QA Pass Rate | Downtime | OEE",
-      "expectedImprovement": "Quantified expected gain"
+      "targetMetric": "Yield Rate | Scrap Rate | QA Pass Rate | Downtime | OEE"
     }
   ],
   "riskFlags": [
@@ -233,7 +274,7 @@ Rules:
         const coreRes = await runCoreAiAnalysis<ProductionPerformanceReportPayload, RawAiOutput>(
             {
                 moduleName: "production-performance-report",
-                tierSlug: "pro",
+                tierSlug: requestedTier,
                 payload: report,
                 domainSystemInstruction,
                 buildPrompt,
@@ -245,35 +286,34 @@ Rules:
                     maxItemsCap: 50
                 }
             },
-            2
+            tierInfo.tierLevel
         );
 
+        // coreRes.data is already the deterministic engine's output whenever isFallback is set, so the
+        // payload is never a blend of model and rule text under one model name.
+        const isDeterministic = coreRes.governance?.isFallback === true;
         const data = coreRes.data || {};
-        const fallback = buildDeterministicAnalysis(report);
+        const executiveSummary = String(data.executiveSummary || "");
+
+        if (!executiveSummary) {
+            return NextResponse.json(
+                { error: "The analysis response did not contain usable content. Try again." },
+                { status: 502 }
+            );
+        }
 
         const finalPayload: ProductionAIAnalysisPayload = {
-            executiveSummary: String(data.executiveSummary || fallback.executiveSummary || ""),
-            keyObservations:
-                Array.isArray(data.keyObservations) && data.keyObservations.length > 0
-                    ? data.keyObservations.map(String)
-                    : fallback.keyObservations || [],
-            bottlenecks:
-                Array.isArray(data.bottlenecks) && data.bottlenecks.length > 0
-                    ? data.bottlenecks
-                    : fallback.bottlenecks || [],
-            correctiveActions:
-                Array.isArray(data.correctiveActions) && data.correctiveActions.length > 0
-                    ? data.correctiveActions
-                    : fallback.correctiveActions || [],
-            riskFlags:
-                Array.isArray(data.riskFlags) && data.riskFlags.length > 0
-                    ? data.riskFlags
-                    : fallback.riskFlags || [],
+            executiveSummary,
+            keyObservations: Array.isArray(data.keyObservations) ? data.keyObservations.map(String) : [],
+            bottlenecks: Array.isArray(data.bottlenecks) ? data.bottlenecks : [],
+            correctiveActions: Array.isArray(data.correctiveActions) ? data.correctiveActions : [],
+            riskFlags: Array.isArray(data.riskFlags) ? data.riskFlags : [],
             meta: {
-                modelUsed: coreRes.governance?.modelUsed || "Gemini 2.5 Flash",
-                isFallback: Boolean(coreRes.governance?.isFallback),
+                modelUsed: coreRes.governance?.modelUsed || "Unspecified model",
+                isFallback: isDeterministic,
                 generatedAt: new Date().toISOString(),
-                freshnessCutoff: report.meta.freshnessCutoff
+                freshnessCutoff: report.meta.freshnessCutoff,
+                aiTier: tierInfo
             }
         };
 

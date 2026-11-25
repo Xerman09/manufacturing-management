@@ -25,6 +25,7 @@ import {
     TableHeader,
     TableRow
 } from "@/components/ui/table";
+import { JOB_ORDER_STATUS } from "../../job-order-status";
 import type { QIJobOrderRow } from "../types";
 
 interface JobOrderTableProps {
@@ -93,27 +94,30 @@ export const JobOrderTable: React.FC<JobOrderTableProps> = ({
 
     const getStatusBadge = (status: string) => {
         switch (status) {
-            case "Closed":
-            case "Completed":
+            case JOB_ORDER_STATUS.CLOSED:
                 return (
                     <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
                         {status}
                     </Badge>
                 );
-            case "In Progress":
-            case "In Production":
+            case JOB_ORDER_STATUS.PICKED:
+            case JOB_ORDER_STATUS.IN_PRODUCTION:
                 return (
                     <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30">
                         {status}
                     </Badge>
                 );
-            case "QA Pending":
+            case JOB_ORDER_STATUS.FOR_PICKING:
+            case JOB_ORDER_STATUS.PRODUCTION_COMPLETED:
+            case JOB_ORDER_STATUS.FOR_QA_RECONCILIATION:
+            case JOB_ORDER_STATUS.ON_HOLD:
+            case JOB_ORDER_STATUS.QA_HOLD:
                 return (
                     <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30">
                         {status}
                     </Badge>
                 );
-            case "Cancelled":
+            case JOB_ORDER_STATUS.CANCELLED:
                 return (
                     <Badge variant="destructive" className="text-[10px]">
                         {status}

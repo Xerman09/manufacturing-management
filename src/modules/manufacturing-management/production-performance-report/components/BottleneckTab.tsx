@@ -177,14 +177,14 @@ export const BottleneckTab: React.FC<BottleneckTabProps> = ({ payload }) => {
                                     >
                                         <div className="flex items-center gap-2.5 min-w-0">
                                             <div className="h-6 w-6 rounded-lg bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0">
-                                                {idx + 1}
+                                                {cell.sequenceOrder ?? "–"}
                                             </div>
                                             <div className="min-w-0">
                                                 <div className="text-xs font-semibold truncate">
                                                     {cell.operationName}
                                                 </div>
                                                 <div className="text-[10px] text-muted-foreground truncate">
-                                                    {cell.routeName} · {cell.jobOrderCount} batches evaluated
+                                                    {cell.ledgerRowCount} shift entries logged
                                                 </div>
                                             </div>
                                         </div>

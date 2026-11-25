@@ -51,7 +51,6 @@ const INITIAL_FILTERS: ProductionPerformanceFilters = {
     dateTo: initialDates.end,
     productId: "all",
     workCenterId: "all",
-    routeId: "all",
     status: "all"
 };
 
@@ -72,8 +71,7 @@ export default function ProductionPerformanceReportModule() {
 
     const [catalog, setCatalog] = useState<PPRFilterCatalogPayload>({
         products: [],
-        workCenters: [],
-        routes: []
+        workCenters: []
     });
     const [catalogLoading, setCatalogLoading] = useState(true);
 
@@ -113,8 +111,7 @@ export default function ProductionPerformanceReportModule() {
                 const data = (await res.json()) as PPRFilterCatalogPayload;
                 setCatalog({
                     products: Array.isArray(data.products) ? data.products : [],
-                    workCenters: Array.isArray(data.workCenters) ? data.workCenters : [],
-                    routes: Array.isArray(data.routes) ? data.routes : []
+                    workCenters: Array.isArray(data.workCenters) ? data.workCenters : []
                 });
             } catch (err: unknown) {
                 if ((err as Error)?.name === "AbortError") return;
@@ -142,7 +139,6 @@ export default function ProductionPerformanceReportModule() {
                     dateTo: appliedFilters.dateTo,
                     productId: appliedFilters.productId,
                     workCenterId: appliedFilters.workCenterId,
-                    routeId: appliedFilters.routeId,
                     status: appliedFilters.status
                 });
 
@@ -213,7 +209,6 @@ export default function ProductionPerformanceReportModule() {
             dateTo: fresh.end,
             productId: "all",
             workCenterId: "all",
-            routeId: "all",
             status: "all"
         };
         setDraftFilters(reset);
@@ -338,9 +333,6 @@ export default function ProductionPerformanceReportModule() {
                         <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground">
                             Production Performance AI Report
                         </h1>
-                        <Badge variant="outline" className="text-[10px] font-semibold">
-                            Manufacturing AI
-                        </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
                         Analyze production trends, identify bottlenecks and loss drivers, and propose corrective actions.

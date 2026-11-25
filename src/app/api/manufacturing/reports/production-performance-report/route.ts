@@ -31,7 +31,6 @@ export async function GET(request: Request) {
         dateTo,
         productId: searchParams.get("productId") || "all",
         workCenterId: searchParams.get("workCenterId") || "all",
-        routeId: searchParams.get("routeId") || "all",
         status: (searchParams.get("status") || "all") as PPRStatusFilter
     };
 

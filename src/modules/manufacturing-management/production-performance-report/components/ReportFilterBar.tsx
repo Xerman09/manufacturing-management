@@ -18,6 +18,7 @@ import {
     DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { FilterCombobox, type ComboboxOption } from "./FilterCombobox";
+import { JOB_ORDER_STATUS } from "../../job-order-status";
 import type {
     QIFilterCatalogPayload,
     QIStatusFilter,
@@ -79,13 +80,16 @@ export const ReportFilterBar: React.FC<ReportFilterBarProps> = ({
     const statusOptions: ComboboxOption[] = useMemo(
         () => [
             { value: "all", label: "All Statuses" },
-            { value: "Draft", label: "Draft" },
-            { value: "Scheduled", label: "Scheduled" },
-            { value: "In Progress", label: "In Progress" },
-            { value: "In Production", label: "In Production" },
-            { value: "QA Pending", label: "QA Pending" },
-            { value: "Closed", label: "Closed / Completed" },
-            { value: "Cancelled", label: "Cancelled" }
+            { value: JOB_ORDER_STATUS.DRAFT, label: "Draft" },
+            { value: JOB_ORDER_STATUS.FOR_PICKING, label: "For Picking" },
+            { value: JOB_ORDER_STATUS.PICKED, label: "Picked" },
+            { value: JOB_ORDER_STATUS.IN_PRODUCTION, label: "In Production" },
+            { value: JOB_ORDER_STATUS.ON_HOLD, label: "On Hold" },
+            { value: JOB_ORDER_STATUS.QA_HOLD, label: "QA Hold" },
+            { value: JOB_ORDER_STATUS.PRODUCTION_COMPLETED, label: "Production Completed" },
+            { value: JOB_ORDER_STATUS.FOR_QA_RECONCILIATION, label: "For QA & Reconciliation" },
+            { value: JOB_ORDER_STATUS.CLOSED, label: "Closed" },
+            { value: JOB_ORDER_STATUS.CANCELLED, label: "Cancelled" }
         ],
         []
     );

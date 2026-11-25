@@ -3,20 +3,17 @@
 import React from "react";
 import {
     Bar,
-    BarChart,
+
     CartesianGrid,
-    Cell,
     ComposedChart,
     Legend,
     Line,
-    Pie,
-    PieChart,
     ResponsiveContainer,
     Tooltip,
     XAxis,
     YAxis
 } from "recharts";
-import { AlertCircle, CheckCircle2, ShieldCheck, XCircle } from "lucide-react";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { WrappedAxisTick } from "./WrappedAxisTick";
@@ -26,12 +23,9 @@ interface QualityTabProps {
     payload: QualityIntelligenceReportPayload;
 }
 
-const PIE_COLORS = ["#10b981", "#f59e0b", "#ef4444", "#3b82f6", "#8b5cf6"];
-
 export const QualityTab: React.FC<QualityTabProps> = ({ payload }) => {
     const qaParams = payload.qaParameterSummary || [];
     const pareto = payload.defectPareto || [];
-    const dispositions = payload.dispositionBreakdown || [];
 
     return (
         <div className="space-y-4">
@@ -42,7 +36,7 @@ export const QualityTab: React.FC<QualityTabProps> = ({ payload }) => {
                         <div>
                             <CardTitle className="text-base font-bold">Defect Pareto Analysis</CardTitle>
                             <CardDescription className="text-xs">
-                                80/20 loss driver distribution: defect frequency alongside cumulative percentage
+                                80/20 loss driver distribution: failed test alongside cumulative percentage
                             </CardDescription>
                         </div>
                         <Badge variant="outline" className="text-[10px]">
@@ -53,7 +47,7 @@ export const QualityTab: React.FC<QualityTabProps> = ({ payload }) => {
                 <CardContent className="pt-2">
                     {pareto.length === 0 ? (
                         <div className="h-[280px] flex items-center justify-center text-xs text-muted-foreground">
-                            No defect records registered in final QA release verification.
+                            No failed QA parameters recorded for the evaluated job orders.
                         </div>
                     ) : (
                         <div className="h-[280px] w-full">
@@ -136,168 +130,85 @@ export const QualityTab: React.FC<QualityTabProps> = ({ payload }) => {
                 </CardContent>
             </Card>
 
-            {/* Row 2: QA Parameters Pass Rate & Disposition Distribution */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* 2 Cols: QA Parameters Summary */}
-                <Card className="lg:col-span-2 rounded-2xl border-border/60 shadow-sm">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-base font-bold">
-                            Inspection Parameter Pass Rates
-                        </CardTitle>
-                        <CardDescription className="text-xs">
-                            Pass rate (%) ranked from lowest to highest; critical parameters flagged
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="pt-2">
-                        {qaParams.length === 0 ? (
-                            <div className="h-[260px] flex items-center justify-center text-xs text-muted-foreground">
-                                No QA parameter checks logged for evaluated job orders.
-                            </div>
-                        ) : (
-                            <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
-                                {qaParams.map((p) => {
-                                    const passPct = p.passRatePct ?? 0;
-                                    const isLow = passPct < 90;
-                                    return (
-                                        <div
-                                            key={p.parameterId}
-                                            className="p-2.5 rounded-xl border border-border/60 bg-muted/20 space-y-1.5"
-                                        >
-                                            <div className="flex items-center justify-between gap-2">
-                                                <div className="flex items-center gap-2 min-w-0">
-                                                    {p.isCritical ? (
-                                                        <Badge
-                                                            variant="destructive"
-                                                            className="text-[9px] px-1.5 py-0 h-4 shrink-0 uppercase tracking-wider"
-                                                        >
-                                                            Critical
-                                                        </Badge>
-                                                    ) : (
-                                                        <Badge
-                                                            variant="secondary"
-                                                            className="text-[9px] px-1.5 py-0 h-4 shrink-0"
-                                                        >
-                                                            Standard
-                                                        </Badge>
-                                                    )}
-                                                    <span className="text-xs font-semibold truncate">
-                                                        {p.parameterName}
-                                                    </span>
-                                                </div>
-
-                                                <div className="flex items-center gap-2 shrink-0">
-                                                    <span
-                                                        className={`text-xs font-bold ${
-                                                            isLow
-                                                                ? "text-rose-600 dark:text-rose-400"
-                                                                : "text-emerald-600 dark:text-emerald-400"
-                                                        }`}
+            {/* Row 2: QA Parameters Pass Rate */}
+            <Card className="rounded-2xl border-border/60 shadow-sm">
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-base font-bold">
+                        Inspection Parameter Pass Rates
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                        Pass rate (%) ranked from lowest to highest; critical parameters flagged
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-2">
+                    {qaParams.length === 0 ? (
+                        <div className="h-[260px] flex items-center justify-center text-xs text-muted-foreground">
+                            No QA parameter checks logged for evaluated job orders.
+                        </div>
+                    ) : (
+                        <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
+                            {qaParams.map((p) => {
+                                const passPct = p.passRatePct ?? 0;
+                                const isLow = passPct < 90;
+                                return (
+                                    <div
+                                        key={p.parameterId}
+                                        className="p-2.5 rounded-xl border border-border/60 bg-muted/20 space-y-1.5"
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                {p.isCritical ? (
+                                                    <Badge
+                                                        variant="destructive"
+                                                        className="text-[9px] px-1.5 py-0 h-4 shrink-0 uppercase tracking-wider"
                                                     >
-                                                        {p.passRatePct !== null ? `${p.passRatePct}%` : "-"}
-                                                    </span>
-                                                    <span className="text-[10px] text-muted-foreground">
-                                                        ({p.passedChecks}/{p.totalChecks})
-                                                    </span>
-                                                </div>
+                                                        Critical
+                                                    </Badge>
+                                                ) : (
+                                                    <Badge
+                                                        variant="secondary"
+                                                        className="text-[9px] px-1.5 py-0 h-4 shrink-0"
+                                                    >
+                                                        Standard
+                                                    </Badge>
+                                                )}
+                                                <span className="text-xs font-semibold truncate">
+                                                    {p.parameterName}
+                                                </span>
                                             </div>
 
-                                            {/* Visual Progress Bar */}
-                                            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                                                <div
-                                                    className={`h-full rounded-full transition-all duration-500 ${
-                                                        isLow ? "bg-rose-500" : "bg-emerald-500"
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <span
+                                                    className={`text-xs font-bold ${
+                                                        isLow
+                                                            ? "text-rose-600 dark:text-rose-400"
+                                                            : "text-emerald-600 dark:text-emerald-400"
                                                     }`}
-                                                    style={{ width: `${Math.min(100, passPct)}%` }}
-                                                />
+                                                >
+                                                    {p.passRatePct !== null ? `${p.passRatePct}%` : "-"}
+                                                </span>
+                                                <span className="text-[10px] text-muted-foreground">
+                                                    ({p.passedChecks}/{p.totalChecks})
+                                                </span>
                                             </div>
                                         </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
 
-                {/* 1 Col: Final QA Disposition Breakdown */}
-                <Card className="rounded-2xl border-border/60 shadow-sm">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-base font-bold">Batch Dispositions</CardTitle>
-                        <CardDescription className="text-xs">
-                            Final QA release verdict distribution across finished goods batches
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="pt-2">
-                        {dispositions.length === 0 ? (
-                            <div className="h-[260px] flex items-center justify-center text-xs text-muted-foreground">
-                                No final release dispositions recorded.
-                            </div>
-                        ) : (
-                            <div className="space-y-4">
-                                <div className="h-[180px] w-full">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <PieChart>
-                                            <Pie
-                                                data={dispositions}
-                                                dataKey="count"
-                                                nameKey="disposition"
-                                                cx="50%"
-                                                cy="50%"
-                                                innerRadius={45}
-                                                outerRadius={70}
-                                                paddingAngle={4}
-                                            >
-                                                {dispositions.map((entry, index) => (
-                                                    <Cell
-                                                        key={`cell-${index}`}
-                                                        fill={PIE_COLORS[index % PIE_COLORS.length]}
-                                                    />
-                                                ))}
-                                            </Pie>
-                                            <Tooltip
-                                                content={({ active, payload }) => {
-                                                    if (!active || !payload?.length) return null;
-                                                    const d = payload[0].payload;
-                                                    return (
-                                                        <div className="rounded-xl border border-border/80 bg-background/95 backdrop-blur-sm p-2 shadow-lg text-xs space-y-1">
-                                                            <div className="font-bold">{d.disposition}</div>
-                                                            <div>Batches: {d.count}</div>
-                                                            <div>Units: {d.qty.toLocaleString()}</div>
-                                                            <div>Share: {d.percentage}%</div>
-                                                        </div>
-                                                    );
-                                                }}
+                                        {/* Visual Progress Bar */}
+                                        <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all duration-500 ${
+                                                    isLow ? "bg-rose-500" : "bg-emerald-500"
+                                                }`}
+                                                style={{ width: `${Math.min(100, passPct)}%` }}
                                             />
-                                        </PieChart>
-                                    </ResponsiveContainer>
-                                </div>
-
-                                <div className="space-y-1.5">
-                                    {dispositions.map((d, i) => (
-                                        <div
-                                            key={d.disposition}
-                                            className="flex items-center justify-between text-xs"
-                                        >
-                                            <div className="flex items-center gap-2">
-                                                <div
-                                                    className="h-2.5 w-2.5 rounded-full shrink-0"
-                                                    style={{
-                                                        backgroundColor:
-                                                            PIE_COLORS[i % PIE_COLORS.length]
-                                                    }}
-                                                />
-                                                <span className="font-medium">{d.disposition}</span>
-                                            </div>
-                                            <span className="text-muted-foreground font-semibold">
-                                                {d.count} ({d.percentage}%)
-                                            </span>
                                         </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-            </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
         </div>
     );
 };

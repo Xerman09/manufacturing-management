@@ -1,7 +1,13 @@
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
+import {
+    JOB_ORDER_STATUS,
+    displayJobOrderStatus,
+    normalizeJobOrderStatus,
+    type CanonicalJobOrderStatus
+} from "@/modules/manufacturing-management/job-order-status";
 import type {
+    AiTierInfo,
     PPRDefectParetoRow,
-    PPRDispositionRow,
     PPRDowntimeEvent,
     PPRFilterCatalogPayload,
     PPRJobOrderDetail,
@@ -18,6 +24,34 @@ import type {
 
 type DirectusRecord = Record<string, any>;
 
+/**
+ * Rows written before the canonical status contract landed still carry legacy
+ * spellings, so an equality filter on one canonical value under-counts.
+ * Mirrors STATUS_BY_KEY in job-order-status.ts in the stored->canonical direction.
+ */
+const STORED_STATUS_VARIANTS: Record<CanonicalJobOrderStatus, string[]> = {
+    [JOB_ORDER_STATUS.DRAFT]: ["Draft", "Planned", "Planning", "Shortage"],
+    [JOB_ORDER_STATUS.FOR_PICKING]: ["For Picking", "Released", "Proceed"],
+    [JOB_ORDER_STATUS.PICKED]: ["Picked", "Reserved"],
+    [JOB_ORDER_STATUS.IN_PRODUCTION]: ["In Production", "Ongoing", "In Progress"],
+    [JOB_ORDER_STATUS.ON_HOLD]: ["On Hold"],
+    [JOB_ORDER_STATUS.QA_HOLD]: ["QA Hold"],
+    [JOB_ORDER_STATUS.PRODUCTION_COMPLETED]: ["Production Completed", "Finished"],
+    [JOB_ORDER_STATUS.FOR_QA_RECONCILIATION]: ["For QA and Reconciliation", "Completed"],
+    [JOB_ORDER_STATUS.CLOSED]: ["Closed"],
+    [JOB_ORDER_STATUS.CANCELLED]: ["Cancelled", "Canceled"]
+};
+
+/** Job Orders that finished producing units, regardless of later QA/closing steps. */
+function isCompletedJobOrderStatus(value: unknown): boolean {
+    const canonical = normalizeJobOrderStatus(value);
+    return (
+        canonical === JOB_ORDER_STATUS.CLOSED ||
+        canonical === JOB_ORDER_STATUS.PRODUCTION_COMPLETED ||
+        canonical === JOB_ORDER_STATUS.FOR_QA_RECONCILIATION
+    );
+}
+
 function safeNumber(val: unknown, fallback: number = 0): number {
     const n = Number(val);
     return Number.isFinite(n) ? n : fallback;
@@ -29,56 +63,220 @@ function safeNumberOrNull(val: unknown): number | null {
     return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * These relation columns carry no FOREIGN KEY in MySQL, so whether Directus hands back a
+ * scalar id or a nested object depends only on its field metadata. Both shapes are
+ * reduced to an id here so the report never depends on that.
+ */
+function relationId(value: unknown, idKeys: string[]): number | null {
+    if (value === null || value === undefined) return null;
+    if (typeof value === "object") {
+        for (const key of idKeys) {
+            const id = Number((value as DirectusRecord)[key]);
+            if (Number.isSafeInteger(id) && id > 0) return id;
+        }
+        return null;
+    }
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * Normalizes boolean or MySQL bit(1) values returned through Directus / mysql2.
+ * In mysql2 / Directus, bit(1) is returned as a Buffer or serialized JSON { type: "Buffer", data: [1] }.
+ */
+function parseBitBoolean(val: unknown): boolean {
+    if (val === true || val === 1 || val === "1" || val === "true") return true;
+    if (val === false || val === 0 || val === "0" || val === "false" || val === null || val === undefined) return false;
+    if (typeof Buffer !== "undefined" && Buffer.isBuffer(val)) {
+        return val.length > 0 && val[0] === 1;
+    }
+    if (typeof val === "object" && val !== null) {
+        const obj = val as { type?: string; data?: unknown };
+        if (Array.isArray(obj.data) && obj.data.length > 0) {
+            return Number(obj.data[0]) === 1;
+        }
+        if (typeof obj.data === "number") {
+            return obj.data === 1;
+        }
+    }
+    if (typeof val === "string") {
+        const trimmed = val.trim().toLowerCase();
+        if (trimmed === "1" || trimmed === "true" || trimmed === "b'1'") return true;
+        if (trimmed === "0" || trimmed === "false" || trimmed === "b'0'") return false;
+        if (val.length > 0) {
+            if (val.charCodeAt(0) === 1) return true;
+            if (val.charCodeAt(0) === 0) return false;
+        }
+    }
+    return Boolean(val);
+}
+
+/** Shown to plant stakeholders, so the reporting clock stays in 24-hour Manila time. */
+function manilaTimestamp(date: Date): string {
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Manila",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23"
+    }).formatToParts(date);
+    const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    return `${pick("year")}-${pick("month")}-${pick("day")} ${pick("hour")}:${pick("minute")}:${pick("second")}`;
+}
+
+/** Directus returns UTC ISO strings; the report shows them on the plant's own clock. */
+function manilaTimestampOrDash(value: unknown): string {
+    if (value === null || value === undefined || value === "") return "-";
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? "-" : manilaTimestamp(date);
+}
+
+/**
+ * A rejected Directus query must not look like an empty table: an unresolvable field,
+ * a bad filter or an outage all throw so the caller surfaces an error state.
+ */
+async function fetchDirectus(
+    url: string,
+    collection: string,
+    signal?: AbortSignal
+): Promise<DirectusRecord | null> {
+    let res: Response;
+    try {
+        res = await fetch(url, { headers, signal, cache: "no-store" });
+    } catch (err) {
+        if (signal?.aborted) throw err;
+        throw new Error(`Could not reach Directus for ${collection}.`);
+    }
+    if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        const reason =
+            payload?.errors?.[0]?.message ?? payload?.error?.message ?? `HTTP ${res.status}`;
+        throw new Error(`Directus query failed for ${collection}: ${reason}`);
+    }
+    const payload = await res.json().catch(() => null);
+    if (!payload || !("data" in payload)) {
+        throw new Error(`Directus returned no data envelope for ${collection}.`);
+    }
+    return payload.data as DirectusRecord | null;
+}
+
+async function fetchDirectusRows(
+    url: string,
+    collection: string,
+    signal?: AbortSignal
+): Promise<DirectusRecord[]> {
+    const data = await fetchDirectus(url, collection, signal);
+    if (!Array.isArray(data)) {
+        throw new Error(`Directus returned a non-list response for ${collection}.`);
+    }
+    return data as DirectusRecord[];
+}
+
+/**
+ * Resolves the AI Tier assigned to this module from Directus `modules` table.
+ * Falls back safely to an active strategic advisory tier if the module row is not yet registered.
+ */
+export async function resolveServerAiTier(signal?: AbortSignal): Promise<AiTierInfo> {
+    const directusBase = DIRECTUS_URL?.replace(/\/+$/, "");
+    if (!directusBase) {
+        return {
+            assigned: true,
+            tierLevel: 3,
+            tierName: "Executive Strategic (Default)",
+            tierSlug: "executive",
+            description: "Directus API URL not configured; using default strategic tier."
+        };
+    }
+
+    try {
+        const params = new URLSearchParams({
+            "filter[base_path][_eq]": "/mm/reports/production-performance-report",
+            fields: "id,title,ai_tier.id,ai_tier.name,ai_tier.slug,ai_tier.tier_level,ai_tier.description",
+            limit: "1"
+        });
+        const url = `${directusBase}/items/modules?${params.toString()}`;
+        const rows = await fetchDirectusRows(url, "modules", signal);
+        const mod = rows[0];
+        const tierObj =
+            mod && typeof mod.ai_tier === "object" && mod.ai_tier !== null
+                ? (mod.ai_tier as Record<string, unknown>)
+                : null;
+
+        if (tierObj) {
+            const slugRaw = String(tierObj.slug || "basic").toLowerCase();
+            const slug =
+                slugRaw === "executive" || slugRaw === "pro" || slugRaw === "basic"
+                    ? slugRaw
+                    : "basic";
+            return {
+                assigned: true,
+                tierLevel: Number(tierObj.tier_level) || 1,
+                tierName: String(tierObj.name || "Basic"),
+                tierSlug: slug,
+                description: String(tierObj.description || "")
+            };
+        }
+
+        // If module entry exists in Directus without an ai_tier, treat strictly as unassigned
+        if (mod) {
+            return {
+                assigned: false,
+                tierLevel: 0,
+                tierName: "Unassigned",
+                tierSlug: "unassigned",
+                description: "No AI Tier is assigned to this report module."
+            };
+        }
+    } catch {
+        // Fall through to safe server default if module registry is temporarily unreachable
+    }
+
+    // Module row not yet registered in Directus `modules` — allow Executive mode for authorized manufacturing users
+    return {
+        assigned: true,
+        tierLevel: 3,
+        tierName: "Executive Strategic (Default)",
+        tierSlug: "executive",
+        description: "Default strategic advisory tier active for authorized manufacturing users."
+    };
+}
+
 export async function fetchProductionFilterCatalog(
     signal?: AbortSignal
 ): Promise<PPRFilterCatalogPayload> {
-    try {
-        const directusBase = DIRECTUS_URL?.replace(/\/+$/, "");
-        if (!directusBase) {
-            return { products: [], workCenters: [], routes: [] };
-        }
-
-        const [productsRes, wcRes, routesRes] = await Promise.all([
-            fetch(
-                `${directusBase}/items/products?fields=product_id,product_name,product_code&filter[isActive][_eq]=1&limit=-1`,
-                { headers, signal, cache: "no-store" }
-            ).then((r) => (r.ok ? r.json() : { data: [] })),
-            fetch(
-                `${directusBase}/items/manufacturing_work_centers?fields=work_center_id,work_center_name&filter[is_active][_eq]=1&limit=-1`,
-                { headers, signal, cache: "no-store" }
-            ).then((r) => (r.ok ? r.json() : { data: [] })),
-            fetch(
-                `${directusBase}/items/manufacturing_routes?fields=route_id,route_name&limit=-1`,
-                { headers, signal, cache: "no-store" }
-            ).then((r) => (r.ok ? r.json() : { data: [] }))
-        ]);
-
-        const products = Array.isArray(productsRes.data)
-            ? productsRes.data.map((p: DirectusRecord) => ({
-                  id: Number(p.product_id),
-                  code: String(p.product_code || ""),
-                  name: String(p.product_name || "Unnamed Product")
-              }))
-            : [];
-
-        const workCenters = Array.isArray(wcRes.data)
-            ? wcRes.data.map((wc: DirectusRecord) => ({
-                  id: Number(wc.work_center_id),
-                  name: String(wc.work_center_name || "Unnamed Work Center")
-              }))
-            : [];
-
-        const routes = Array.isArray(routesRes.data)
-            ? routesRes.data.map((r: DirectusRecord) => ({
-                  id: Number(r.route_id),
-                  name: String(r.route_name || "Unnamed Route")
-              }))
-            : [];
-
-        return { products, workCenters, routes };
-    } catch {
-        return { products: [], workCenters: [], routes: [] };
+    const directusBase = DIRECTUS_URL?.replace(/\/+$/, "");
+    if (!directusBase) {
+        throw new Error("Directus API URL is not configured.");
     }
+
+    const [productRows, wcRows] = await Promise.all([
+        fetchDirectusRows(
+            `${directusBase}/items/products?fields=product_id,product_name,product_code&filter[isActive][_eq]=1&limit=-1`,
+            "products",
+            signal
+        ),
+        fetchDirectusRows(
+            `${directusBase}/items/manufacturing_work_centers?fields=work_center_id,work_center_name&filter[is_active][_eq]=1&limit=-1`,
+            "manufacturing_work_centers",
+            signal
+        )
+    ]);
+
+    return {
+        products: productRows.map((p: DirectusRecord) => ({
+            id: Number(p.product_id),
+            code: String(p.product_code || ""),
+            name: String(p.product_name || "Unnamed Product")
+        })),
+        workCenters: wcRows.map((wc: DirectusRecord) => ({
+            id: Number(wc.work_center_id),
+            name: String(wc.work_center_name || "Unnamed Work Center")
+        }))
+    };
 }
 
 export const fetchQualityFilterCatalog = fetchProductionFilterCatalog;
@@ -117,90 +315,150 @@ export async function buildProductionPerformanceReport(params: {
     }
 
     if (filters.status && filters.status !== "all") {
-        joFilter.status = { _eq: filters.status };
+        const canonical = normalizeJobOrderStatus(filters.status);
+        const variants = canonical ? STORED_STATUS_VARIANTS[canonical] : [String(filters.status)];
+        joFilter.status = { _in: variants };
     }
 
     const joQuery = new URLSearchParams({
         filter: JSON.stringify(joFilter),
-        fields: "job_order_id,job_order_no,product_id.product_id,product_id.product_name,product_id.product_code,status,target_quantity,actual_quantity_produced,completed_quantity,rejected_quantity,start_date,end_date,production_started_at,production_completed_at,primary_work_center_id.work_center_id,primary_work_center_id.work_center_name",
+        fields: "job_order_id,job_order_no,product_id.product_id,product_id.product_name,product_id.product_code,status,target_quantity,actual_quantity_produced,completed_quantity,rejected_quantity,start_date,end_date,production_started_at,production_completed_at,primary_work_center_id,primary_work_center_id.work_center_id,primary_work_center_id.work_center_name",
         sort: "-created_at",
         limit: "500"
     });
 
-    const joRes = await fetch(`${directusBase}/items/manufacturing_job_orders?${joQuery.toString()}`, {
-        headers,
-        signal,
-        cache: "no-store"
-    });
-
-    if (!joRes.ok) {
-        const errJson = await joRes.json().catch(() => ({}));
-        throw new Error(errJson.error || `Failed to fetch Job Orders (HTTP ${joRes.status}).`);
-    }
-
-    const joData = await joRes.json();
-    const rawJobOrders: DirectusRecord[] = Array.isArray(joData.data) ? joData.data : [];
+    const rawJobOrders = await fetchDirectusRows(
+        `${directusBase}/items/manufacturing_job_orders?${joQuery.toString()}`,
+        "manufacturing_job_orders",
+        signal
+    );
     const jobOrderIds = rawJobOrders.map((j) => Number(j.job_order_id)).filter((id) => Number.isInteger(id) && id > 0);
 
-    // Parallel fetch related tables: yield ledger, QA records, final QA releases, work centers, downtime events
-    const yieldLedgerFilter: Record<string, any> = jobOrderIds.length > 0 ? { job_order_id: { _in: jobOrderIds } } : {};
-    if (filters.dateFrom && filters.dateTo && jobOrderIds.length === 0) {
-        yieldLedgerFilter.production_date = { _between: [filters.dateFrom, filters.dateTo] };
-    }
+    // Parallel fetch related tables: yield ledger, QA records, work centers, downtime events
+    const yieldLedgerFilter: Record<string, any> =
+        jobOrderIds.length > 0 ? { job_order_id: { _in: jobOrderIds } } : {};
 
     const qaRecordsFilter: Record<string, any> = jobOrderIds.length > 0 ? { job_order_id: { _in: jobOrderIds } } : {};
-    const finalQaFilter: Record<string, any> = jobOrderIds.length > 0 ? { job_order_id: { _in: jobOrderIds } } : {};
 
-    const [yieldRes, qaRecordsRes, finalQaRes, workCentersRes, downtimeRes, paramsRes] = await Promise.all([
-        jobOrderIds.length > 0
-            ? fetch(
+    // Maintenance episodes belong to the Job Orders that triggered them, so the
+    // same scope plus period applies; unscoped episodes would pin availability at 100%.
+    const downtimeFilter: {
+        source_job_order_id?: { _in: number[] };
+        started_at?: { _gte?: string; _lte?: string };
+    } = {};
+    if (jobOrderIds.length > 0) {
+        downtimeFilter.source_job_order_id = { _in: jobOrderIds };
+        const startedAt: { _gte?: string; _lte?: string } = {};
+        if (filters.dateFrom) startedAt._gte = `${filters.dateFrom} 00:00:00`;
+        if (filters.dateTo) startedAt._lte = `${filters.dateTo} 23:59:59`;
+        if (Object.keys(startedAt).length > 0) downtimeFilter.started_at = startedAt;
+    }
+
+    const EMPTY_ROWS: DirectusRecord[] = [];
+    const scoped = jobOrderIds.length > 0;
+
+    const [
+        yieldRows,
+        qaRecords,
+        allWorkCenters,
+        rawDowntime,
+        allQaParams,
+        dispositionRows,
+        routeRows,
+        operationRows,
+        aiTier
+    ] = await Promise.all([
+        scoped
+            ? fetchDirectusRows(
                   `${directusBase}/items/manufacturing_job_order_yield_ledger?filter=${encodeURIComponent(
                       JSON.stringify(yieldLedgerFilter)
-                  )}&fields=ledger_id,job_order_id,shift_name,yield_quantity,scrap_quantity,rejected_quantity,qa_status,logged_at,production_date,work_center_id.work_center_id,work_center_id.work_center_name,jo_route_id.sequence_order,jo_route_id.operation_id.operation_name&limit=-1`,
-                  { headers, signal, cache: "no-store" }
-              ).then((r) => (r.ok ? r.json() : { data: [] }))
-            : Promise.resolve({ data: [] }),
+                  )}&fields=ledger_id,job_order_id,shift_name,yield_quantity,scrap_quantity,rejected_quantity,qa_status,logged_at,production_date,work_center_id,work_center_id.work_center_id,work_center_id.work_center_name,jo_route_id&limit=-1`,
+                  "manufacturing_job_order_yield_ledger",
+                  signal
+              )
+            : EMPTY_ROWS,
 
-        jobOrderIds.length > 0
-            ? fetch(
+        scoped
+            ? fetchDirectusRows(
                   `${directusBase}/items/manufacturing_job_order_qa_records?filter=${encodeURIComponent(
                       JSON.stringify(qaRecordsFilter)
                   )}&fields=qa_record_id,job_order_id,is_passed,parameter_id.parameter_id,parameter_id.test_name,parameter_id.is_critical,inspected_at&limit=-1`,
-                  { headers, signal, cache: "no-store" }
-              ).then((r) => (r.ok ? r.json() : { data: [] }))
-            : Promise.resolve({ data: [] }),
+                  "manufacturing_job_order_qa_records",
+                  signal
+              )
+            : EMPTY_ROWS,
 
-        jobOrderIds.length > 0
-            ? fetch(
-                  `${directusBase}/items/manufacturing_final_qa_releases?filter=${encodeURIComponent(
-                      JSON.stringify(finalQaFilter)
-                  )}&fields=final_release_id,job_order_id,inspected_quantity,defect_quantity,overall_disposition,packaging_seal_passed,label_compliance_passed&limit=-1`,
-                  { headers, signal, cache: "no-store" }
-              ).then((r) => (r.ok ? r.json() : { data: [] }))
-            : Promise.resolve({ data: [] }),
+        fetchDirectusRows(
+            // No is_active filter: job orders still route through retired stations, and their
+            // output has to be attributed somewhere instead of vanishing from the card.
+            `${directusBase}/items/manufacturing_work_centers?fields=work_center_id,work_center_name,capacity_per_hour&limit=-1`,
+            "manufacturing_work_centers",
+            signal
+        ),
 
-        fetch(
-            `${directusBase}/items/manufacturing_work_centers?fields=work_center_id,work_center_name,capacity_per_hour&filter[is_active][_eq]=1&limit=-1`,
-            { headers, signal, cache: "no-store" }
-        ).then((r) => (r.ok ? r.json() : { data: [] })),
+        scoped
+            ? fetchDirectusRows(
+                  `${directusBase}/items/manufacturing_asset_maintenance_history?filter=${encodeURIComponent(
+                      JSON.stringify(downtimeFilter)
+                  )}&fields=id,asset_id.id,asset_id.serial,asset_id.item_id.item_name,started_at,ended_at,breakdown_category,root_cause,corrective_action,technician_name&sort=-started_at&limit=-1`,
+                  "manufacturing_asset_maintenance_history",
+                  signal
+              )
+            : EMPTY_ROWS,
 
-        fetch(
-            `${directusBase}/items/manufacturing_asset_maintenance_history?fields=id,asset_id.id,asset_id.serial,asset_id.item_id.name,started_at,ended_at,breakdown_category,root_cause,corrective_action,technician_name&sort=-started_at&limit=50`,
-            { headers, signal, cache: "no-store" }
-        ).then((r) => (r.ok ? r.json() : { data: [] })),
-
-        fetch(
+        fetchDirectusRows(
             `${directusBase}/items/quality_inspection_parameters?fields=parameter_id,test_name,is_critical&limit=-1`,
-            { headers, signal, cache: "no-store" }
-        ).then((r) => (r.ok ? r.json() : { data: [] }))
+            "quality_inspection_parameters",
+            signal
+        ),
+
+        scoped
+            ? fetchDirectusRows(
+                  `${directusBase}/items/manufacturing_qa_dispositions?filter=${encodeURIComponent(
+                      JSON.stringify({ job_order_id: { _in: jobOrderIds } })
+                  )}&fields=id,job_order_id,product_name,task_name,station_name,expected_quantity,actual_quantity,failed_parameters,decision,recorded_at&limit=-1`,
+                  "manufacturing_qa_dispositions",
+                  signal
+              )
+            : EMPTY_ROWS,
+
+        scoped
+            ? fetchDirectusRows(
+                  `${directusBase}/items/manufacturing_job_order_routes?filter=${encodeURIComponent(
+                      JSON.stringify({ job_order_id: { _in: jobOrderIds } })
+                  )}&fields=jo_route_id,sequence_order,operation_id&limit=-1`,
+                  "manufacturing_job_order_routes",
+                  signal
+              )
+            : EMPTY_ROWS,
+
+        fetchDirectusRows(
+            `${directusBase}/items/manufacturing_operations?fields=id,operation_name&limit=-1`,
+            "manufacturing_operations",
+            signal
+        ),
+
+        resolveServerAiTier(signal)
     ]);
 
-    const yieldRows: DirectusRecord[] = Array.isArray(yieldRes.data) ? yieldRes.data : [];
-    const qaRecords: DirectusRecord[] = Array.isArray(qaRecordsRes.data) ? qaRecordsRes.data : [];
-    const finalQaRows: DirectusRecord[] = Array.isArray(finalQaRes.data) ? finalQaRes.data : [];
-    const allWorkCenters: DirectusRecord[] = Array.isArray(workCentersRes.data) ? workCentersRes.data : [];
-    const rawDowntime: DirectusRecord[] = Array.isArray(downtimeRes.data) ? downtimeRes.data : [];
-    const allQaParams: DirectusRecord[] = Array.isArray(paramsRes.data) ? paramsRes.data : [];
+    const wcNameById = new Map<number, string>();
+    for (const wc of allWorkCenters) {
+        const id = Number(wc.work_center_id);
+        if (Number.isSafeInteger(id) && id > 0) {
+            wcNameById.set(id, String(wc.work_center_name || `Work Center #${id}`));
+        }
+    }
+
+    /** Resolves a work center relation to id + display name without needing Directus metadata. */
+    const resolveWorkCenter = (relValue: unknown): { id: number | null; name: string | null } => {
+        const id = relationId(relValue, ["work_center_id", "id"]);
+        const nestedName =
+            relValue && typeof relValue === "object"
+                ? String((relValue as DirectusRecord).work_center_name || "") || null
+                : null;
+        if (id === null) return { id: null, name: nestedName };
+        return { id, name: wcNameById.get(id) ?? nestedName ?? `Work Center #${id}` };
+    };
 
     // Map yield ledger per job order
     const joYieldMap = new Map<number, { yieldQty: number; scrapQty: number; rejectedQty: number }>();
@@ -221,7 +479,7 @@ export async function buildProductionPerformanceReport(params: {
         if (!jid) continue;
         const cur = joQaMap.get(jid) || { total: 0, passed: 0 };
         cur.total += 1;
-        if (qr.is_passed === true || qr.is_passed === 1 || qr.is_passed === "1" || qr.is_passed === "true") {
+        if (parseBitBoolean(qr.is_passed)) {
             cur.passed += 1;
         }
         joQaMap.set(jid, cur);
@@ -265,14 +523,14 @@ export async function buildProductionPerformanceReport(params: {
         }
 
         const prodObj = typeof jo.product_id === "object" && jo.product_id ? jo.product_id : null;
-        const wcObj = typeof jo.primary_work_center_id === "object" && jo.primary_work_center_id ? jo.primary_work_center_id : null;
+        const station = resolveWorkCenter(jo.primary_work_center_id);
 
         return {
             jobOrderId: id,
             jobOrderNo: String(jo.job_order_no || `JO-${id}`),
             productId: prodObj ? Number(prodObj.product_id) : safeNumber(jo.product_id),
             productName: prodObj ? String(prodObj.product_name || `Product #${jo.product_id}`) : `Product #${jo.product_id}`,
-            status: String(jo.status || "Draft"),
+            status: displayJobOrderStatus(jo.status),
             startDate: jo.start_date ? String(jo.start_date) : null,
             endDate: jo.end_date ? String(jo.end_date) : null,
             targetQty: target,
@@ -283,7 +541,8 @@ export async function buildProductionPerformanceReport(params: {
             scrapRatePct,
             qaPassRatePct,
             cycleTimeHrs,
-            workCenterName: wcObj ? String(wcObj.work_center_name || "-") : null
+            workCenterId: station.id,
+            workCenterName: station.name
         };
     });
 
@@ -315,7 +574,7 @@ export async function buildProductionPerformanceReport(params: {
     let passedQaChecks = 0;
     for (const qr of qaRecords) {
         totalQaChecks += 1;
-        if (qr.is_passed === true || qr.is_passed === 1 || qr.is_passed === "1" || qr.is_passed === "true") {
+        if (parseBitBoolean(qr.is_passed)) {
             passedQaChecks += 1;
         }
     }
@@ -344,7 +603,7 @@ export async function buildProductionPerformanceReport(params: {
 
         const assetObj = typeof dt.asset_id === "object" && dt.asset_id ? dt.asset_id : null;
         const assetName = assetObj
-            ? String(assetObj.item_id?.name || assetObj.serial || `Asset #${assetObj.id}`)
+            ? String(assetObj.item_id?.item_name || assetObj.serial || `Asset #${assetObj.id}`)
             : "Production Equipment";
 
         downtimeEvents.push({
@@ -360,9 +619,7 @@ export async function buildProductionPerformanceReport(params: {
         });
     }
 
-    const completedJobOrdersCount = jobOrders.filter(
-        (j) => j.status === "Closed" || j.status === "Completed"
-    ).length;
+    const completedJobOrdersCount = jobOrders.filter((j) => isCompletedJobOrderStatus(j.status)).length;
     const completionRatePct =
         jobOrders.length > 0
             ? Number(((completedJobOrdersCount / jobOrders.length) * 100).toFixed(1))
@@ -371,28 +628,39 @@ export async function buildProductionPerformanceReport(params: {
     // OEE Calculation (Availability x Performance x Quality)
     // Approximate scheduled hours based on job orders or standard shifts
     const scheduledHours = Math.max(8, jobOrders.length * 8);
-    const operatingHours = Math.max(0, scheduledHours - totalDowntimeHrs);
-    const availabilityPct = Number(
-        Math.min(100, Math.max(0, (operatingHours / scheduledHours) * 100)).toFixed(1)
-    );
+    // Without a maintenance episode in scope, availability has no evidence and a
+    // 100% would inflate OEE, so both report as undetermined instead.
+    const availabilityPct =
+        downtimeEvents.length > 0
+            ? Number(
+                  Math.min(
+                      100,
+                      Math.max(0, ((scheduledHours - totalDowntimeHrs) / scheduledHours) * 100)
+                  ).toFixed(1)
+              )
+            : null;
 
     const performancePct =
         totalTarget > 0
             ? Number(Math.min(100, Math.max(0, (totalActualProduced / totalTarget) * 100)).toFixed(1))
             : avgYieldRatePct !== null
             ? Math.min(100, avgYieldRatePct)
-            : 85.0;
+            : null;
 
     const qualityPct =
         qaPassRatePct !== null
             ? qaPassRatePct
             : avgScrapRatePct !== null
             ? Number(Math.max(0, 100 - avgScrapRatePct).toFixed(1))
-            : 95.0;
+            : null;
 
-    const oeePct = Number(
-        (((availabilityPct / 100) * (performancePct / 100) * (qualityPct / 100)) * 100).toFixed(1)
-    );
+    // A product of factors is meaningless when any one of them has no evidence behind it.
+    const oeePct =
+        availabilityPct === null || performancePct === null || qualityPct === null
+            ? null
+            : Number(
+                  (((availabilityPct / 100) * (performancePct / 100) * (qualityPct / 100)) * 100).toFixed(1)
+              );
 
     const kpis: PPRKpiMetrics = {
         oeePct,
@@ -499,7 +767,7 @@ export async function buildProductionPerformanceReport(params: {
         const r = safeNumber(yr.rejected_quantity);
         const loss = s + r;
         if (loss > 0) {
-            const wcName = yr.work_center_id?.work_center_name || "Unassigned Work Center";
+            const wcName = resolveWorkCenter(yr.work_center_id).name || "Unassigned Work Center";
             const cur = wcLossMap.get(wcName) || { label: wcName, lossQty: 0 };
             cur.lossQty += loss;
             wcLossMap.set(wcName, cur);
@@ -537,38 +805,51 @@ export async function buildProductionPerformanceReport(params: {
             actualQty: number;
             scrapQty: number;
             joCount: number;
-            capPerHour: number;
+            capPerHour: number | null;
         }
     >();
     for (const wc of allWorkCenters) {
         const id = Number(wc.work_center_id);
+        if (!Number.isSafeInteger(id) || id <= 0) continue;
         wcMap.set(id, {
             id,
             name: String(wc.work_center_name || `Work Center #${id}`),
             actualQty: 0,
             scrapQty: 0,
             joCount: 0,
-            capPerHour: safeNumber(wc.capacity_per_hour, 100)
+            capPerHour: safeNumberOrNull(wc.capacity_per_hour)
         });
     }
 
     for (const jo of jobOrders) {
-        if (!jo.workCenterName) continue;
-        const matching = Array.from(wcMap.values()).find((w) => w.name === jo.workCenterName);
-        if (matching) {
-            matching.actualQty += jo.actualQtyProduced || jo.completedQty || 0;
-            matching.joCount += 1;
-            const yInfo = joYieldMap.get(jo.jobOrderId);
-            if (yInfo) matching.scrapQty += yInfo.scrapQty;
+        if (jo.workCenterId === null) continue;
+        let station = wcMap.get(jo.workCenterId);
+        if (!station) {
+            // Job orders also route through stations this query excludes (inactive ones),
+            // but their output still belongs to a station rather than disappearing.
+            station = {
+                id: jo.workCenterId,
+                name: jo.workCenterName || `Work Center #${jo.workCenterId}`,
+                actualQty: 0,
+                scrapQty: 0,
+                joCount: 0,
+                capPerHour: null
+            };
+            wcMap.set(jo.workCenterId, station);
         }
+        station.actualQty += jo.actualQtyProduced || jo.completedQty || 0;
+        station.joCount += 1;
+        const yInfo = joYieldMap.get(jo.jobOrderId);
+        if (yInfo) station.scrapQty += yInfo.scrapQty;
     }
 
     const workCenterThroughput: PPRWorkCenterRow[] = Array.from(wcMap.values())
         .filter((w) => w.actualQty > 0 || w.joCount > 0)
         .map((w) => {
-            const estimatedCap = w.capPerHour * 8 * Math.max(1, w.joCount);
+            const estimatedCap =
+                w.capPerHour === null ? null : w.capPerHour * 8 * Math.max(1, w.joCount);
             const util =
-                estimatedCap > 0
+                estimatedCap && estimatedCap > 0
                     ? Math.min(100, Number(((w.actualQty / estimatedCap) * 100).toFixed(1)))
                     : null;
             const totalOut = w.actualQty + w.scrapQty;
@@ -585,46 +866,84 @@ export async function buildProductionPerformanceReport(params: {
             };
         });
 
-    // Route Heatmap
+    // Route Step Scrap Matrix. The yield ledger stores only `jo_route_id`, and that column has
+    // no FK for Directus to traverse, so the step and its operation are joined here by id —
+    // the same way every other report that needs route steps does it.
+    const operationNameById = new Map<number, string>();
+    for (const op of operationRows) {
+        const id = Number(op.id);
+        if (Number.isSafeInteger(id) && id > 0) {
+            operationNameById.set(id, String(op.operation_name || `Operation #${id}`));
+        }
+    }
+
+    const routeStepById = new Map<
+        number,
+        { sequenceOrder: number | null; operationId: number | null }
+    >();
+    for (const r of routeRows) {
+        const id = relationId(r.jo_route_id, ["jo_route_id", "id"]);
+        if (id === null) continue;
+        const seq = Number(r.sequence_order);
+        routeStepById.set(id, {
+            sequenceOrder: Number.isSafeInteger(seq) && seq > 0 ? seq : null,
+            operationId: relationId(r.operation_id, ["operation_id", "id"])
+        });
+    }
+
     const routeMap = new Map<
         string,
         {
-            routeName: string;
+            operationId: number | null;
+            sequenceOrder: number | null;
             operationName: string;
             scrapQty: number;
             yieldQty: number;
-            joCount: number;
+            ledgerRowCount: number;
         }
     >();
     for (const yr of yieldRows) {
-        const opName = yr.jo_route_id?.operation_id?.operation_name || "Standard Step";
-        const seq = yr.jo_route_id?.sequence_order ?? 1;
-        const key = `Step ${seq}: ${opName}`;
+        const stepId = relationId(yr.jo_route_id, ["jo_route_id", "id"]);
+        const step = stepId === null ? undefined : routeStepById.get(stepId);
+        // Shift runs logged without a route step keep their own bucket instead of being
+        // counted as step 1 of an unnamed operation.
+        const operationName = step?.operationId
+            ? operationNameById.get(step.operationId) ?? `Operation #${step.operationId}`
+            : "No route step recorded";
+        const sequenceOrder = step?.sequenceOrder ?? null;
+        const key = sequenceOrder === null ? operationName : `${sequenceOrder}|${operationName}`;
+
         const cur = routeMap.get(key) || {
-            routeName: `Sequence ${seq}`,
-            operationName: opName,
+            operationId: step?.operationId ?? null,
+            sequenceOrder,
+            operationName,
             scrapQty: 0,
             yieldQty: 0,
-            joCount: 0
+            ledgerRowCount: 0
         };
         cur.scrapQty += safeNumber(yr.scrap_quantity);
         cur.yieldQty += safeNumber(yr.yield_quantity);
-        cur.joCount += 1;
+        cur.ledgerRowCount += 1;
         routeMap.set(key, cur);
     }
 
-    const routeHeatmap: PPRRouteHeatmapCell[] = Array.from(routeMap.entries()).map(([k, v], idx) => {
-        const total = v.yieldQty + v.scrapQty;
-        const scrapRate = total > 0 ? Number(((v.scrapQty / total) * 100).toFixed(1)) : 0;
-        return {
-            routeId: idx + 1,
-            routeName: v.routeName,
-            operationName: v.operationName,
-            scrapRatePct: scrapRate,
-            yieldQty: Number(v.yieldQty.toFixed(1)),
-            jobOrderCount: v.joCount
-        };
-    });
+    const routeHeatmap: PPRRouteHeatmapCell[] = Array.from(routeMap.values())
+        .sort((a, b) => {
+            if (a.sequenceOrder === null) return 1;
+            if (b.sequenceOrder === null) return -1;
+            return a.sequenceOrder - b.sequenceOrder;
+        })
+        .map((v) => {
+            const total = v.yieldQty + v.scrapQty;
+            return {
+                operationId: v.operationId,
+                sequenceOrder: v.sequenceOrder,
+                operationName: v.operationName,
+                scrapRatePct: total > 0 ? Number(((v.scrapQty / total) * 100).toFixed(1)) : null,
+                yieldQty: Number(v.yieldQty.toFixed(1)),
+                ledgerRowCount: v.ledgerRowCount
+            };
+        });
 
     // QA Parameter Summary
     const paramStatsMap = new Map<
@@ -643,7 +962,7 @@ export async function buildProductionPerformanceReport(params: {
         paramStatsMap.set(pid, {
             id: pid,
             name: String(p.test_name || `Param #${pid}`),
-            isCrit: Boolean(p.is_critical),
+            isCrit: parseBitBoolean(p.is_critical),
             total: 0,
             passed: 0,
             failed: 0
@@ -658,14 +977,14 @@ export async function buildProductionPerformanceReport(params: {
         const cur = paramStatsMap.get(pid) || {
             id: pid,
             name: pObj?.test_name || `Param #${pid}`,
-            isCrit: Boolean(pObj?.is_critical),
+            isCrit: parseBitBoolean(pObj?.is_critical),
             total: 0,
             passed: 0,
             failed: 0
         };
 
         cur.total += 1;
-        if (qr.is_passed === true || qr.is_passed === 1 || qr.is_passed === "1" || qr.is_passed === "true") {
+        if (parseBitBoolean(qr.is_passed)) {
             cur.passed += 1;
         } else {
             cur.failed += 1;
@@ -686,19 +1005,31 @@ export async function buildProductionPerformanceReport(params: {
         }))
         .sort((a, b) => (a.passRatePct ?? 0) - (b.passRatePct ?? 0));
 
-    // Defect Pareto from final QA releases
+    // Defect Pareto from the QA dispositions' failed parameters. A disposition
+    // records every parameter that failed on one batch, so its failed units are
+    // split across them to keep the Pareto total equal to the lost quantity.
     const defectMap = new Map<string, number>();
-    for (const f of finalQaRows) {
-        const disp = String(f.overall_disposition || "Quarantined");
-        const qty = safeNumber(f.defect_quantity);
-        if (qty > 0) {
-            defectMap.set(disp, (defectMap.get(disp) || 0) + qty);
+    for (const d of dispositionRows) {
+        let failedParams: unknown = d.failed_parameters;
+        if (typeof failedParams === "string") {
+            try {
+                failedParams = JSON.parse(failedParams);
+            } catch {
+                failedParams = [];
+            }
         }
-        if (f.packaging_seal_passed === 0 || f.packaging_seal_passed === false) {
-            defectMap.set("Seal Compromise", (defectMap.get("Seal Compromise") || 0) + 1);
-        }
-        if (f.label_compliance_passed === 0 || f.label_compliance_passed === false) {
-            defectMap.set("Label Non-Compliance", (defectMap.get("Label Non-Compliance") || 0) + 1);
+        if (!Array.isArray(failedParams) || failedParams.length === 0) continue;
+
+        const failedQty = Math.max(
+            0,
+            safeNumber(d.expected_quantity) - safeNumber(d.actual_quantity)
+        );
+        const share = failedQty > 0 ? failedQty / failedParams.length : 1;
+
+        for (const p of failedParams as DirectusRecord[]) {
+            const label = String(p?.test_name || "").trim();
+            if (!label) continue;
+            defectMap.set(label, (defectMap.get(label) || 0) + share);
         }
     }
 
@@ -717,26 +1048,6 @@ export async function buildProductionPerformanceReport(params: {
         };
     });
 
-    // Disposition breakdown
-    const dispMap = new Map<string, { count: number; qty: number }>();
-    let totalDispCount = 0;
-    for (const f of finalQaRows) {
-        const disp = String(f.overall_disposition || "Quarantined");
-        const qty = safeNumber(f.inspected_quantity);
-        const cur = dispMap.get(disp) || { count: 0, qty: 0 };
-        cur.count += 1;
-        cur.qty += qty;
-        dispMap.set(disp, cur);
-        totalDispCount += 1;
-    }
-
-    const dispositionBreakdown: PPRDispositionRow[] = Array.from(dispMap.entries()).map(([disp, v]) => ({
-        disposition: disp,
-        count: v.count,
-        qty: Number(v.qty.toFixed(1)),
-        percentage: totalDispCount > 0 ? Number(((v.count / totalDispCount) * 100).toFixed(1)) : 0
-    }));
-
     // Metadata
     const productLabel =
         filters.productId && filters.productId !== "all"
@@ -748,7 +1059,8 @@ export async function buildProductionPerformanceReport(params: {
             ? allWorkCenters.find((w) => String(w.work_center_id) === filters.workCenterId)?.work_center_name || "Specific Station"
             : "All Work Centers";
 
-    const statusLabel = filters.status && filters.status !== "all" ? filters.status : "All Statuses";
+    const statusLabel =
+        filters.status && filters.status !== "all" ? displayJobOrderStatus(filters.status) : "All Statuses";
 
     return {
         meta: {
@@ -756,8 +1068,9 @@ export async function buildProductionPerformanceReport(params: {
             productLabel,
             workCenterLabel,
             statusLabel,
-            freshnessCutoff: new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila" }),
+            freshnessCutoff: manilaTimestamp(new Date()),
             totalRecordsEvaluated: jobOrders.length,
+            aiTier,
             notices: []
         },
         kpis,
@@ -768,7 +1081,6 @@ export async function buildProductionPerformanceReport(params: {
         downtimeEvents,
         qaParameterSummary,
         defectPareto,
-        dispositionBreakdown,
         jobOrders
     };
 }
@@ -784,44 +1096,45 @@ export async function fetchJobOrderDetail(
         throw new Error("Directus API URL is not configured.");
     }
 
-    const [joRes, yieldRes, matRes, qaRes, timelineRes] = await Promise.all([
-        fetch(
+    const [joRaw, yieldRows, matRows, qaRows, timelineRows] = await Promise.all([
+        fetchDirectus(
             `${directusBase}/items/manufacturing_job_orders/${jobOrderId}?fields=job_order_id,job_order_no,product_id.product_name,status,target_quantity,actual_quantity_produced,completed_quantity`,
-            { headers, signal, cache: "no-store" }
-        ).then((r) => (r.ok ? r.json() : { data: null })),
+            `manufacturing_job_orders/${jobOrderId}`,
+            signal
+        ),
 
-        fetch(
+        fetchDirectusRows(
             `${directusBase}/items/manufacturing_job_order_yield_ledger?filter[job_order_id][_eq]=${jobOrderId}&fields=ledger_id,shift_name,yield_quantity,scrap_quantity,rejected_quantity,qa_status,logged_at,lot_number,work_center_id.work_center_name&sort=-logged_at`,
-            { headers, signal, cache: "no-store" }
-        ).then((r) => (r.ok ? r.json() : { data: [] })),
+            "manufacturing_job_order_yield_ledger",
+            signal
+        ),
 
-        fetch(
+        fetchDirectusRows(
             `${directusBase}/items/manufacturing_job_order_materials?filter[job_order_id][_eq]=${jobOrderId}&fields=jo_material_id,product_id.product_name,uom_id.unit_name,allocated_quantity,actual_consumed_quantity,scrap_quantity`,
-            { headers, signal, cache: "no-store" }
-        ).then((r) => (r.ok ? r.json() : { data: [] })),
+            "manufacturing_job_order_materials",
+            signal
+        ),
 
-        fetch(
+        fetchDirectusRows(
             `${directusBase}/items/manufacturing_job_order_qa_records?filter[job_order_id][_eq]=${jobOrderId}&fields=qa_record_id,parameter_id.test_name,parameter_id.test_type,parameter_id.is_critical,value_text,value_numeric,value_boolean,is_passed,inspected_at,remarks`,
-            { headers, signal, cache: "no-store" }
-        ).then((r) => (r.ok ? r.json() : { data: [] })),
+            "manufacturing_job_order_qa_records",
+            signal
+        ),
 
-        fetch(
+        fetchDirectusRows(
             `${directusBase}/items/manufacturing_job_order_status_history?filter[job_order_id][_eq]=${jobOrderId}&fields=history_id,old_status,new_status,changed_at,changed_by.user_fname,changed_by.user_lname,remarks&sort=changed_at`,
-            { headers, signal, cache: "no-store" }
-        ).then((r) => (r.ok ? r.json() : { data: [] }))
+            "manufacturing_job_order_status_history",
+            signal
+        )
     ]);
 
-    const jo = joRes.data || {};
-    const yieldRows: DirectusRecord[] = Array.isArray(yieldRes.data) ? yieldRes.data : [];
-    const matRows: DirectusRecord[] = Array.isArray(matRes.data) ? matRes.data : [];
-    const qaRows: DirectusRecord[] = Array.isArray(qaRes.data) ? qaRes.data : [];
-    const timelineRows: DirectusRecord[] = Array.isArray(timelineRes.data) ? timelineRes.data : [];
+    const jo = joRaw ?? {};
 
     return {
         jobOrderId,
         jobOrderNo: String(jo.job_order_no || `JO-${jobOrderId}`),
         productName: String(jo.product_id?.product_name || "Finished Good"),
-        status: String(jo.status || "Draft"),
+        status: displayJobOrderStatus(jo.status),
         targetQty: safeNumber(jo.target_quantity),
         actualQtyProduced: safeNumberOrNull(jo.actual_quantity_produced),
         completedQty: safeNumberOrNull(jo.completed_quantity),
@@ -832,7 +1145,7 @@ export async function fetchJobOrderDetail(
             scrapQty: safeNumber(yr.scrap_quantity),
             rejectedQty: safeNumber(yr.rejected_quantity),
             qaStatus: String(yr.qa_status || "Passed"),
-            loggedAt: String(yr.logged_at || "-"),
+            loggedAt: manilaTimestampOrDash(yr.logged_at),
             workCenterName: yr.work_center_id?.work_center_name ? String(yr.work_center_id.work_center_name) : null,
             lotNumber: yr.lot_number ? String(yr.lot_number) : null
         })),
@@ -859,7 +1172,7 @@ export async function fetchJobOrderDetail(
             } else if (qr.value_text) {
                 valueLabel = String(qr.value_text);
             } else if (qr.value_boolean !== null && qr.value_boolean !== undefined) {
-                valueLabel = qr.value_boolean ? "Passed" : "Failed";
+                valueLabel = parseBitBoolean(qr.value_boolean) ? "Passed" : "Failed";
             }
 
             return {
@@ -867,9 +1180,9 @@ export async function fetchJobOrderDetail(
                 parameterName: String(p.test_name || "Parameter"),
                 testType: String(p.test_type || "Numeric"),
                 valueLabel,
-                isPassed: qr.is_passed === true || qr.is_passed === 1 || qr.is_passed === "1" || qr.is_passed === "true",
-                inspectedAt: String(qr.inspected_at || "-"),
-                isCritical: Boolean(p.is_critical),
+                isPassed: parseBitBoolean(qr.is_passed),
+                inspectedAt: manilaTimestampOrDash(qr.inspected_at),
+                isCritical: parseBitBoolean(p.is_critical),
                 remarks: qr.remarks ? String(qr.remarks) : null
             };
         }),
@@ -880,7 +1193,7 @@ export async function fetchJobOrderDetail(
                 historyId: Number(tr.history_id),
                 oldStatus: tr.old_status ? String(tr.old_status) : null,
                 newStatus: String(tr.new_status),
-                changedAt: String(tr.changed_at || "-"),
+                changedAt: manilaTimestampOrDash(tr.changed_at),
                 changedByLabel: name || null,
                 remarks: tr.remarks ? String(tr.remarks) : null
             };

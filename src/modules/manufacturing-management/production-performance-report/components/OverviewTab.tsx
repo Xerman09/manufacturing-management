@@ -18,7 +18,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { WrappedAxisTick } from "./WrappedAxisTick";
+import { getAxisHeight, WrappedAxisTick } from "./WrappedAxisTick";
 import type { QualityIntelligenceReportPayload } from "../types";
 
 interface OverviewTabProps {
@@ -78,6 +78,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ payload }) => {
                                             dataKey="periodLabel"
                                             tick={<WrappedAxisTick />}
                                             interval={0}
+                                            height={getAxisHeight(trendData.length)} // reserves room for staggered rows when there are many dates
                                         />
                                         <YAxis
                                             yAxisId="left"
@@ -268,6 +269,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ payload }) => {
                                         dataKey="periodLabel"
                                         tick={<WrappedAxisTick />}
                                         interval={0}
+                                        height={getAxisHeight(trendData.length)} // reserves room for staggered rows when there are many dates
                                     />
                                     <YAxis
                                         tick={{ fontSize: 10 }}

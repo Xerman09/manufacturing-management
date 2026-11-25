@@ -1,19 +1,13 @@
-export type PPRStatusFilter =
-    | "all"
-    | "Draft"
-    | "Scheduled"
-    | "In Progress"
-    | "In Production"
-    | "QA Pending"
-    | "Closed"
-    | "Cancelled";
+import type { CanonicalJobOrderStatus } from "../job-order-status";
+
+/** Restricted to the stored Job Order vocabulary — see job-order-status.ts. */
+export type PPRStatusFilter = "all" | CanonicalJobOrderStatus;
 
 export interface ProductionPerformanceFilters {
     dateFrom: string;
     dateTo: string;
     productId: string;
     workCenterId: string;
-    routeId: string;
     status: PPRStatusFilter;
 }
 
@@ -29,15 +23,9 @@ export interface PPRFilterWorkCenterOption {
     name: string;
 }
 
-export interface PPRFilterRouteOption {
-    id: number;
-    name: string;
-}
-
 export interface PPRFilterCatalogPayload {
     products: PPRFilterProductOption[];
     workCenters: PPRFilterWorkCenterOption[];
-    routes: PPRFilterRouteOption[];
 }
 
 export interface PPRKpiMetrics {
@@ -86,12 +74,12 @@ export interface PPRWorkCenterRow {
 }
 
 export interface PPRRouteHeatmapCell {
-    routeId: number;
-    routeName: string;
+    operationId: number | null;
+    sequenceOrder: number | null;
     operationName: string;
     scrapRatePct: number | null;
     yieldQty: number | null;
-    jobOrderCount: number;
+    ledgerRowCount: number;
 }
 
 export interface PPRDowntimeEvent {
@@ -122,13 +110,6 @@ export interface PPRDefectParetoRow {
     cumulativePct: number;
 }
 
-export interface PPRDispositionRow {
-    disposition: string;
-    count: number;
-    qty: number;
-    percentage: number;
-}
-
 export interface PPRJobOrderRow {
     jobOrderId: number;
     jobOrderNo: string;
@@ -145,6 +126,7 @@ export interface PPRJobOrderRow {
     scrapRatePct: number | null;
     qaPassRatePct: number | null;
     cycleTimeHrs: number | null;
+    workCenterId: number | null;
     workCenterName: string | null;
 }
 
@@ -217,7 +199,6 @@ export interface PPRCorrectiveActionItem {
     description: string;
     priority: "critical" | "high" | "medium" | "low";
     targetMetric: string;
-    expectedImprovement: string;
 }
 
 export interface PPRRiskFlagItem {
@@ -225,6 +206,22 @@ export interface PPRRiskFlagItem {
     flag: string;
     detail: string;
     severity: "high" | "medium" | "low";
+}
+
+export interface AiTierInfo {
+    assigned: boolean;
+    tierLevel: number;
+    tierName: string;
+    tierSlug: "basic" | "pro" | "executive" | "unassigned";
+    description: string;
+}
+
+export interface ChatMessage {
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    timestamp: string;
+    modelUsed?: string;
 }
 
 export interface ProductionAIAnalysisPayload {
@@ -238,6 +235,7 @@ export interface ProductionAIAnalysisPayload {
         isFallback: boolean;
         generatedAt: string;
         freshnessCutoff: string;
+        aiTier?: AiTierInfo;
     };
 }
 
@@ -249,6 +247,7 @@ export interface ProductionPerformanceReportPayload {
         statusLabel: string;
         freshnessCutoff: string;
         totalRecordsEvaluated: number;
+        aiTier?: AiTierInfo;
         notices: Array<{ id: string; severity: "warning" | "error"; message: string }>;
     };
     kpis: PPRKpiMetrics;
@@ -259,7 +258,6 @@ export interface ProductionPerformanceReportPayload {
     downtimeEvents: PPRDowntimeEvent[];
     qaParameterSummary: PPRQaParameterRow[];
     defectPareto: PPRDefectParetoRow[];
-    dispositionBreakdown: PPRDispositionRow[];
     jobOrders: PPRJobOrderRow[];
 }
 
@@ -270,7 +268,6 @@ export type QIStatusFilter = PPRStatusFilter;
 export type QualityIntelligenceFilters = ProductionPerformanceFilters;
 export type QIFilterProductOption = PPRFilterProductOption;
 export type QIFilterWorkCenterOption = PPRFilterWorkCenterOption;
-export type QIFilterRouteOption = PPRFilterRouteOption;
 export type QIFilterCatalogPayload = PPRFilterCatalogPayload;
 export type QIKpiMetrics = PPRKpiMetrics;
 export type QITrendPoint = PPRTrendPoint;
@@ -280,7 +277,6 @@ export type QIRouteHeatmapCell = PPRRouteHeatmapCell;
 export type QIDowntimeEvent = PPRDowntimeEvent;
 export type QIQaParameterRow = PPRQaParameterRow;
 export type QIDefectParetoRow = PPRDefectParetoRow;
-export type QIDispositionRow = PPRDispositionRow;
 export type QIJobOrderRow = PPRJobOrderRow;
 export type QIYieldLedgerRow = PPRYieldLedgerRow;
 export type QIBomVarianceRow = PPRBomVarianceRow;
