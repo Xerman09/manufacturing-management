@@ -2,6 +2,7 @@
 
 import React, { useEffect, useCallback } from "react";
 import { useInvoiceConsolidation } from "./hooks/useInvoiceConsolidation";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 import CreateConsolidationModal from "./components/CreateConsolidationModal";
 import ConsolidationDetailSheet from "./components/ConsolidationDetailSheet";
 import {
@@ -48,6 +49,7 @@ import {
 type ConfirmAction = "revert" | "audit" | "start-picking" | null;
 
 export default function InvoiceConsolidationModule() {
+    const { formatDateTime } = useTimeZone();
     const {
         consolidations,
         summary,
@@ -321,8 +323,8 @@ export default function InvoiceConsolidationModule() {
                                                 <TableCell className="text-right font-black tabular-nums">
                                                     P{Number(c.totalSalesOrderAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                                 </TableCell>
-                                                <TableCell className="text-muted-foreground">
-                                                    {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : "—"}
+                                                <TableCell className="text-muted-foreground font-mono text-xs">
+                                                    {formatDateTime(c.createdAt)}
                                                 </TableCell>
                                                 <TableCell className="pr-5 text-center md:pr-7"><ConsolidationStatusBadge status={c.status} /></TableCell>
                                             </TableRow>

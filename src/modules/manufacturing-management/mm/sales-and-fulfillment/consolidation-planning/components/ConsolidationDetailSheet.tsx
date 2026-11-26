@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
  
 import { toast } from "sonner";
 import {
@@ -106,6 +107,7 @@ export default function ConsolidationDetailSheet({
     onClose,
     onRequestAction,
 }: Props) {
+    const { formatDateTime } = useTimeZone();
     const [search, setSearch] = useState("");
     const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null);
     const [allocationState, setAllocationState] = useState<{
@@ -246,15 +248,9 @@ export default function ConsolidationDetailSheet({
                                         <Building2 className="mr-1.5 h-3 w-3" />
                                         {consolidation.branchName}
                                     </Badge>
-                                    <span className="flex items-center gap-1 text-[11px] font-bold text-muted-foreground">
+                                    <span className="flex items-center gap-1 text-[11px] font-bold text-muted-foreground font-mono">
                                         <Clock className="h-3.5 w-3.5" />
-                                        {new Date(consolidation.createdAt).toLocaleString([], {
-                                            month: "short",
-                                            day: "2-digit",
-                                            year: "numeric",
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                        })}
+                                        {formatDateTime(consolidation.createdAt)}
                                     </span>
                                 </div>
                                 <DialogTitle className="truncate font-mono text-2xl lg:text-3xl font-black uppercase italic leading-none tracking-tighter text-foreground">

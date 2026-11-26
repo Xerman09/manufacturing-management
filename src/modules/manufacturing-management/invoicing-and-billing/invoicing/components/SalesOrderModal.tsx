@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { SalesOrder, ReceiptType } from "../types";
 import { formatToPHT } from "../utils/dateUtils";
 import { InvoicingService } from "../services/InvoicingService";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 import {
     Loader2,
 
@@ -55,6 +56,7 @@ interface SalesOrderModalProps {
 }
 
 export const SalesOrderModal: React.FC<SalesOrderModalProps> = ({ order, open, onClose, onUpdateRemarks, onUpdateReceiptType }) => {
+    const { formatDateTime } = useTimeZone();
     const [remarks, setRemarks] = useState(order?.remarks || "");
     const [isSaving, setIsSaving] = useState(false);
     const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
@@ -159,7 +161,7 @@ export const SalesOrderModal: React.FC<SalesOrderModalProps> = ({ order, open, o
     if (!order) return null;
 
     const formatDate = (dateString?: string | null) => {
-        return formatToPHT(dateString);
+        return formatDateTime(dateString);
     };
 
     const formatCurrency = (amount: number | null) => {
@@ -214,7 +216,7 @@ export const SalesOrderModal: React.FC<SalesOrderModalProps> = ({ order, open, o
         {
             label: "Invoicing",
             description: "Billing document generated.",
-            date: hasInvoice ? (order.order_date || order.for_invoicing_at) : (order.order_status === "Invoiced" ? order.for_invoicing_at : null),
+            date: hasInvoice ? (order.for_invoicing_at || order.order_date) : (order.order_status === "Invoiced" ? order.for_invoicing_at : null),
             icon: FileText
         },
         {

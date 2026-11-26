@@ -1,6 +1,8 @@
 import jsPDF from 'jspdf';
 
 import { formatToPHT } from './dateUtils';
+import { formatInZone } from '@/lib/datetime';
+import { loadConfiguredTimeZone } from '@/providers/TimeZoneProvider';
 import { ORTemplate, ORFieldConfig } from '../types';
 
 export interface ReceiptItem {
@@ -554,7 +556,8 @@ const generateThermalReceipt = async (data: ReceiptData, existingDoc?: jsPDF): P
     divider('=');
     y += 2;
     center("--- THANK YOU ---");
-    center(formatToPHT(new Date(), "yyyy-MM-dd HH:mm:ss"));
+    const tz = await loadConfiguredTimeZone();
+    center(formatInZone(new Date(), tz));
 
     // Trim the page height if needed (complex in jsPDF, usually easier to just set a safe height or use a custom format)
     // For now, we've generated the content. In a real browser, the print dialog handles the cut.

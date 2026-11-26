@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { nowUtcSql, parseUtc } from "@/lib/datetime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
         // Get created_by from JWT token
         let createdBy = null;
         const cookieStore = await cookies();
-        const token = cookieStore.get('vos_access_token');
+        const token = cookieStore.get('vos_mm_access_token');
         if (token && token.value) {
             try {
                 const payload = token.value.split('.')[1];
@@ -66,7 +67,10 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        const now = new Date().toISOString();
+        const now = nowUtcSql();
+        if (!now) {
+            return NextResponse.json({ error: "Failed to generate UTC timestamp" }, { status: 500 });
+        }
 
         // Transaction simulation: We will collect all requests and execute them sequentially
         const results = {
@@ -152,8 +156,8 @@ export async function POST(req: NextRequest) {
                         if (dateA !== dateB) {
                             return dateB - dateA; // Descending (Newest first)
                         }
-                        const createdA = a.created_at ? new Date(a.created_at).getTime() : 0;
-                        const createdB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                        const createdA = parseUtc(a.created_at)?.getTime() ?? 0;
+                        const createdB = parseUtc(b.created_at)?.getTime() ?? 0;
                         return createdB - createdA; // Tie-breaker: Newest created_at first
                     });
 
@@ -434,10 +438,15 @@ export async function POST(req: NextRequest) {
                         const existingDetail = existingItemsMap.get(Number(item.product_id));
                         if (existingDetail) {
                             // PATCH existing detail
+                            const { created_date: _omitCreatedDate, ...patchDetailPayload } = detailPayload;
+                            void _omitCreatedDate;
                             const detailRes = await fetch(`${DIRECTUS_BASE}/items/sales_invoice_details/${existingDetail.detail_id}`, {
                                 method: 'PATCH',
                                 headers: directusHeaders(),
-                                body: JSON.stringify(detailPayload)
+                                body: JSON.stringify({
+                                    ...patchDetailPayload,
+                                    modified_date: now
+                                })
                             });
                             if (!detailRes.ok) {
                                 throw new Error(`Failed to update invoice details for product ${item.product_id}: ${await detailRes.text()}`);
@@ -763,6 +772,7 @@ export async function POST(req: NextRequest) {
                 body: JSON.stringify({
                     order_status: "For Loading",
                     for_loading_at: now,
+                    modified_date: now,
                     // Guard against NaN from parseInt() — fall back to the order's existing receipt_type
                     receipt_type: (!isNaN(receipt_type_id) && receipt_type_id) ? receipt_type_id : (order.receipt_type?.id || null)
                 })

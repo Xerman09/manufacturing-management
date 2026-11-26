@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   DIRECTUS_URL,
   headers as directusHeaders,
-  formatPhtDateTime,
 } from "@/app/api/manufacturing/directus-api";
+import { nowUtcSql } from "@/lib/datetime";
 import {
   directusGet,
   directusGetOne,
@@ -115,7 +115,13 @@ export async function POST(
     }
 
     const userId = await getUserIdFromToken();
-    const nowPht = formatPhtDateTime();
+    const utcNow = nowUtcSql();
+    if (!utcNow) {
+      return NextResponse.json(
+        { success: false, message: "Failed to generate UTC timestamp." },
+        { status: 500 }
+      );
+    }
 
     // Fetch linked SOs
     const details = await directusGet<RawDispatchDetailRow>(
@@ -130,12 +136,12 @@ export async function POST(
       action === "approve"
         ? {
             status: "Dispatched",
-            approved_at: nowPht,
+            approved_at: utcNow,
             ...(userId ? { approved_by: userId } : {}),
           }
         : {
             status: "Rejected",
-            rejected_at: nowPht,
+            rejected_at: utcNow,
             rejection_reason: reason,
             reject_remarks: reason,
             ...(userId ? { rejected_by: userId } : {}),
@@ -165,7 +171,7 @@ export async function POST(
         salesOrderIds.map(async (soId) => {
           const soPatch: Record<string, unknown> = {
             order_status: targetOrderStatus,
-            modified_date: nowPht,
+            modified_date: utcNow,
           };
           if (userId) soPatch.modified_by = userId;
           const soRes = await fetch(`${DIRECTUS_URL}/items/sales_order/${soId}`, {

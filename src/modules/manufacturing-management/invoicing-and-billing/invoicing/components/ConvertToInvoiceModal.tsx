@@ -11,6 +11,8 @@ import { InvoicingService, INVOICING_API_BASE } from "../services/InvoicingServi
 import { generateInvoicingPDF, ReceiptData } from "../utils/generateInvoicingPDF";
 import { format } from "date-fns";
 import { formatToPHT } from "../utils/dateUtils";
+import { nowUtcSql } from "@/lib/datetime";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 import { ReceiptTemplateEditor, MARIKINA_TEMPLATE, DEFAULT_TEMPLATE } from "./ReceiptTemplateEditor";
 import { jsPDF } from "jspdf";
 
@@ -76,6 +78,7 @@ export const ConvertToInvoiceModal: React.FC<ConvertToInvoiceModalProps> = ({
     onClose,
     order
 }) => {
+    const { formatDateTime } = useTimeZone();
     const [logistics, setLogistics] = useState<LogisticsData[]>([]);
     const [conversionData, setConversionData] = useState<ConversionData | null>(null);
     const [isLoadingDetails, setIsLoadingDetails] = useState(true);
@@ -619,11 +622,17 @@ export const ConvertToInvoiceModal: React.FC<ConvertToInvoiceModalProps> = ({
 
     const handleHoldOrder = async () => {
         if (!order) return;
+        const utcNow = nowUtcSql();
+        if (!utcNow) {
+            toast.error("Failed to generate UTC timestamp");
+            return;
+        }
         setIsHolding(true);
         try {
             await InvoicingService.updateSalesOrder(order.order_id, {
                 order_status: "On Hold",
-                on_hold_at: new Date().toISOString()
+                on_hold_at: utcNow,
+                modified_date: utcNow
             });
 
             toast.warning("Order placed on hold successfully!");
@@ -1019,7 +1028,7 @@ export const ConvertToInvoiceModal: React.FC<ConvertToInvoiceModalProps> = ({
             thermalCheckerDivider,
             "",
             thermalCenterText("--- THANK YOU ---"),
-            thermalCenterText(format(new Date(), "yyyy-MM-dd hh:mm a")),
+            thermalCenterText(formatDateTime(new Date())),
         ];
     };
 

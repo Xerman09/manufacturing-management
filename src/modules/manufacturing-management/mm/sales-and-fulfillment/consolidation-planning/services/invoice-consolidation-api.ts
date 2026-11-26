@@ -102,10 +102,10 @@ export async function fetchAllocationPreview(
 }
 
 export async function auditBatch(payload: AuditPayload): Promise<{ success: boolean; message: string; checkedBy?: number }> {
-    const res = await fetchWithSessionRetry("/api/manufacturing/invoice-consolidation/audit", {
+    const res = await fetchWithSessionRetry("/api/manufacturing/sales-and-fulfillment/consolidation-approval", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, action: "approve" }),
     });
     return handleResponse(res, "Failed to audit batch");
 }
@@ -117,7 +117,7 @@ export interface ProductStockAvailability {
 
 export async function fetchStockAvailability(batchId: number): Promise<ProductStockAvailability[]> {
     const res = await fetchWithSessionRetry(
-        `/api/manufacturing/invoice-consolidation/validate-stock?batchId=${batchId}`
+        `/api/manufacturing/sales-and-fulfillment/consolidation-picking/validate-stock?batchId=${batchId}`
     );
     const data = await handleResponse(res, "Failed to validate stock");
     return data.availability ?? [];
@@ -143,22 +143,22 @@ export interface LotAllocation {
 }
 
 export async function fetchAllocations(batchId: number): Promise<LotAllocation[]> {
-    const res = await fetchWithSessionRetry(`/api/manufacturing/invoice-consolidation/allocations?batchId=${batchId}`);
+    const res = await fetchWithSessionRetry(`/api/manufacturing/sales-and-fulfillment/consolidation-picking/allocations?batchId=${batchId}`);
     const data = await handleResponse(res, "Failed to load allocations");
     return data.allocations ?? [];
 }
 
 export async function repickBatch(batchId: number): Promise<{ success: boolean; message: string; compensatedCount?: number }> {
-    const res = await fetchWithSessionRetry("/api/manufacturing/invoice-consolidation/audit/repick", {
+    const res = await fetchWithSessionRetry("/api/manufacturing/sales-and-fulfillment/consolidation-approval", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ batchId }),
+        body: JSON.stringify({ batchId, action: "repick" }),
     });
     return handleResponse(res, "Failed to re-pick batch");
 }
 
 export async function revertBatch(batchId: number): Promise<{ success: boolean; message: string }> {
-    const res = await fetchWithSessionRetry("/api/manufacturing/invoice-consolidation/revert", {
+    const res = await fetchWithSessionRetry("/api/manufacturing/sales-and-fulfillment/consolidation-planning/revert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ batchId }),
@@ -167,7 +167,7 @@ export async function revertBatch(batchId: number): Promise<{ success: boolean; 
 }
 
 export async function startPicking(batchId: number): Promise<{ success: boolean; message: string; status: string }> {
-    const res = await fetchWithSessionRetry("/api/manufacturing/invoice-consolidation/pick", {
+    const res = await fetchWithSessionRetry("/api/manufacturing/sales-and-fulfillment/consolidation-picking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ batchId, action: "start" }),
@@ -179,7 +179,7 @@ export async function completePicking(
     batchId: number,
     orderDistributions?: Array<{ orderId: number; invoiceId?: number; productId: number; pickedQuantity: number }>
 ): Promise<{ success: boolean; message: string; status: string }> {
-    const res = await fetchWithSessionRetry("/api/manufacturing/invoice-consolidation/pick", {
+    const res = await fetchWithSessionRetry("/api/manufacturing/sales-and-fulfillment/consolidation-picking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ batchId, action: "complete", orderDistributions }),
@@ -188,7 +188,7 @@ export async function completePicking(
 }
 
 export async function savePickedQuantities(payload: PickingSavePayload): Promise<{ success: boolean; message: string }> {
-    const res = await fetchWithSessionRetry("/api/manufacturing/invoice-consolidation/pick", {
+    const res = await fetchWithSessionRetry("/api/manufacturing/sales-and-fulfillment/consolidation-picking", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

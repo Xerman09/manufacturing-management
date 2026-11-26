@@ -33,6 +33,7 @@ import {
   getDispatchStatusBadgeStyle,
   getOrderStatusBadgeStyle,
 } from "../../shared.utils";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 
 interface DispatchPlanTableProps {
   plans: DispatchPlanListItem[];
@@ -63,6 +64,7 @@ export const DispatchPlanTable: React.FC<DispatchPlanTableProps> = ({
   onEdit,
   onRetry,
 }) => {
+  const { formatDateTime } = useTimeZone();
   const totalPages = Math.max(1, Math.ceil(totalPlans / pageSize));
   const startRow = totalPlans === 0 ? 0 : (page - 1) * pageSize + 1;
   const endRow = Math.min(page * pageSize, totalPlans);
@@ -170,8 +172,8 @@ export const DispatchPlanTable: React.FC<DispatchPlanTableProps> = ({
                     >
                       <TableCell className="font-mono font-semibold text-xs text-primary">
                         <div>{plan.dispatch_no}</div>
-                        <div className="text-[11px] font-sans font-normal text-muted-foreground mt-0.5">
-                          {formatDateTimeDisplay(plan.created_at)}
+                        <div className="text-[11px] font-mono font-normal text-muted-foreground mt-0.5">
+                          {formatDateTime(plan.created_at)}
                         </div>
                       </TableCell>
 

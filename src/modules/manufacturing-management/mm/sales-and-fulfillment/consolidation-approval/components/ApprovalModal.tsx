@@ -34,6 +34,7 @@ import {
     repickBatch,
     type LotAllocation,
 } from "../../shared/consolidation-api";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 
 interface ApprovalModalProps {
     batch: InvoiceConsolidation | null;
@@ -48,6 +49,7 @@ export function ApprovalModal({
     onClose,
     onSuccess,
 }: ApprovalModalProps) {
+    const { formatDateTime } = useTimeZone();
     const [fullBatch, setFullBatch] = useState<InvoiceConsolidation | null>(null);
     const [loadingDetails, setLoadingDetails] = useState(false);
     const [allocations, setAllocations] = useState<LotAllocation[]>([]);
@@ -318,9 +320,9 @@ export function ApprovalModal({
                                     {batch.branchName || `Branch #${batch.branchId}`}
                                 </span>
                                 <span>•</span>
-                                <span className="flex items-center gap-1">
+                                <span className="flex items-center gap-1 font-mono">
                                     <Calendar className="h-3.5 w-3.5" />
-                                    {batch.createdAt ? new Date(batch.createdAt).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }) : "N/A"}
+                                    {formatDateTime(batch.createdAt)}
                                 </span>
                             </div>
                         </div>
@@ -500,14 +502,20 @@ export function ApprovalModal({
                                             </div>
 
                                             {(() => {
-                                                const isBatchOrProdPicked = activeBatch?.status === "Picked" || prodItem.totalPicked > 0;
-                                                const pickedAllocs = prodAllocs.filter((alloc) => {
-                                                    const cap = Number(alloc.quantity || 0);
-                                                    const p = (alloc.pickedQuantity !== undefined && alloc.pickedQuantity > 0)
-                                                        ? Number(alloc.pickedQuantity)
-                                                        : (alloc.status === "Picked" || isBatchOrProdPicked ? cap : 0);
-                                                    return p > 0;
-                                                });
+                                                const hasExplicitLotPicks = prodAllocs.some(
+                                                    (a) => Number(a.pickedQuantity || 0) > 0 || a.status === "Picked"
+                                                );
+                                                const fallbackToPlanned = !hasExplicitLotPicks && activeBatch?.status === "Picked";
+                                                const resolveLotPicked = (alloc: LotAllocation): number => {
+                                                    if (hasExplicitLotPicks) {
+                                                        return Number(alloc.pickedQuantity || 0);
+                                                    }
+                                                    if (fallbackToPlanned) {
+                                                        return Number(alloc.quantity || 0);
+                                                    }
+                                                    return 0;
+                                                };
+                                                const pickedAllocs = prodAllocs.filter((alloc) => resolveLotPicked(alloc) > 0);
 
                                                 if (pickedAllocs.length === 0) {
                                                     return (
@@ -533,9 +541,7 @@ export function ApprovalModal({
                                                         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                                                             {pickedAllocs.map((alloc, idx) => {
                                                                 const lotPlanned = Number(alloc.quantity || 0);
-                                                                const lotPicked = (alloc.pickedQuantity !== undefined && alloc.pickedQuantity > 0)
-                                                                    ? Number(alloc.pickedQuantity)
-                                                                    : (alloc.status === "Picked" || isBatchOrProdPicked ? lotPlanned : 0);
+                                                                const lotPicked = resolveLotPicked(alloc);
                                                                 const isFloorLot = !alloc.reservationIds || alloc.reservationIds.length === 0 || lotPlanned === 0;
 
                                                                 return (

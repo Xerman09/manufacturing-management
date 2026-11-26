@@ -48,7 +48,6 @@ async function handleResponse(res: Response, fallback: string) {
 // ─── Base paths ─────────────────────────────────────────────────────────────
 
 const BASE = "/api/manufacturing/sales-and-fulfillment";
-const LEGACY = "/api/manufacturing/invoice-consolidation";
 
 // ─── Shared ─────────────────────────────────────────────────────────────────
 
@@ -77,17 +76,17 @@ export async function fetchConsolidations(params: {
 }
 
 export async function fetchSummary(branchId: number): Promise<StatusSummary> {
-    const res = await fetchWithSessionRetry(`${LEGACY}/summary?branchId=${branchId}`);
+    const res = await fetchWithSessionRetry(`${BASE}/consolidation-planning/summary?branchId=${branchId}`);
     return handleResponse(res, "Failed to load summary");
 }
 
 export async function fetchCandidates(branchId: number): Promise<CandidateInvoice[]> {
-    const res = await fetchWithSessionRetry(`${LEGACY}/candidates?branchId=${branchId}`);
+    const res = await fetchWithSessionRetry(`${BASE}/consolidation-planning/candidates?branchId=${branchId}`);
     return handleResponse(res, "Failed to load candidate invoices");
 }
 
 export async function fetchConsolidationByNo(consolidatorNo: string): Promise<InvoiceConsolidation> {
-    const res = await fetchWithSessionRetry(`${LEGACY}/${encodeURIComponent(consolidatorNo)}`);
+    const res = await fetchWithSessionRetry(`${BASE}/consolidation-planning/${encodeURIComponent(consolidatorNo)}`);
     return handleResponse(res, "Failed to load consolidation");
 }
 
@@ -110,7 +109,7 @@ export async function markReadyForPicking(batchId: number): Promise<{ success: b
 }
 
 export async function revertBatch(batchId: number): Promise<{ success: boolean; message: string }> {
-    const res = await fetchWithSessionRetry(`${LEGACY}/revert`, {
+    const res = await fetchWithSessionRetry(`${BASE}/consolidation-planning/revert`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ batchId }),
@@ -122,7 +121,7 @@ export async function fetchAllocationPreview(
     payload: CreateConsolidationPayload,
     signal?: AbortSignal
 ): Promise<AllocationPreview> {
-    const res = await fetchWithSessionRetry(`${LEGACY}/allocation-preview`, {
+    const res = await fetchWithSessionRetry(`${BASE}/consolidation-planning/allocation-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -159,12 +158,20 @@ export async function startPicking(batchId: number): Promise<{ success: boolean;
 
 export async function completePicking(
     batchId: number,
-    orderDistributions?: import("./consolidation-types").OrderDistributionItem[]
+    orderDistributions?: import("./consolidation-types").OrderDistributionItem[],
+    pickedReservationIds?: number[],
+    pickedLotIds?: number[]
 ): Promise<{ success: boolean; message: string; status: string }> {
     const res = await fetchWithSessionRetry(`${BASE}/consolidation-picking`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ batchId, action: "complete", orderDistributions }),
+        body: JSON.stringify({
+            batchId,
+            action: "complete",
+            orderDistributions,
+            pickedReservationIds,
+            pickedLotIds,
+        }),
     });
     return handleResponse(res, "Failed to complete picking");
 }
@@ -181,7 +188,7 @@ export async function savePickedQuantities(payload: PickingSavePayload): Promise
 export interface ProductStockAvailability { productId: number; availableQuantity: number; }
 
 export async function fetchStockAvailability(batchId: number): Promise<ProductStockAvailability[]> {
-    const res = await fetchWithSessionRetry(`${LEGACY}/validate-stock?batchId=${batchId}`);
+    const res = await fetchWithSessionRetry(`${BASE}/consolidation-picking/validate-stock?batchId=${batchId}`);
     const data = await handleResponse(res, "Failed to validate stock");
     return data.availability ?? [];
 }
@@ -207,12 +214,7 @@ export interface LotAllocation {
 }
 
 export async function fetchAllocations(batchId: number): Promise<LotAllocation[]> {
-    const primaryUrl = `${BASE}/consolidation-picking/allocations?batchId=${batchId}`;
-    const legacyUrl = `${LEGACY}/allocations?batchId=${batchId}`;
-    let res = await fetchWithSessionRetry(primaryUrl);
-    if (!res.ok && res.status === 404) {
-        res = await fetchWithSessionRetry(legacyUrl);
-    }
+    const res = await fetchWithSessionRetry(`${BASE}/consolidation-picking/allocations?batchId=${batchId}`);
     const data = await handleResponse(res, "Failed to load allocations");
     return data.allocations ?? [];
 }
@@ -224,13 +226,7 @@ export async function fetchAllocationsWithBatches(batchId: number, branchId?: nu
     const qs = new URLSearchParams({ batchId: String(batchId) });
     if (branchId) qs.set("branchId", String(branchId));
 
-    const primaryUrl = `${BASE}/consolidation-picking/allocations?${qs.toString()}`;
-    const legacyUrl = `${LEGACY}/allocations?${qs.toString()}`;
-
-    let res = await fetchWithSessionRetry(primaryUrl);
-    if (!res.ok && res.status === 404) {
-        res = await fetchWithSessionRetry(legacyUrl);
-    }
+    const res = await fetchWithSessionRetry(`${BASE}/consolidation-picking/allocations?${qs.toString()}`);
     const data = await handleResponse(res, "Failed to load allocations");
     return {
         allocations: data.allocations ?? [],

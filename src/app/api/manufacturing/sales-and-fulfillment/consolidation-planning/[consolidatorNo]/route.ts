@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DIRECTUS_URL, headers as directusHeaders } from "../../../directus-api";
+import {
+    DIRECTUS_URL,
+    headers as directusHeaders,
+} from "@/app/api/manufacturing/directus-api";
 import { resolveVersions } from "../../../invoice-consolidation/version-resolver";
 import { getUserIdFromToken } from "../../../invoice-consolidation/_auth";
 
@@ -210,6 +213,7 @@ export async function GET(
             .map((j) => {
                 const so = salesOrderMap.get(j.invoice_id);
                 const cust = so ? customerMap.get(so.customer_code) : undefined;
+                const rawCreated = so?.created_date || j.created_at;
                 return {
                     id: j.id,
                     consolidatorId: j.consolidator_id,
@@ -217,7 +221,7 @@ export async function GET(
                     invoiceNo: so?.order_no || `#${j.invoice_id}`,
                     branchId: so?.branch_id ?? c.branch_id,
                     customerName: cust?.customer_name || so?.customer_code || "Standard Fulfillment",
-                    createdAt: so?.created_date || j.created_at,
+                    createdAt: rawCreated,
                     products: soProductsMap.get(j.invoice_id) || [],
                 };
             });

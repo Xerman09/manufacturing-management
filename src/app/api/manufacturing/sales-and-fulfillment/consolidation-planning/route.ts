@@ -1,14 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DIRECTUS_URL, headers as directusHeaders } from "../../directus-api";
-import { getTodayDateString } from "@/app/api/manufacturing/directus-api";
+import {
+    DIRECTUS_URL,
+    getTodayDateString,
+    headers as directusHeaders,
+} from "@/app/api/manufacturing/directus-api";
+import { nowUtcSql } from "@/lib/datetime";
 import {
     allocateInvoicesForConsolidation,
     allocateInvoicesWithCustomAllocations,
     loadCandidateDocuments,
-    releaseReservationIds,
 } from "../../invoice-consolidation/_reservation-service";
 import { getUserIdFromToken } from "../../invoice-consolidation/_auth";
-import { getPhTimestamp } from "../../invoice-consolidation/_time-utils";
+
+async function releaseReservationsUtc(reservationIds: number[], userId: number, utcNow: string): Promise<void> {
+    if (reservationIds.length === 0) return;
+    await Promise.all(
+        reservationIds.map(async (id) => {
+            const soRes = await fetch(`${DIRECTUS_URL}/items/sales_order_reservation/${id}`, {
+                method: "PATCH",
+                headers: directusHeaders,
+                body: JSON.stringify({ status: "Released", updated_by: userId, updated_at: utcNow }),
+            }).catch(() => null);
+            if (!soRes || !soRes.ok) {
+                await fetch(`${DIRECTUS_URL}/items/sales_invoice_reservation/${id}`, {
+                    method: "PATCH",
+                    headers: directusHeaders,
+                    body: JSON.stringify({ status: "Released", updated_by: userId, updated_at: utcNow }),
+                }).catch(() => null);
+            }
+        })
+    );
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -207,6 +229,7 @@ export async function GET(req: NextRequest) {
                             versionName: null,
                         };
                     });
+                    const rawCreated = so?.created_date || j.created_at;
                     return {
                         id: j.id,
                         consolidatorId: j.consolidator_id,
@@ -214,7 +237,7 @@ export async function GET(req: NextRequest) {
                         invoiceNo: so?.order_no || `#${j.invoice_id}`,
                         branchId: so?.branch_id ?? c.branch_id,
                         customerName: (so?.customer_code && customerNameMap.get(so.customer_code)) || so?.customer_code || "Standard Fulfillment",
-                        createdAt: so?.created_date || j.created_at,
+                        createdAt: rawCreated,
                         products: prods,
                     };
                 });
@@ -370,7 +393,22 @@ export async function POST(req: NextRequest) {
 
         // Create consolidator header
         const consolidatorNo = await generateConsolidatorNo();
-        const phNow = getPhTimestamp();
+        const utcNow = nowUtcSql();
+        if (!utcNow) {
+            return NextResponse.json({ message: "Failed to generate UTC timestamp" }, { status: 500 });
+        }
+
+        if (createdReservationIds.length > 0) {
+            await Promise.all(
+                createdReservationIds.map((rId) =>
+                    fetch(`${DIRECTUS_URL}/items/sales_order_reservation/${rId}`, {
+                        method: "PATCH",
+                        headers: directusHeaders,
+                        body: JSON.stringify({ created_at: utcNow, updated_at: utcNow }),
+                    }).catch(() => null)
+                )
+            );
+        }
 
         const createRes = await fetch(`${DIRECTUS_URL}/items/consolidator`, {
             method: "POST",
@@ -380,12 +418,12 @@ export async function POST(req: NextRequest) {
                 status: "Pending",
                 branch_id: Number(branchId),
                 created_by: userId,
-                created_at: phNow,
-                updated_at: phNow,
+                created_at: utcNow,
+                updated_at: utcNow,
             }),
         });
         if (!createRes.ok) {
-            await releaseReservationIds(createdReservationIds, userId!);
+            await releaseReservationsUtc(createdReservationIds, userId!, utcNow);
             return NextResponse.json({ message: `Failed to create consolidator: ${createRes.status}` }, { status: createRes.status });
         }
         const newConsolidator = (await createRes.json()).data;
@@ -399,6 +437,7 @@ export async function POST(req: NextRequest) {
             const linkPayload = uniqueIds.map((docId: number) => ({
                 consolidator_id: newId,
                 invoice_id: docId,
+                created_at: utcNow,
             }));
             const linkRes = await fetch(`${DIRECTUS_URL}/items/consolidator_invoices`, {
                 method: "POST",
@@ -426,7 +465,6 @@ export async function POST(req: NextRequest) {
                         const detailId = Number(reservation.sales_order_detail_id);
                         reservedMap.set(detailId, (reservedMap.get(detailId) || 0) + Number(reservation.reserved_quantity ?? reservation.quantity ?? 0));
                     }
-                    const phModifiedDate = getPhTimestamp();
                     await Promise.all(
                         detailIds.map((detailId) =>
                             fetch(`${DIRECTUS_URL}/items/sales_order_details/${detailId}`, {
@@ -434,7 +472,7 @@ export async function POST(req: NextRequest) {
                                 headers: directusHeaders,
                                 body: JSON.stringify({
                                     allocated_quantity: reservedMap.get(detailId) || 0,
-                                    modified_date: phModifiedDate,
+                                    modified_date: utcNow,
                                 }),
                             }).catch((err) => {
                                 console.warn(`[consolidation-planning] Failed to update sales_order_details ${detailId}:`, err);
@@ -509,8 +547,8 @@ export async function POST(req: NextRequest) {
                 branchId: Number(branchId),
                 branchName: branchMap.get(Number(branchId))?.branchName || `Branch #${branchId}`,
                 totalSalesOrderAmount: siData.reduce((sum, s) => sum + Number(s.total_amount || 0), 0),
-                createdAt: newConsolidator.created_at,
-                updatedAt: newConsolidator.updated_at,
+                createdAt: newConsolidator.created_at || utcNow,
+                updatedAt: newConsolidator.updated_at || utcNow,
                 details: detCheck.map((d) => {
                     const prod = productMap.get(d.product_id);
                     return {
@@ -539,7 +577,7 @@ export async function POST(req: NextRequest) {
                         invoiceNo: s.invoice_no,
                         branchId: s.branch_id,
                         customerName: customerMap.get(s.customer_code) || s.customer_code || "",
-                        createdAt: new Date().toISOString(),
+                        createdAt: utcNow,
                         products: orderProds.map((d) => {
                             const prod = productMap.get(d.product_id);
                             return {
@@ -562,13 +600,13 @@ export async function POST(req: NextRequest) {
             for (const jid of createdJunctionIds) {
                 await fetch(`${DIRECTUS_URL}/items/consolidator_invoices/${jid}`, { method: "DELETE", headers: directusHeaders }).catch(() => null);
             }
-            const phNowDelete = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).replace("T", " ");
+            const rollbackDeletedAt = nowUtcSql() || utcNow;
             await fetch(`${DIRECTUS_URL}/items/consolidator/${newId}`, {
                 method: "PATCH",
                 headers: directusHeaders,
-                body: JSON.stringify({ is_delete: 1, deleted_at: phNowDelete, deleted_by: userId }),
+                body: JSON.stringify({ is_delete: 1, deleted_at: rollbackDeletedAt, deleted_by: userId }),
             }).catch(() => null);
-            await releaseReservationIds(createdReservationIds, userId!).catch(() => false);
+            await releaseReservationsUtc(createdReservationIds, userId!, rollbackDeletedAt);
 
             const msg = e instanceof Error ? e.message : "Failed to create consolidation";
             return NextResponse.json({ message: msg }, { status: 500 });
@@ -613,11 +651,15 @@ export async function PATCH(req: NextRequest) {
             );
         }
 
-        const phNow = getPhTimestamp();
+        const utcNow = nowUtcSql();
+        if (!utcNow) {
+            return NextResponse.json({ message: "Failed to generate UTC timestamp" }, { status: 500 });
+        }
+
         const patchRes = await fetch(`${DIRECTUS_URL}/items/consolidator/${batchId}`, {
             method: "PATCH",
             headers: directusHeaders,
-            body: JSON.stringify({ status: "For Picking", updated_at: phNow }),
+            body: JSON.stringify({ status: "For Picking", updated_at: utcNow }),
         });
         if (!patchRes.ok) {
             return NextResponse.json(
@@ -643,10 +685,10 @@ export async function PATCH(req: NextRequest) {
                             headers: directusHeaders,
                             body: JSON.stringify({
                                 order_status: "For Picking",
-                                for_picking_at: phNow,
-                                modified_date: phNow,
+                                for_picking_at: utcNow,
+                                modified_date: utcNow,
                                 modified_by: userId,
-                                updated_at: phNow,
+                                updated_at: utcNow,
                             }),
                         }).catch((err) => {
                             console.warn(`[consolidation-planning] Failed to update sales_order ${orderId}:`, err);

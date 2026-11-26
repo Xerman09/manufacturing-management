@@ -17,10 +17,10 @@ import type {
   EligibleSalesOrder,
 } from "../../shared.types";
 import {
-  formatDateTimeDisplay,
   getDispatchStatusBadgeStyle,
   toDateTimeLocalValue,
 } from "../../shared.utils";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 import { SalesOrderInvoicePanel } from "./SalesOrderInvoicePanel";
 import { TripConfigPanel } from "./TripConfigPanel";
 import { BudgetSection } from "./BudgetSection";
@@ -39,6 +39,7 @@ export const DispatchPlanViewModal: React.FC<DispatchPlanViewModalProps> = ({
   plan,
   masterData,
 }) => {
+  const { formatDateTime } = useTimeZone();
   const [orderSearch, setOrderSearch] = useState("");
 
   const orderCards: EligibleSalesOrder[] = useMemo(() => {
@@ -118,7 +119,7 @@ export const DispatchPlanViewModal: React.FC<DispatchPlanViewModalProps> = ({
               <CheckCircle2 className="h-4 w-4 shrink-0" />
               <span>
                 Approved by <strong>{plan.approved_by_name || "-"}</strong> on{" "}
-                {formatDateTimeDisplay(plan.approved_at)}
+                <span className="font-mono">{formatDateTime(plan.approved_at)}</span>
               </span>
             </div>
           )}
@@ -129,7 +130,7 @@ export const DispatchPlanViewModal: React.FC<DispatchPlanViewModalProps> = ({
               <div>
                 <span>
                   Returned by <strong>{plan.rejected_by_name || "-"}</strong> on{" "}
-                  {formatDateTimeDisplay(plan.rejected_at)}
+                  <span className="font-mono">{formatDateTime(plan.rejected_at)}</span>
                 </span>
                 {plan.rejection_reason && (
                   <p className="mt-0.5 font-medium">Reason: {plan.rejection_reason}</p>

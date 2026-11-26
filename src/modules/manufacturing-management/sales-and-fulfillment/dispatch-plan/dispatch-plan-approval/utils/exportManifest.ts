@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { DispatchPlanDetail } from "../../shared.types";
+import { formatInZone } from "@/lib/datetime";
 
 const formatPDFCurrency = (val: number) =>
   `PHP ${(val || 0).toLocaleString("en-PH", {
@@ -26,7 +27,10 @@ type AutoTableCell =
     };
 type AutoTableRow = AutoTableCell[];
 
-export const exportDispatchManifestPDF = (plan: DispatchPlanDetail | null) => {
+export const exportDispatchManifestPDF = (
+  plan: DispatchPlanDetail | null,
+  timeZone?: string | null
+) => {
   if (!plan) return;
 
   const doc = new jsPDF();
@@ -366,7 +370,7 @@ export const exportDispatchManifestPDF = (plan: DispatchPlanDetail | null) => {
     doc.setFont("helvetica", "italic");
     doc.setTextColor(100);
     doc.text(
-      `Page ${i} of ${pageCount}  |  ${plan.dispatch_no}  |  Generated: ${new Date().toLocaleString("en-PH")}`,
+      `Page ${i} of ${pageCount}  |  ${plan.dispatch_no}  |  Generated: ${formatInZone(new Date(), timeZone)}`,
       pageWidth / 2,
       pageHeight - 6,
       { align: "center" }
