@@ -41,7 +41,7 @@ function getHeaders(): Record<string, string> {
  * Extract authenticated user's display name from request session token
  */
 function getUserNameFromReq(req: NextRequest): string {
-    const token = req.cookies.get("vos_access_token")?.value;
+    const token = req.cookies.get("vos_mm_access_token")?.value;
     if (!token) return "-";
     const payload = decodeJwtPayload(token);
     if (!payload) return "-";
@@ -648,6 +648,11 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        const reqUserName = getUserNameFromReq(request);
+        const resolvedPreparedBy =
+            (body.preparedBy && body.preparedBy.trim()) ||
+            (reqUserName !== "-" ? reqUserName : "");
+
         const payload = {
             rfq_title: sanitizedBodyTitle,
             rfq_reference: candidateRef,
@@ -666,7 +671,7 @@ export async function POST(request: NextRequest) {
             scoring_weight_lead_time_pct: body.scoringWeightLeadTimePct ?? 15.0,
             status: body.status === "Awarded" ? "Approved" : (body.status || "Draft"),
             version: 1,
-            prepared_by: body.preparedBy || "",
+            prepared_by: resolvedPreparedBy,
             prepared_by_title: body.preparedByTitle || "",
             reviewed_by: body.reviewedBy || "",
             reviewed_by_title: body.reviewedByTitle || "",
@@ -766,6 +771,11 @@ export async function PUT(request: NextRequest) {
                 }
                 project.rfqReference = safeRef;
 
+                const reqUserName = getUserNameFromReq(request);
+                const resolvedPreparedBy =
+                    (project.preparedBy && project.preparedBy.trim()) ||
+                    (reqUserName !== "-" ? reqUserName : "");
+
                 const initialPayload = {
                     rfq_title: sanitizedTitle,
                     rfq_reference: safeRef,
@@ -784,7 +794,7 @@ export async function PUT(request: NextRequest) {
                     scoring_weight_lead_time_pct: project.scoringWeightLeadTimePct ?? 15.0,
                     status: project.status === "Awarded" ? "Approved" : (project.status || "Draft"),
                     version: 1,
-                    prepared_by: project.preparedBy || "",
+                    prepared_by: resolvedPreparedBy,
                     prepared_by_title: project.preparedByTitle || "",
                     reviewed_by: project.reviewedBy || "",
                     reviewed_by_title: project.reviewedByTitle || "",

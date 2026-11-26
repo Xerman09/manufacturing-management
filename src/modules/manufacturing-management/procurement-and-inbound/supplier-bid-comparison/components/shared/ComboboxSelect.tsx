@@ -102,7 +102,7 @@ export const ComboboxSelect: React.FC<ComboboxSelectProps> = ({
                     aria-expanded={open}
                     disabled={disabled}
                     className={cn(
-                        "w-full justify-between h-8 text-xs font-normal px-2.5",
+                        "w-full justify-between h-8 text-xs font-normal px-2.5 disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed",
                         !value && "text-muted-foreground",
                         className
                     )}

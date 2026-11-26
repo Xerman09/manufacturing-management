@@ -87,7 +87,7 @@ export const ApprovalWorkflowCard: React.FC = () => {
             ...prev,
             status: "Awarded",
             approvalRemarks: commentText,
-            approvedBy: currentUser?.name || currentUser?.email || "Award Signatory",
+            approvedBy: "",
             approvalHistory: newHistory,
         }));
 

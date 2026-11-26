@@ -5,18 +5,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NumericInputField } from "../shared/NumericInputField";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 
 export const CostAssumptionsCard: React.FC = () => {
     const { currentProject, updateProject } = useBidComparisonStore();
     if (!currentProject) return null;
+
+    const isLocked = isRfqProjectLocked(currentProject);
 
     return (
         <Card className="shadow-xs border-border/80 h-full flex flex-col bg-card">
             <CardHeader className="py-3 px-4 border-b bg-muted/10">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
                     <span>🧮</span>
-                    <span>Cost assumptions</span>
+                    <span>1.2 Cost Assumptions</span>
                 </CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-4 flex-1 flex flex-col justify-between">
@@ -26,6 +28,7 @@ export const CostAssumptionsCard: React.FC = () => {
                         <Label className="text-xs text-muted-foreground font-medium">FX risk buffer %</Label>
                         <NumericInputField
                             value={currentProject.fxRiskBufferPct}
+                            disabled={isLocked}
                             onChange={(val) => updateProject((prev) => ({ ...prev, fxRiskBufferPct: val }))}
                             min={0}
                             max={100}
@@ -37,6 +40,7 @@ export const CostAssumptionsCard: React.FC = () => {
                         <Label className="text-xs text-muted-foreground font-medium">Cost of money % / yr</Label>
                         <NumericInputField
                             value={currentProject.costOfMoneyPctPerYear}
+                            disabled={isLocked}
                             onChange={(val) => updateProject((prev) => ({ ...prev, costOfMoneyPctPerYear: val }))}
                             min={0}
                             max={100}
@@ -48,6 +52,7 @@ export const CostAssumptionsCard: React.FC = () => {
                         <Label className="text-xs text-muted-foreground font-medium">Default VAT %</Label>
                         <NumericInputField
                             value={currentProject.defaultVatPct}
+                            disabled={isLocked}
                             onChange={(val) => updateProject((prev) => ({ ...prev, defaultVatPct: val }))}
                             min={0}
                             max={100}
@@ -60,6 +65,7 @@ export const CostAssumptionsCard: React.FC = () => {
                 <div className="flex items-center space-x-2 pt-1">
                     <Checkbox
                         id="count-vat-cost"
+                        disabled={isLocked}
                         checked={currentProject.countVatAsCost}
                         onCheckedChange={(checked) =>
                             updateProject((prev) => ({ ...prev, countVatAsCost: Boolean(checked) }))
@@ -67,7 +73,7 @@ export const CostAssumptionsCard: React.FC = () => {
                     />
                     <label
                         htmlFor="count-vat-cost"
-                        className="text-xs text-foreground font-medium cursor-pointer select-none"
+                        className={`text-xs text-foreground font-medium select-none ${isLocked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
                     >
                         Count VAT as a cost (untick if your company claims input VAT)
                     </label>

@@ -2,10 +2,11 @@
 
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2 } from "lucide-react";
-import { ACTIVE_PROJECT_ID_KEY, useBidComparisonStore } from "./hooks/useBidComparisonState";
+import { Loader2, Lock, Copy, Plus, Users } from "lucide-react";
+import { ACTIVE_PROJECT_ID_KEY, useBidComparisonStore, isRfqProjectLocked } from "./hooks/useBidComparisonState";
 import { TopBar } from "./components/layout/TopBar";
 import { StepNavigation } from "./components/layout/StepNavigation";
+import { StepFooterNavigation } from "./components/layout/StepFooterNavigation";
 import { ImportExportModal } from "./components/shared/ImportExportModal";
 import { ExportModal } from "./components/shared/ExportModal";
 import { SelectProjectModal } from "./components/shared/SelectProjectModal";
@@ -51,7 +52,6 @@ import { AbstractOfBidsDocument } from "./components/abstract/AbstractOfBidsDocu
 
 import { SupplierBid, ItemQuotation, PassFailResult, Incoterm } from "./types";
 import { toast } from "sonner";
-import { Plus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface SupplierBidComparisonModuleProps {
@@ -184,7 +184,7 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
   };
 
   const handleAddSupplier = (type: "LOCAL" | "INTERNATIONAL") => {
-    if (!currentProject) return;
+    if (!currentProject || isRfqProjectLocked(currentProject)) return;
     const newBidId = `bid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
     const initialQuotes: Record<string, ItemQuotation> = {};
@@ -218,11 +218,11 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
       id: newBidId,
       supplierName: type === "LOCAL" ? "New Local Supplier" : "New Overseas Supplier",
       supplierType: type,
-      country: type === "LOCAL" ? "Philippines" : "CN",
+      country: type === "LOCAL" ? "Philippines" : "",
       contactPerson: "",
       contactEmail: "",
       contactPhone: "",
-      quoteCurrency: type === "LOCAL" ? "PHP" : "USD",
+      quoteCurrency: type === "LOCAL" ? "PHP" : "",
       quotationRef: nextQuoteRef,
       quoteDate: new Date().toISOString().split("T")[0],
       validUntil: "",
@@ -267,7 +267,7 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
   };
 
   const handleDuplicateBid = (bidId: string) => {
-    if (!currentProject) return;
+    if (!currentProject || isRfqProjectLocked(currentProject)) return;
     const bidToDup = currentProject.bids.find((b) => b.id === bidId);
     if (!bidToDup) return;
     const newBidId = `bid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -290,7 +290,7 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
   };
 
   const handleRemoveBid = (bidId: string) => {
-    if (!currentProject) return;
+    if (!currentProject || isRfqProjectLocked(currentProject)) return;
     updateProject((prev) => ({
       ...prev,
       bids: prev.bids.filter((b) => b.id !== bidId),
@@ -338,6 +338,7 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
   }
 
   const activeBid = currentProject.bids.find((b) => b.id === activeBidId) || currentProject.bids[0];
+  const isLocked = isRfqProjectLocked(currentProject);
 
   const awardedDistinctSuppliersCount = new Set(
     (currentProject.awards || []).map((a) => a.rfqBidId).filter(Boolean)
@@ -354,6 +355,28 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
 
       {/* 5-Step Navigation Header */}
       <StepNavigation />
+
+      {/* Non-intrusive inline Locked-State Banner */}
+      {isLocked && (
+        <div className="mx-3 sm:mx-5 md:mx-6 mt-4 px-4 py-2.5 rounded-lg border border-amber-300/80 bg-amber-50/90 dark:bg-amber-950/30 dark:border-amber-800/70 flex flex-wrap items-center justify-between gap-2 text-xs print:hidden">
+          <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-medium">
+            <Lock className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              This RFQ is locked in <strong>{currentProject.status === "Approved" ? "Awarded" : currentProject.status}</strong> status and cannot be edited. Use <strong>Duplicate</strong> to create an editable copy, or reopen to Draft in Step 4.
+            </span>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => useBidComparisonStore.getState().duplicateProject()}
+            className="h-7 text-xs gap-1.5 bg-background border-amber-300 hover:bg-amber-100/60 dark:border-amber-700"
+          >
+            <Copy className="h-3 w-3" />
+            Duplicate Copy
+          </Button>
+        </div>
+      )}
 
       {/* Switching Project Subtle Indicator */}
       {isLoadingProject && (
@@ -396,12 +419,12 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
                 <CustomsAndPortChargesCard />
               </div>
 
-              {/* Row 4: 1.4 Scored Quality Criteria & 1.5 Pass/Fail Mandatory Requirements (combined in one row card, half each) */}
+              {/* Row 4: 1.5 Scored Quality Criteria & 1.6 Pass/Fail Mandatory Requirements */}
               <div className="w-full">
                 <QualityCriteriaCard />
               </div>
 
-              {/* Row 5: 1.6 Evaluation Exchange Rates (Full Width) */}
+              {/* Row 5: 1.7 Evaluation Exchange Rates (Full Width) */}
               <div className="w-full">
                 <ExchangeRatesCard />
               </div>
@@ -441,7 +464,7 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
                     {/* 2.5 Technical Quality Evaluation (Full row) */}
                     <QualityEvaluationForm bid={activeBid} />
 
-                    {/* 2.7 Checks & 2.8 Attachments (Two separate standalone cards side-by-side) */}
+                    {/* 2.6 Checks & 2.7 Attachments (Two separate standalone cards side-by-side) */}
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
                       <BidValidationChecks bid={activeBid} />
                       <BidAttachmentsCard bid={activeBid} />
@@ -463,6 +486,7 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
                     <div className="flex items-center gap-2 pt-2">
                       <Button
                         size="sm"
+                        disabled={isLocked}
                         onClick={() => handleAddSupplier("LOCAL")}
                         className="text-xs gap-1.5"
                       >
@@ -472,6 +496,7 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
                       <Button
                         size="sm"
                         variant="outline"
+                        disabled={isLocked}
                         onClick={() => handleAddSupplier("INTERNATIONAL")}
                         className="text-xs gap-1.5"
                       >
@@ -500,10 +525,10 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
                 supplierFilter={supplierFilter}
                 onFilterChange={setSupplierFilter}
               />
-              <SupplierSummaryTable supplierFilter={supplierFilter} />
-              <LandedCostStackedChart supplierFilter={supplierFilter} />
               <LandedCostMatrixTable supplierFilter={supplierFilter} />
+              <LandedCostStackedChart supplierFilter={supplierFilter} />
               <QualityComparisonTable supplierFilter={supplierFilter} />
+              <SupplierSummaryTable supplierFilter={supplierFilter} />
             </motion.div>
           )}
 
@@ -546,6 +571,9 @@ const SupplierBidComparisonModule: React.FC<SupplierBidComparisonModuleProps> = 
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Bottom Previous / Next Navigation with Step Validation */}
+        <StepFooterNavigation />
 
         {/* Dedicated Print Tree for Abstract of Bids — Always mounted to guarantee instant, reliable printing from any step or export modal */}
         <div className="hidden print:block w-full print:p-0 print:m-0 print:opacity-100">

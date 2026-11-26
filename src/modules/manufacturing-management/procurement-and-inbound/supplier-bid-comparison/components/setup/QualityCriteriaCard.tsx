@@ -7,13 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { NumericInputField } from "../shared/NumericInputField";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { QualityCriterion } from "../../types";
 
 export const QualityCriteriaCard: React.FC = () => {
     const { currentProject, updateProject } = useBidComparisonStore();
     if (!currentProject) return null;
 
+    const isLocked = isRfqProjectLocked(currentProject);
     const criteria = currentProject.qualityCriteria || [];
     const scoredCriteria = criteria.filter((c) => c.criterionType === "SCORED");
     const passFailCriteria = criteria.filter((c) => c.criterionType === "PASS_FAIL");
@@ -76,13 +77,13 @@ export const QualityCriteriaCard: React.FC = () => {
                     <div>
                         <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                             <Award className="h-4 w-4 text-amber-500" />
-                            1.4 Scored Quality Criteria
+                            1.5 Scored Quality Criteria
                         </CardTitle>
                         <CardDescription className="text-xs">
                             Graded 1 to 5 per supplier. Weights are normalized (Sum: {totalWeight}%).
                         </CardDescription>
                     </div>
-                    <Button size="sm" variant="outline" onClick={handleAddScoredCriterion} className="h-7 text-xs gap-1">
+                    <Button size="sm" variant="outline" disabled={isLocked} onClick={handleAddScoredCriterion} className="h-7 text-xs gap-1">
                         <Plus className="h-3 w-3" />
                         Add Criterion
                     </Button>
@@ -105,14 +106,16 @@ export const QualityCriteriaCard: React.FC = () => {
                                         <td className="py-1.5 px-3">
                                             <Input
                                                 value={c.criterionName}
+                                                disabled={isLocked}
                                                 onChange={(e) => handleUpdateCriterion(c.id, { criterionName: e.target.value })}
                                                 placeholder="e.g. Meets technical specifications"
-                                                className="h-7 text-xs"
+                                                className="h-7 text-xs disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed"
                                             />
                                         </td>
                                         <td className="py-1.5 px-3">
                                             <NumericInputField
                                                 value={c.weightPct}
+                                                disabled={isLocked}
                                                 onChange={(val) => handleUpdateCriterion(c.id, { weightPct: val })}
                                                 min={1}
                                                 max={100}
@@ -127,8 +130,9 @@ export const QualityCriteriaCard: React.FC = () => {
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
+                                                disabled={isLocked}
                                                 onClick={() => handleRemoveCriterion(c.id)}
-                                                className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                                className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive disabled:opacity-40"
                                             >
                                                 <Trash2 className="h-3 w-3" />
                                             </Button>
@@ -181,13 +185,13 @@ export const QualityCriteriaCard: React.FC = () => {
                     <div>
                         <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                             <ShieldAlert className="h-4 w-4 text-rose-500" />
-                            1.5 Pass/Fail Mandatory Requirements
+                            1.6 Pass/Fail Mandatory Requirements
                         </CardTitle>
                         <CardDescription className="text-xs">
                             Non-negotiable criteria. Failing any one disqualifies the supplier.
                         </CardDescription>
                     </div>
-                    <Button size="sm" variant="outline" onClick={handleAddPassFailCriterion} className="h-7 text-xs gap-1">
+                    <Button size="sm" variant="outline" disabled={isLocked} onClick={handleAddPassFailCriterion} className="h-7 text-xs gap-1">
                         <Plus className="h-3 w-3" />
                         Add Requirement
                     </Button>
@@ -213,17 +217,19 @@ export const QualityCriteriaCard: React.FC = () => {
                                         <td className="py-1.5 px-3">
                                             <Input
                                                 value={c.criterionName}
+                                                disabled={isLocked}
                                                 onChange={(e) => handleUpdateCriterion(c.id, { criterionName: e.target.value })}
                                                 placeholder="e.g. Complete eligibility documents (SEC, BIR)"
-                                                className="h-7 text-xs"
+                                                className="h-7 text-xs disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed"
                                             />
                                         </td>
                                         <td className="py-1.5 px-2 text-center">
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
+                                                disabled={isLocked}
                                                 onClick={() => handleRemoveCriterion(c.id)}
-                                                className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                                className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive disabled:opacity-40"
                                             >
                                                 <Trash2 className="h-3 w-3" />
                                             </Button>

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Check, Sliders, Users, BarChart3, Award, FileSpreadsheet } from "lucide-react";
+import { Sliders, Users, BarChart3, Award, FileSpreadsheet } from "lucide-react";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
 import { cn } from "@/lib/utils";
@@ -84,11 +84,7 @@ export const StepNavigation: React.FC = () => {
                                             : "bg-muted text-muted-foreground"
                                 )}
                             >
-                                {s.hasContent ? (
-                                    <Check className="h-4 w-4" />
-                                ) : (
-                                    <span>{s.num}</span>
-                                )}
+                                <span>{s.num}</span>
                             </div>
 
                             <div className="flex flex-col min-w-0 flex-1">

@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 
 interface ScoringWeightsControlsProps {
     supplierFilter: "ALL" | "LOCAL" | "INTERNATIONAL";
@@ -20,7 +20,7 @@ export const ScoringWeightsControls: React.FC<ScoringWeightsControlsProps> = ({
 }) => {
     const { currentProject, updateProject } = useBidComparisonStore();
 
-    const isLocked = currentProject?.status === "Submitted" || currentProject?.status === "Approved";
+    const isLocked = isRfqProjectLocked(currentProject);
     const wP = currentProject?.scoringWeightPricePct ?? 50;
     const wQ = currentProject?.scoringWeightQualityPct ?? 35;
     const wL = currentProject?.scoringWeightLeadTimePct ?? 15;
@@ -80,7 +80,7 @@ export const ScoringWeightsControls: React.FC<ScoringWeightsControlsProps> = ({
                         <div className="flex items-center gap-2">
                             <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                                 <SlidersHorizontal className="h-4 w-4 text-primary" />
-                                Scoring weights
+                                3.1 Scoring Weights
                             </CardTitle>
                             {sum === 100 ? (
                                 <Badge variant="outline" className="text-[11px] font-normal py-0 h-5 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800">

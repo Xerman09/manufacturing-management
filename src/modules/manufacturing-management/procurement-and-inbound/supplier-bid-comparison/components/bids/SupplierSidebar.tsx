@@ -4,7 +4,7 @@ import React from "react";
 import { Plus, Globe, Building2, AlertTriangle, XCircle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
  
 import { cn } from "@/lib/utils";
@@ -17,6 +17,7 @@ export const SupplierSidebar: React.FC<SupplierSidebarProps> = ({ onAddSupplier 
     const { currentProject, activeBidId, setActiveBidId } = useBidComparisonStore();
     if (!currentProject) return null;
 
+    const isLocked = isRfqProjectLocked(currentProject);
     const bids = currentProject.bids || [];
     const summary = evaluateAndCompareSuppliers(currentProject);
 
@@ -33,6 +34,7 @@ export const SupplierSidebar: React.FC<SupplierSidebarProps> = ({ onAddSupplier 
                     <Button
                         size="sm"
                         variant="outline"
+                        disabled={isLocked}
                         onClick={() => onAddSupplier("LOCAL")}
                         className="h-7 text-xs gap-1.5 justify-center"
                     >
@@ -42,6 +44,7 @@ export const SupplierSidebar: React.FC<SupplierSidebarProps> = ({ onAddSupplier 
                     <Button
                         size="sm"
                         variant="outline"
+                        disabled={isLocked}
                         onClick={() => onAddSupplier("INTERNATIONAL")}
                         className="h-7 text-xs gap-1.5 justify-center"
                     >

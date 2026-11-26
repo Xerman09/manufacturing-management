@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { NumericInputField } from "../shared/NumericInputField";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { SupplierBid } from "../../types";
 import { calculateSupplierLandedCost } from "../../engine/landed-cost-calculator";
 
@@ -19,6 +19,7 @@ export const PaymentTermsCard: React.FC<PaymentTermsCardProps> = ({ bid }) => {
     const { currentProject, updateProject } = useBidComparisonStore();
     if (!currentProject) return null;
 
+    const isLocked = isRfqProjectLocked(currentProject);
     const items = currentProject.items || [];
     const landedResult = calculateSupplierLandedCost(currentProject, items, bid);
 
@@ -92,7 +93,7 @@ export const PaymentTermsCard: React.FC<PaymentTermsCardProps> = ({ bid }) => {
             <CardHeader className="py-3 px-4 border-b bg-muted/20 flex flex-row items-center justify-between">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                     <CreditCard className="h-4 w-4 text-primary" />
-                    Payment terms
+                    2.4 Payment Terms
                 </CardTitle>
                 {isFullDownpayment && (
                     <span className="text-[10px] font-medium text-amber-700 bg-amber-100 dark:bg-amber-950/60 dark:text-amber-300 px-2 py-0.5 rounded-full">
@@ -107,6 +108,7 @@ export const PaymentTermsCard: React.FC<PaymentTermsCardProps> = ({ bid }) => {
                         <Label className="text-xs font-medium">Down payment %</Label>
                         <NumericInputField
                             value={bid.downPaymentPct}
+                            disabled={isLocked}
                             onChange={handleDownpaymentChange}
                             min={0}
                             max={100}
@@ -124,7 +126,7 @@ export const PaymentTermsCard: React.FC<PaymentTermsCardProps> = ({ bid }) => {
                             onChange={handleBalanceDueChange}
                             min={0}
                             max={365}
-                            disabled={isFullDownpayment}
+                            disabled={isLocked || isFullDownpayment}
                             className="h-8 text-xs font-mono disabled:opacity-50 disabled:bg-muted/40 disabled:cursor-not-allowed"
                         />
                     </div>
@@ -139,7 +141,7 @@ export const PaymentTermsCard: React.FC<PaymentTermsCardProps> = ({ bid }) => {
                             onChange={handleEarlyDiscountPctChange}
                             min={0}
                             max={100}
-                            disabled={isFullDownpayment}
+                            disabled={isLocked || isFullDownpayment}
                             className="h-8 text-xs font-mono disabled:opacity-50 disabled:bg-muted/40 disabled:cursor-not-allowed"
                         />
                     </div>
@@ -157,7 +159,7 @@ export const PaymentTermsCard: React.FC<PaymentTermsCardProps> = ({ bid }) => {
                             onChange={handleEarlyDiscountDaysChange}
                             min={0}
                             max={bid.balanceDueDays ?? 0}
-                            disabled={isFullDownpayment}
+                            disabled={isLocked || isFullDownpayment}
                             className="h-8 text-xs font-mono disabled:opacity-50 disabled:bg-muted/40 disabled:cursor-not-allowed"
                         />
                     </div>
@@ -166,6 +168,7 @@ export const PaymentTermsCard: React.FC<PaymentTermsCardProps> = ({ bid }) => {
                         <Label className="text-xs font-medium truncate">Bank / transfer fee per payment (PHP)</Label>
                         <NumericInputField
                             value={bid.bankFeePerPaymentCompCurr}
+                            disabled={isLocked}
                             onChange={(val) => handleUpdate({ bankFeePerPaymentCompCurr: Math.min(1000000, Math.max(0, val)) })}
                             min={0}
                             max={1000000}
@@ -179,7 +182,7 @@ export const PaymentTermsCard: React.FC<PaymentTermsCardProps> = ({ bid }) => {
                     <Checkbox
                         id="take-early-discount"
                         checked={isFullDownpayment ? false : bid.takeEarlyPayDiscount}
-                        disabled={isFullDownpayment}
+                        disabled={isLocked || isFullDownpayment}
                         onCheckedChange={(checked) =>
                             handleUpdate({ takeEarlyPayDiscount: Boolean(checked) })
                         }
@@ -187,7 +190,7 @@ export const PaymentTermsCard: React.FC<PaymentTermsCardProps> = ({ bid }) => {
                     <Label
                         htmlFor="take-early-discount"
                         className={`text-xs font-medium ${
-                            isFullDownpayment
+                            isLocked || isFullDownpayment
                                 ? "cursor-not-allowed text-muted-foreground/60"
                                 : "cursor-pointer"
                         }`}

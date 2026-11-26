@@ -137,7 +137,7 @@ export const LandedCostStackedChart: React.FC<LandedCostStackedChartProps> = ({ 
             <CardHeader className="py-3 px-4 border-b bg-muted/20">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                     <BarChart3 className="h-4 w-4 text-primary" />
-                    3.4 Total Landed Cost Composition ({compCurr})
+                    3.3 Total Landed Cost Composition ({compCurr})
                 </CardTitle>
                 <CardDescription className="text-xs">
                     Stacked cost breakdown for full-scope bids, from lowest to highest total landed cost.

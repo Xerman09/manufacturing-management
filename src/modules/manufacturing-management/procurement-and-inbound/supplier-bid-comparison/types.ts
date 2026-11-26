@@ -347,3 +347,19 @@ export interface ComparisonSummary {
     isBudgetOver: boolean;
     results: Record<string, SupplierLandedCostResult>; // keyed by bidId
 }
+
+export interface CountryCurrencyLookup {
+    code: string;
+    name: string;
+    symbol?: string;
+}
+
+export interface CountryLookup {
+    iso2: string;
+    iso3: string;
+    name: string;
+    officialName?: string;
+    flagEmoji?: string;
+    currencies: CountryCurrencyLookup[];
+}
+
