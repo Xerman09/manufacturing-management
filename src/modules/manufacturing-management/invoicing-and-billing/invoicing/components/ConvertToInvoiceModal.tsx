@@ -1792,6 +1792,7 @@ export const ConvertToInvoiceModal: React.FC<ConvertToInvoiceModalProps> = ({
                                         // EWT calculation: EWT Base = Sales - Discount - VAT payable; EWT amount = EWT Base * 1%
                                         const ewtBase = isCustomerVat ? vatableSales : netTotal;
                                         const withholdingTax = isCustomerEwt ? ewtBase * 0.01 : 0;
+                                        const totalAmountDue = netTotal - withholdingTax;
 
                                         const fieldValues: Record<string, string> = {
                                             customer_name: fullName.toUpperCase(),
@@ -1807,7 +1808,7 @@ export const ConvertToInvoiceModal: React.FC<ConvertToInvoiceModalProps> = ({
                                             net_total: formatCurrency(netTotal),
                                             po_no: `PO NO. : ${order.po_no || ""}`,
                                             salesman: `SALESMAN : ${order.salesman_id?.salesman_name || "N/A"}`,
-                                            total_amount_due: formatCurrency(netTotal),
+                                            total_amount_due: formatCurrency(totalAmountDue),
                                             net_total_footer: formatCurrency(netTotal),
                                             zero_rated: "0.00",
                                             exempt: isCustomerVat ? "0.00" : formatCurrency(netTotal),
