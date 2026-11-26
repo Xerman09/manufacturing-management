@@ -1,0 +1,112 @@
+"use client";
+
+import * as React from "react";
+import { Check, ChevronsUpDown } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+    Command,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
+} from "@/components/ui/command";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover";
+
+export interface ComboboxOption {
+    value: string;
+    label: string;
+}
+
+interface ComboboxProps {
+    options: ComboboxOption[];
+    value?: string;
+    onValueChange: (value: string) => void;
+    placeholder?: string;
+    emptyMessage?: string;
+    className?: string;
+    disabled?: boolean;
+    renderItem?: (option: ComboboxOption) => React.ReactNode;
+}
+
+export function Combobox({
+    options,
+    value,
+    onValueChange,
+    placeholder = "Select option...",
+    emptyMessage = "No option found.",
+    className,
+    disabled,
+    renderItem,
+}: ComboboxProps) {
+    const [open, setOpen] = React.useState(false);
+
+    const selectedLabel = React.useMemo(() => {
+        return options.find((option) => option.value === value)?.label;
+    }, [options, value]);
+
+    const searchPlaceholder = placeholder.toLowerCase().startsWith("search")
+        ? placeholder
+        : `Search ${placeholder.toLowerCase()}...`;
+
+    return (
+        <Popover open={open} onOpenChange={setOpen} modal={true}>
+            <PopoverTrigger asChild>
+                <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    className={cn("w-full justify-between font-normal h-10 border-input bg-background", className)}
+                    disabled={disabled}
+                >
+                    <span className="truncate">{selectedLabel || placeholder}</span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent
+                className="w-[var(--radix-popover-trigger-width)] min-w-[200px] p-0"
+                align="start"
+                onWheel={(e) => e.stopPropagation()}
+                onWheelCapture={(e) => e.stopPropagation()}
+            >
+                <Command>
+                    <CommandInput placeholder={searchPlaceholder} />
+                    <CommandList
+                        className="max-h-[300px] overflow-y-auto overscroll-contain"
+                        onWheel={(e) => e.stopPropagation()}
+                        onWheelCapture={(e) => e.stopPropagation()}
+                        onTouchMove={(e) => e.stopPropagation()}
+                    >
+                        <CommandEmpty>{emptyMessage}</CommandEmpty>
+                        <CommandGroup>
+                            {options.map((option) => (
+                                <CommandItem
+                                    key={option.value}
+                                    value={`${option.label} ${option.value}`}
+                                    onSelect={() => {
+                                        onValueChange(option.value === value ? "" : option.value);
+                                        setOpen(false);
+                                    }}
+                                >
+                                    <Check
+                                        className={cn(
+                                            "mr-2 h-4 w-4 shrink-0",
+                                            value === option.value ? "opacity-100" : "opacity-0"
+                                        )}
+                                    />
+                                    {renderItem ? renderItem(option) : option.label}
+                                </CommandItem>
+                            ))}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
