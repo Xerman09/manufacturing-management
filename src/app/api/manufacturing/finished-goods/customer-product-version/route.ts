@@ -98,11 +98,12 @@ export async function POST(request: Request) {
         }
 
         // Case B: Create or Update override
+        const nowPht = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).replace(" ", "T");
         const payload: any = {
             customer_id: Number(customerId),
             product_id: Number(productId),
             version_id: Number(versionId),
-            created_at: new Date().toISOString()
+            created_at: nowPht
         };
         if (userId) {
             payload.created_by = userId;
@@ -117,7 +118,7 @@ export async function POST(request: Request) {
                 body: JSON.stringify({
                     version_id: Number(versionId),
                     created_by: userId || existingRecord.created_by,
-                    created_at: new Date().toISOString()
+                    created_at: nowPht
                 })
             });
             if (!patchRes.ok) {

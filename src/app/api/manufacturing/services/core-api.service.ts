@@ -100,7 +100,7 @@ export async function getConfiguredTimezone(): Promise<string> {
     }
     
     try {
-        const tz = await getGeneralSetting("timezone");
+        const tz = (await getGeneralSetting("time_zone")) || (await getGeneralSetting("timezone"));
         if (tz) {
             cachedTimezone = tz;
             cacheTimestamp = now;

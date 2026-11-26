@@ -717,7 +717,7 @@ export async function createJobOrder(
                 event_key: `create:${joNoStr}`,
                 remarks: "Initial Job Order Creation",
                 changed_by: joData.created_by ? Number(joData.created_by) : null,
-                changed_at: new Date().toISOString()
+                changed_at: formatPhtDateTime()
             })
         });
         if (!historyRes.ok) {

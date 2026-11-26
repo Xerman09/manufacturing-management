@@ -249,7 +249,7 @@ export async function processShipmentLandedCosts(
         // 6. Update Shipment Header Status
         const updatePayload: Record<string, unknown> = { status };
         if (status === "Received" || status === "Receiving (QA)") {
-            updatePayload.date_received = new Date().toISOString().split('T')[0];
+            updatePayload.date_received = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).split(" ")[0];
         }
         await fetch(`${DIRECTUS_URL}/items/incoming_shipments/${shipmentId}`, {
             method: "PATCH",
@@ -311,7 +311,7 @@ export async function createIncomingShipment(
             body: JSON.stringify({
                 ...shipmentData,
                 status: shipmentData.status || "Shipped",
-                date_received: shipmentData.date_received || new Date().toISOString().split('T')[0]
+                date_received: shipmentData.date_received || new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).split(" ")[0]
             })
         });
         if (!res.ok) {
@@ -384,7 +384,7 @@ export async function updateIncomingShipmentStatus(
 
         const updatePayload: Record<string, unknown> = { status };
         if (status === "Received" || status === "Receiving (QA)") {
-            updatePayload.date_received = new Date().toISOString().split('T')[0];
+            updatePayload.date_received = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).split(" ")[0];
         }
         const res = await fetch(`${DIRECTUS_URL}/items/incoming_shipments/${shipmentId}`, {
             method: "PATCH",

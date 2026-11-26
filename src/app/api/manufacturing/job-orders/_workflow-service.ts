@@ -1085,7 +1085,7 @@ async function writeTransition(
     const jobOrderNo = text(jobOrder.job_order_no) || `JO-${jobOrderId}`;
     const nowInstant = new Date();
     const now = formatPhtDateTime(nowInstant);
-    const changedAt = nowInstant.toISOString();
+    const changedAt = now;
     const suppliedRemarks = command.remarks?.trim() || "";
     const transitionRemarks = command.action === "start-production" && suppliedRemarks
         ? suppliedRemarks

@@ -108,7 +108,7 @@ export async function POST(request: Request) {
         } catch {}
 
         const dailyRateVal = Number(daily_rate || 1200);
-        const now = new Date().toISOString();
+        const now = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).replace(" ", "T");
 
         const payload = {
             department: department ? Number(department) : PRODUCTION_DEPARTMENT_ID,

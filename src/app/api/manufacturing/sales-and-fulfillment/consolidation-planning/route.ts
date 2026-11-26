@@ -562,10 +562,11 @@ export async function POST(req: NextRequest) {
             for (const jid of createdJunctionIds) {
                 await fetch(`${DIRECTUS_URL}/items/consolidator_invoices/${jid}`, { method: "DELETE", headers: directusHeaders }).catch(() => null);
             }
+            const phNowDelete = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).replace("T", " ");
             await fetch(`${DIRECTUS_URL}/items/consolidator/${newId}`, {
                 method: "PATCH",
                 headers: directusHeaders,
-                body: JSON.stringify({ is_delete: 1, deleted_at: new Date().toISOString(), deleted_by: userId }),
+                body: JSON.stringify({ is_delete: 1, deleted_at: phNowDelete, deleted_by: userId }),
             }).catch(() => null);
             await releaseReservationIds(createdReservationIds, userId!).catch(() => false);
 

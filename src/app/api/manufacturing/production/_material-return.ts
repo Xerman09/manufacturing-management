@@ -1355,7 +1355,7 @@ async function executeCancellation(
                 cancellationImageId: jobOrder.cancellationImageId
             };
             const cancelledAt = formatPhtDateTime();
-            const cancellationHistoryAt = new Date().toISOString();
+            const cancellationHistoryAt = cancelledAt;
             await directusWrite(
                 `/items/manufacturing_job_orders/${jobOrder.jobOrderId}`,
                 "PATCH",

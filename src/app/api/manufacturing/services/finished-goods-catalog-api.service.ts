@@ -1,6 +1,6 @@
 // VOS ERP - Finished Goods Catalog API Service
 
-import { DIRECTUS_URL, headers } from "./core-api.service";
+import { DIRECTUS_URL, headers, formatPhtDateTime } from "./core-api.service";
 import { productUpdateAuditFields } from "../product-audit";
 
 // Data Interfaces
@@ -257,7 +257,7 @@ export async function createProductVersion(productId: number, versionName: strin
             body: JSON.stringify({
                 product_id: productId,
                 version_name: versionName,
-                created_at: new Date().toISOString()
+                created_at: formatPhtDateTime()
             })
         });
         if (!res.ok) throw new Error("Failed to create product version");
