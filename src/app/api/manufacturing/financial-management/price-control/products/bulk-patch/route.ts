@@ -46,7 +46,7 @@ async function fetchDirectusRaw(url: string, init?: RequestInit) {
     return { ok: res.ok, status: res.status, text };
 }
 
-function decodeUserIdFromJwtCookie(req: NextRequest, cookieName = "vos_access_token") {
+function decodeUserIdFromJwtCookie(req: NextRequest, cookieName = "vos_mm_access_token") {
     const token = req.cookies.get(cookieName)?.value;
     if (!token) return null;
 

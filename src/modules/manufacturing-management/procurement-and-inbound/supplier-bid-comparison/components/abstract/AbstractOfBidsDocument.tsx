@@ -14,8 +14,12 @@ interface AbstractOfBidsDocumentProps {
 }
 
 export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ onPrint }) => {
-    const { currentProject } = useBidComparisonStore();
+    const { currentProject, currentUser } = useBidComparisonStore();
     if (!currentProject) return null;
+
+    const preparedByName =
+        (currentProject.preparedBy && currentProject.preparedBy.trim()) ||
+        (currentUser?.name && currentUser.name !== "-" ? currentUser.name : "");
 
     const items = currentProject.items || [];
     const bids = currentProject.bids || [];
@@ -825,54 +829,47 @@ export const AbstractOfBidsDocument: React.FC<AbstractOfBidsDocumentProps> = ({ 
             {/* 5. Section 4: Three Signatures Block */}
                 <div className="signatories-box grid grid-cols-3 gap-6 pt-8 mt-6 border-t-2 border-slate-700 dark:border-slate-300 text-center">
                     <div className="flex flex-col items-center">
+                        <span className="text-xs font-bold block text-foreground uppercase tracking-wide">
+                            PREPARED BY:
+                        </span>
                         <div className="signature-clearance h-20 w-full flex items-end justify-center">
-                            <div className="signature-line border-b-2 border-slate-900 dark:border-slate-100 w-48 mb-2" />
+                            <div className="signature-line border-b-2 border-slate-900 dark:border-slate-100 w-48 pb-1 text-center">
+                                <span className="text-xs block text-foreground font-semibold min-h-[16px]">
+                                    {preparedByName}
+                                </span>
+                            </div>
                         </div>
-                        <div>
-                            <span className="text-xs font-bold block text-foreground uppercase tracking-wide">
-                                PREPARED BY
-                            </span>
-                            <span className="text-xs block text-foreground font-semibold mt-0.5">
-                                {currentProject.preparedBy || "—"}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground block">
-                                {currentProject.preparedByTitle || "Procurement Officer"}
-                            </span>
-                        </div>
+                        <span className="text-[10px] text-muted-foreground block mt-1">
+                            {currentProject.preparedByTitle || "Procurement Officer"}
+                        </span>
                     </div>
 
                     <div className="flex flex-col items-center">
+                        <span className="text-xs font-bold block text-foreground uppercase tracking-wide">
+                            REVIEWED BY:
+                        </span>
                         <div className="signature-clearance h-20 w-full flex items-end justify-center">
-                            <div className="signature-line border-b-2 border-slate-900 dark:border-slate-100 w-48 mb-2" />
+                            <div className="signature-line border-b-2 border-slate-900 dark:border-slate-100 w-48 pb-1 text-center">
+                                <span className="text-xs block text-foreground font-semibold min-h-[16px]" aria-hidden="true" />
+                            </div>
                         </div>
-                        <div>
-                            <span className="text-xs font-bold block text-foreground uppercase tracking-wide">
-                                REVIEWED BY
-                            </span>
-                            <span className="text-xs block text-foreground font-semibold mt-0.5">
-                                {currentProject.reviewedBy || "—"}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground block">
-                                {currentProject.reviewedByTitle || "BAC Reviewer"}
-                            </span>
-                        </div>
+                        <span className="text-[10px] text-muted-foreground block mt-1">
+                            {currentProject.reviewedByTitle || "BAC Reviewer"}
+                        </span>
                     </div>
 
                     <div className="flex flex-col items-center">
+                        <span className="text-xs font-bold block text-foreground uppercase tracking-wide">
+                            APPROVED BY:
+                        </span>
                         <div className="signature-clearance h-20 w-full flex items-end justify-center">
-                            <div className="signature-line border-b-2 border-slate-900 dark:border-slate-100 w-48 mb-2" />
+                            <div className="signature-line border-b-2 border-slate-900 dark:border-slate-100 w-48 pb-1 text-center">
+                                <span className="text-xs block text-foreground font-semibold min-h-[16px]" aria-hidden="true" />
+                            </div>
                         </div>
-                        <div>
-                            <span className="text-xs font-bold block text-foreground uppercase tracking-wide">
-                                APPROVED BY
-                            </span>
-                            <span className="text-xs block text-foreground font-semibold mt-0.5">
-                                {currentProject.approvedBy || "—"}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground block">
-                                {currentProject.approvedByTitle || "Approving Authority"}
-                            </span>
-                        </div>
+                        <span className="text-[10px] text-muted-foreground block mt-1">
+                            {currentProject.approvedByTitle || "Approving Authority"}
+                        </span>
                     </div>
                 </div>
             </CardContent>

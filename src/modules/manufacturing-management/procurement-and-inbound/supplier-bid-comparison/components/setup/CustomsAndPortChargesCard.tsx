@@ -5,12 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { NumericInputField } from "../shared/NumericInputField";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 
 export const CustomsAndPortChargesCard: React.FC = () => {
     const { currentProject, updateProject } = useBidComparisonStore();
     if (!currentProject) return null;
 
+    const isLocked = isRfqProjectLocked(currentProject);
     const rates = currentProject.customsRates;
     const brackets = currentProject.ipcBrackets || [];
 
@@ -49,13 +50,14 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
                         PH
                     </span>
-                    <span>Philippine customs &amp; port charges</span>
+                    <span>1.4 Philippine Customs &amp; Port Charges</span>
                 </CardTitle>
 
                 {/* Automatic calculation toggle */}
                 <div className="flex items-center space-x-2 pt-0.5">
                     <Checkbox
                         id="auto-customs-calc"
+                        disabled={isLocked}
                         checked={currentProject.calcCustomsAuto}
                         onCheckedChange={(checked) =>
                             updateProject((prev) => ({ ...prev, calcCustomsAuto: Boolean(checked) }))
@@ -63,7 +65,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                     />
                     <label
                         htmlFor="auto-customs-calc"
-                        className="text-xs text-foreground font-medium cursor-pointer select-none"
+                        className={`text-xs text-foreground font-medium select-none ${isLocked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
                     >
                         Calculate Bureau of Customs and port charges automatically for international suppliers
                     </label>
@@ -95,6 +97,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                             {b.maxDutiableValueCompCurr !== null ? (
                                                 <NumericInputField
                                                     value={b.maxDutiableValueCompCurr}
+                                                    disabled={isLocked}
                                                     onChange={(val) =>
                                                         handleUpdateBracketLimit(b.bracketOrder, val)
                                                     }
@@ -110,6 +113,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                             <div className="w-28">
                                                 <NumericInputField
                                                     value={b.chargeCompCurr}
+                                                    disabled={isLocked}
                                                     onChange={(val) =>
                                                         handleUpdateBracketCharge(b.bracketOrder, val)
                                                     }
@@ -130,6 +134,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                 </Label>
                                 <NumericInputField
                                     value={rates.cdsCompCurr}
+                                    disabled={isLocked}
                                     onChange={(v) => handleUpdateRate("cdsCompCurr", v)}
                                     className="h-8 text-xs font-mono bg-background"
                                 />
@@ -141,6 +146,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                 </Label>
                                 <NumericInputField
                                     value={rates.birDstCompCurr}
+                                    disabled={isLocked}
                                     onChange={(v) => handleUpdateRate("birDstCompCurr", v)}
                                     className="h-8 text-xs font-mono bg-background"
                                 />
@@ -152,6 +158,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                 </Label>
                                 <NumericInputField
                                     value={rates.containerSecurityUsd}
+                                    disabled={isLocked}
                                     onChange={(v) => handleUpdateRate("containerSecurityUsd", v)}
                                     className="h-8 text-xs font-mono bg-background"
                                 />
@@ -163,6 +170,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                 </Label>
                                 <NumericInputField
                                     value={rates.lcBankChargePct}
+                                    disabled={isLocked}
                                     onChange={(v) => handleUpdateRate("lcBankChargePct", v)}
                                     precision={4}
                                     className="h-8 text-xs font-mono bg-background"
@@ -185,6 +193,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                 </Label>
                                 <NumericInputField
                                     value={rates.arrastre20ftCompCurr}
+                                    disabled={isLocked}
                                     onChange={(v) => handleUpdateRate("arrastre20ftCompCurr", v)}
                                     className="h-8 text-xs font-mono bg-background"
                                 />
@@ -196,6 +205,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                 </Label>
                                 <NumericInputField
                                     value={rates.arrastre40ftCompCurr}
+                                    disabled={isLocked}
                                     onChange={(v) => handleUpdateRate("arrastre40ftCompCurr", v)}
                                     className="h-8 text-xs font-mono bg-background"
                                 />
@@ -207,6 +217,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                 </Label>
                                 <NumericInputField
                                     value={rates.wharfage20ftCompCurr}
+                                    disabled={isLocked}
                                     onChange={(v) => handleUpdateRate("wharfage20ftCompCurr", v)}
                                     className="h-8 text-xs font-mono bg-background"
                                 />
@@ -218,6 +229,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                 </Label>
                                 <NumericInputField
                                     value={rates.wharfage40ftCompCurr}
+                                    disabled={isLocked}
                                     onChange={(v) => handleUpdateRate("wharfage40ftCompCurr", v)}
                                     className="h-8 text-xs font-mono bg-background"
                                 />
@@ -232,6 +244,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                 </Label>
                                 <NumericInputField
                                     value={rates.lclArrastrePerRtCompCurr}
+                                    disabled={isLocked}
                                     onChange={(v) => handleUpdateRate("lclArrastrePerRtCompCurr", v)}
                                     className="h-8 text-xs font-mono bg-background"
                                 />
@@ -243,6 +256,7 @@ export const CustomsAndPortChargesCard: React.FC = () => {
                                 </Label>
                                 <NumericInputField
                                     value={rates.lclWharfagePerRtCompCurr}
+                                    disabled={isLocked}
                                     onChange={(v) => handleUpdateRate("lclWharfagePerRtCompCurr", v)}
                                     className="h-8 text-xs font-mono bg-background"
                                 />

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DIRECTUS_URL, headers as directusHeaders } from "../../../directus-api";
 import { getUserIdFromToken, SPRING_API_BASE, getSpringAuthHeaders } from "../../../invoice-consolidation/_auth";
+import { parseUtc } from "@/lib/datetime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -205,19 +206,38 @@ export async function GET(req: NextRequest) {
                 }
                 if (soRes.ok) {
                     const rData = (await soRes.json()).data || [];
-                    for (const row of rData) {
+                    const filteredRows = rData.filter((row: { status?: string; created_at?: string }) => {
                         if (!isActiveBatch) {
-                            if (row.status === "Reserved") continue;
+                            if (row.status === "Reserved") return false;
                             if (batchUpdatedAt && row.created_at) {
-                                const rowCreatedTime = new Date(row.created_at).getTime();
-                                const batchUpdatedTime = new Date(batchUpdatedAt).getTime();
-                                if (rowCreatedTime > batchUpdatedTime + 60000) continue;
+                                const rowCreatedTime = parseUtc(row.created_at)?.getTime() ?? null;
+                                const batchUpdatedTime = parseUtc(batchUpdatedAt)?.getTime() ?? null;
+                                if (rowCreatedTime !== null && batchUpdatedTime !== null && rowCreatedTime > batchUpdatedTime + 60000) {
+                                    return false;
+                                }
                             }
                         }
+                        return true;
+                    });
+
+                    const hasExplicitPickedReservations = filteredRows.some(
+                        (row: { status?: string; picked_quantity?: number }) =>
+                            row.status === "Picked" ||
+                            row.status === "Consumed" ||
+                            Number(row.picked_quantity || 0) > 0
+                    );
+
+                    for (const row of filteredRows) {
                         const rowQty = Number(row.reserved_quantity ?? row.quantity ?? 0);
                         const rawPickedQty = Number(row.picked_quantity || 0);
-                        const isPicked = row.status === "Picked" || (isBatchPicked && rowQty > 0);
-                        const rowPickedQty = isPicked ? (rawPickedQty > 0 ? rawPickedQty : rowQty) : rawPickedQty;
+                        const isPicked = hasExplicitPickedReservations
+                            ? row.status === "Picked" || row.status === "Consumed" || rawPickedQty > 0
+                            : isBatchPicked && rowQty > 0;
+                        const rowPickedQty = isPicked
+                            ? rawPickedQty > 0
+                                ? rawPickedQty
+                                : rowQty
+                            : 0;
                         const rowStatus = isPicked ? "Picked" : row.status;
 
                         reservations.push({
@@ -349,6 +369,7 @@ export async function GET(req: NextRequest) {
         };
 
         const invLotMap = new Map<number, BatchMeta>();
+        const invLotIdByKey = new Map<string, number>();
         const productBatchMap = new Map<number, BatchMeta[]>();
 
         // Process Directus mm_inventory_lots
@@ -384,7 +405,16 @@ export async function GET(req: NextRequest) {
                     unit: lotUnitMap.get(lotId) || productUnitMap.get(pId) || undefined,
                 };
 
-                if (invId) invLotMap.set(invId, meta);
+                if (invId) {
+                    invLotMap.set(invId, meta);
+                    const normBatchKey = batchNo.trim().toLowerCase();
+                    if (pId && normBatchKey && normBatchKey !== "lot-n/a") {
+                        if (lotId) invLotIdByKey.set(`${pId}:${lotId}:${normBatchKey}`, invId);
+                        if (!invLotIdByKey.has(`${pId}:${normBatchKey}`)) {
+                            invLotIdByKey.set(`${pId}:${normBatchKey}`, invId);
+                        }
+                    }
+                }
 
                 // For available batches, strictly enforce the consolidation's branch if known
                 const isBranchMatch = !targetBranchId || branchIdVal === targetBranchId;
@@ -404,10 +434,16 @@ export async function GET(req: NextRequest) {
                 const sbData = await springBatchRes.json();
                 const sbList: Array<Record<string, unknown>> = Array.isArray(sbData) ? sbData : sbData?.data || [];
                 for (const sb of sbList) {
-                    const sbInvId = Number(sb.inventoryLotId ?? sb.inventory_lot_id ?? sb.id ?? 0);
+                    const rawSbInvId = Number(sb.inventoryLotId ?? sb.inventory_lot_id ?? 0);
                     const sbLotId = Number(sb.lotId ?? sb.mmLotId ?? sb.lot_id ?? sb.mm_lot_id ?? 0);
                     const sbPId = Number(sb.productId ?? sb.product_id ?? 0);
                     const sbBatchNo = String(sb.batchNo ?? sb.batch_no ?? "LOT-N/A").trim();
+                    const sbNormBatch = sbBatchNo.toLowerCase();
+                    const sbInvId =
+                        rawSbInvId ||
+                        (sbPId && sbLotId && invLotIdByKey.get(`${sbPId}:${sbLotId}:${sbNormBatch}`)) ||
+                        (sbPId && invLotIdByKey.get(`${sbPId}:${sbNormBatch}`)) ||
+                        0;
                     const sbExp = (sb.expirationDate || sb.expiration_date || sb.expiryDate || sb.expiry_date || null) as string | null;
                     const sbMfg = (sb.manufacturingDate || sb.manufacturing_date || null) as string | null;
                     const sbQty = Number(sb.availableQuantity ?? sb.available_quantity ?? sb.onhandQuantity ?? sb.onhand_quantity ?? sb.quantity ?? 0);
@@ -420,10 +456,9 @@ export async function GET(req: NextRequest) {
                     }
 
                     if (sbPId && sbBatchNo && sbBatchNo !== "LOT-N/A") {
-                        const normBatch = sbBatchNo.toLowerCase();
-                        if (sbLotId) batchOnhandMap.set(`${sbPId}:${sbLotId}:${normBatch}`, sbQty);
-                        if (!batchOnhandMap.has(`${sbPId}:${normBatch}`)) {
-                            batchOnhandMap.set(`${sbPId}:${normBatch}`, sbQty);
+                        if (sbLotId) batchOnhandMap.set(`${sbPId}:${sbLotId}:${sbNormBatch}`, sbQty);
+                        if (!batchOnhandMap.has(`${sbPId}:${sbNormBatch}`)) {
+                            batchOnhandMap.set(`${sbPId}:${sbNormBatch}`, sbQty);
                         }
                     }
 
@@ -464,8 +499,11 @@ export async function GET(req: NextRequest) {
                         const existingIdx = list.findIndex((b) => b.batchNo === sbBatchNo && b.lotId === sbLotId);
                         if (existingIdx === -1) {
                             list.push(meta);
-                        } else if (sbQty > 0) {
-                            list[existingIdx].quantity = sbQty;
+                        } else {
+                            if (sbQty > 0) list[existingIdx].quantity = sbQty;
+                            if (!list[existingIdx].inventoryLotId && sbInvId) {
+                                list[existingIdx].inventoryLotId = sbInvId;
+                            }
                         }
                         productBatchMap.set(sbPId, list);
                     }
@@ -532,10 +570,8 @@ export async function GET(req: NextRequest) {
             const key = `${productId}:${lotId}:${batchNo}:${expiryDate || ""}`;
             const existing = allocationMap.get(key);
             const qty = Number(reservation.quantity || 0);
-            const isResPicked = reservation.status === "Picked" || isBatchPicked;
-            const resPickedQty = isResPicked
-                ? (Number(reservation.picked_quantity) > 0 ? Number(reservation.picked_quantity) : qty)
-                : Number(reservation.picked_quantity || 0);
+            const resPickedQty = Number(reservation.picked_quantity || 0);
+            const isResPicked = reservation.status === "Picked" || reservation.status === "Consumed" || resPickedQty > 0;
             const resId = Number(reservation.id || 0);
 
             if (existing) {

@@ -74,14 +74,14 @@ async function authenticateRequest(request: Request): Promise<{ ok: boolean; use
         let cookieToken: string | undefined;
         try {
             const cookieStore = await cookies();
-            cookieToken = cookieStore.get("vos_access_token")?.value ||
-                cookieStore.get("springboot_token")?.value ||
+            cookieToken = cookieStore.get("vos_mm_access_token")?.value ||
+                cookieStore.get("vos_mm_springboot_token")?.value ||
                 cookieStore.get("token")?.value;
         } catch {
             // Outside Next.js AsyncLocalStorage context (e.g. integration tests), parse Cookie header
             const cookieHeader = request.headers.get("cookie");
             if (cookieHeader) {
-                const match = cookieHeader.match(/(?:vos_access_token|springboot_token|token)=([^;]+)/);
+                const match = cookieHeader.match(/(?:vos_mm_access_token|vos_mm_springboot_token|token)=([^;]+)/);
                 if (match) cookieToken = match[1].trim();
             }
         }

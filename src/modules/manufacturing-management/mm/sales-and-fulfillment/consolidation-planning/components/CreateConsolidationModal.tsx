@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
+import { getPhIsoDate, getPhIsoTimestamp } from "../utils/date-utils";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     X,
@@ -147,6 +149,7 @@ export default function CreateConsolidationModal({
     loading,
     onSubmit,
 }: Props) {
+    const { timeZone } = useTimeZone();
     const [step, setStep] = useState<ModalStep>(1);
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [expandedInvoiceIds, setExpandedInvoiceIds] = useState<Set<number>>(new Set());
@@ -1090,18 +1093,19 @@ export default function CreateConsolidationModal({
                 }
             }
 
+            const draftDatePart = getPhIsoDate(new Date(), timeZone);
             const printData = {
-                consolidatorNo: `DRAFT-${branch.branchCode || "CONSOL"}-${new Date().toISOString().slice(0, 10)}`,
+                consolidatorNo: `DRAFT-${branch.branchCode || "CONSOL"}${draftDatePart ? `-${draftDatePart}` : ""}`,
                 branchName: branch.branchName,
                 status: "DRAFT PLAN",
-                createdAt: new Date().toISOString(),
+                createdAt: getPhIsoTimestamp(),
                 details,
                 invoices,
                 totalInvoices: selectedIds.size,
                 allocations,
             };
 
-            await generateConsolidationPDF(printData);
+            await generateConsolidationPDF(printData, timeZone);
             toast.success("Consolidation Picklist PDF generated successfully.");
         } catch (err: unknown) {
             console.error("Failed to print picklist:", err);

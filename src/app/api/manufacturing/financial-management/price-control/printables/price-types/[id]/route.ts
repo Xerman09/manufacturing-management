@@ -23,7 +23,7 @@ async function fetchDirectus<T>(url: string, init?: RequestInit): Promise<T> {
     return (await res.json()) as T;
 }
 
-function decodeUserIdFromJwtCookie(req: NextRequest, cookieName = "vos_access_token") {
+function decodeUserIdFromJwtCookie(req: NextRequest, cookieName = "vos_mm_access_token") {
     const token = req.cookies.get(cookieName)?.value;
     if (!token) return null;
 

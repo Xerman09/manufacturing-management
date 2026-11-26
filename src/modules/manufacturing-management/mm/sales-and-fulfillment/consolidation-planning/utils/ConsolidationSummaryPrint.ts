@@ -1,3 +1,6 @@
+import { formatInZone } from "@/lib/datetime";
+import { loadConfiguredTimeZone } from "@/providers/TimeZoneProvider";
+
 interface PrintInvoiceProduct {
     productName: string;
     productCode: string;
@@ -42,7 +45,8 @@ interface PrintData {
     allocations: PrintLotAllocation[];
 }
 
-export async function generateConsolidationPDF(data: PrintData) {
+export async function generateConsolidationPDF(data: PrintData, timeZone?: string | null) {
+    const tz = timeZone ?? (await loadConfiguredTimeZone());
     const jsPDFModule = await import("jspdf");
     const JsPDFClass = (jsPDFModule.default || jsPDFModule.jsPDF) as unknown as typeof import("jspdf").jsPDF;
 
@@ -79,7 +83,7 @@ export async function generateConsolidationPDF(data: PrintData) {
     doc.setFont("helvetica", "bold");
     doc.text(`Created:`, 110, 24);
     doc.setFont("helvetica", "normal");
-    doc.text(new Date(data.createdAt).toLocaleDateString(), 126, 24);
+    doc.text(formatInZone(data.createdAt, tz), 126, 24);
 
     doc.setFont("helvetica", "bold");
     doc.text(`Orders:`, 10, 28);
@@ -94,7 +98,7 @@ export async function generateConsolidationPDF(data: PrintData) {
     doc.setFont("helvetica", "bold");
     doc.text("Printed:", pageWidth - 55, 28);
     doc.setFont("helvetica", "normal");
-    doc.text(new Date().toLocaleString(), pageWidth - 42, 28);
+    doc.text(formatInZone(new Date(), tz), pageWidth - 42, 28);
 
     // ── Product Lines Table ──
     const sortedDetails = [...data.details].sort((a, b) =>

@@ -117,7 +117,7 @@ export async function GET(req: NextRequest) {
 // =============================================================================
 export async function POST(req: NextRequest) {
   try {
-    const token = req.cookies.get("vos_access_token")?.value;
+    const token = req.cookies.get("vos_mm_access_token")?.value;
     const userId = getUserIdFromToken(token);
     
     // 🟢 Session token is now mandatory.
@@ -165,7 +165,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     // Default: full update
-    const token = req.cookies.get("vos_access_token")?.value;
+    const token = req.cookies.get("vos_mm_access_token")?.value;
     const userId = getUserIdFromToken(token);
     
     // 🟢 Session token is now mandatory.

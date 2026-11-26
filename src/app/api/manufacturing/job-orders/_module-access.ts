@@ -96,7 +96,7 @@ export async function requireJobOrderModuleAccess(
         throw new JobOrderModuleAccessError(503, "MODULE_ACCESS_SERVICE_UNAVAILABLE", "Job Order module access is not configured.");
     }
 
-    const token = (await cookies()).get("vos_access_token")?.value;
+    const token = (await cookies()).get("vos_mm_access_token")?.value;
     if (!token) {
         throw new JobOrderModuleAccessError(401, "AUTHENTICATION_REQUIRED", "Authentication is required.");
     }

@@ -858,7 +858,7 @@ export function useIncomingShipmentsForm({
     const isFinanceManager = React.useMemo(() => {
         if (typeof window === "undefined" || !isModalOpen) return false;
         const cookieStr = document.cookie;
-        const match = cookieStr.match(/vos_access_token=([^;]+)/);
+        const match = cookieStr.match(/vos_mm_access_token=([^;]+)/);
         if (match) {
             try {
                 const token = match[1];

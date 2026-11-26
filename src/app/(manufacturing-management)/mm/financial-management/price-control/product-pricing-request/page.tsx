@@ -18,7 +18,7 @@ import { ProductPricingModule } from "@/modules/manufacturing-management/financi
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 interface JwtPayload {
     Firstname?: string;

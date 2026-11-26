@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 // 🚀 PUT Handler - Directus Native
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const cookieStore = await cookies();
-    const token = cookieStore.get("vos_access_token")?.value;
+    const token = cookieStore.get("vos_mm_access_token")?.value;
 
     if (!token) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
@@ -43,7 +43,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 // 🚀 DELETE Handler - Directus Native with Immutability Check
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const cookieStore = await cookies();
-    const token = cookieStore.get("vos_access_token")?.value;
+    const token = cookieStore.get("vos_mm_access_token")?.value;
 
     if (!token) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 

@@ -11,7 +11,13 @@ import {
     ItemQuotation,
     ItemAward,
     StorageSyncStatus,
+    CountryLookup,
 } from "../types";
+
+export function isRfqProjectLocked(project: { status?: ProjectStatus } | null | undefined): boolean {
+    if (!project) return false;
+    return project.status === "Awarded" || project.status === "Submitted" || project.status === "Approved";
+}
 import {
     DEFAULT_CUSTOMS_RATES,
     DEFAULT_IPC_BRACKETS,
@@ -98,6 +104,18 @@ interface BidComparisonState {
     forexCache: { base: string; date: string; ratesToComparison: Record<string, number> } | null;
     isLoadingForex: boolean;
     fetchForexRates: (baseCurrency?: string, force?: boolean) => Promise<{ success: boolean; date?: string; error?: string }>;
+
+    // Flagdex Countries Cache
+    countries: CountryLookup[];
+    isLoadingCountries: boolean;
+    countriesError: string | null;
+    fetchCountries: (force?: boolean) => Promise<void>;
+
+    // Step Validation Highlight State
+    validationErrors: Record<string, string>;
+    setValidationErrors: (errors: Record<string, string>) => void;
+    clearValidationError: (key: string) => void;
+    clearValidationErrors: () => void;
 
     // User session
     currentUser: { name?: string; email?: string } | null;
@@ -305,6 +323,41 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
     forexCache: null,
     isLoadingForex: false,
 
+    countries: [],
+    isLoadingCountries: false,
+    countriesError: null,
+
+    fetchCountries: async (force = false) => {
+        if (!force && get().countries.length > 0) return;
+        set({ isLoadingCountries: true, countriesError: null });
+        try {
+            const url = `/api/manufacturing/procurement-and-inbound/supplier-bid-comparison/countries${force ? "?force=true" : ""}`;
+            const res = await fetch(url);
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.success || !Array.isArray(data?.countries)) {
+                throw new Error(data?.error || `Failed to load countries (HTTP ${res.status})`);
+            }
+            set({ countries: data.countries, countriesError: null });
+        } catch (err) {
+            const msg = (err as Error)?.message || "Failed to fetch countries from Flagdex API.";
+            set({ countriesError: msg });
+            toast.error(msg);
+        } finally {
+            set({ isLoadingCountries: false });
+        }
+    },
+
+    validationErrors: {},
+    setValidationErrors: (errors) => set({ validationErrors: errors }),
+    clearValidationError: (key) =>
+        set((state) => {
+            if (!state.validationErrors[key]) return state;
+            const next = { ...state.validationErrors };
+            delete next[key];
+            return { validationErrors: next };
+        }),
+    clearValidationErrors: () => set({ validationErrors: {} }),
+
     fetchForexRates: async (baseCurrency?: string, force = false) => {
         const currentComp = baseCurrency || get().currentProject?.comparisonCurrency || "PHP";
         const existing = get().forexCache;
@@ -364,7 +417,7 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
     currentUser: null,
     setCurrentUser: (user) => set({ currentUser: user }),
 
-    setCurrentStep: (step) => set({ currentStep: step }),
+    setCurrentStep: (step) => set({ currentStep: step, validationErrors: {} }),
     setActiveBidId: (id) => set({ activeBidId: id }),
 
     fetchLookups: async () => {
@@ -596,7 +649,11 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
     createNewProject: (title, ref) => {
         lastSavedContentHash = "";
         const newProj = createEmptyProject(title, ref);
-        const { lookups } = get();
+        const { lookups, currentUser } = get();
+        const creatorName = currentUser?.name && currentUser.name !== "-" ? currentUser.name : "";
+        if (creatorName) {
+            newProj.preparedBy = creatorName;
+        }
 
         // Prefill active forex rates from lookup if available
         if (lookups.forex && lookups.forex.length > 0) {
@@ -697,6 +754,9 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             dbId: undefined,
         }));
 
+        const creatorName = get().currentUser?.name;
+        const resolvedCreator = creatorName && creatorName !== "-" ? creatorName : "";
+
         const newProject: RfqProject = {
             ...importedProject,
             id,
@@ -704,6 +764,9 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             rfqReference: safeRef,
             status: "Draft", // CRITICAL: Enforce Draft status
             version: 1,
+            preparedBy: importedProject.preparedBy || resolvedCreator,
+            reviewedBy: "",
+            approvedBy: "",
             rejectionReason: undefined,
             approvalRemarks: undefined,
             customsRates: {
@@ -765,10 +828,9 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
         if (!currentProject) return;
 
         // View only check (locked when Awarded, Submitted or Approved, unless transitioning status or explicitly allowed)
-        if (!allowWhenLocked && (currentProject.status === "Awarded" || currentProject.status === "Submitted" || currentProject.status === "Approved")) {
+        if (!allowWhenLocked && isRfqProjectLocked(currentProject)) {
             const preview = updater({ ...currentProject });
             if (preview.status === currentProject.status) {
-                toast.error("Project is locked and cannot be edited in this status.");
                 return;
             }
         }
@@ -866,6 +928,9 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             };
         });
 
+        const creatorName = get().currentUser?.name;
+        const resolvedCreator = creatorName && creatorName !== "-" ? creatorName : currentProject.preparedBy;
+
         const duplicated: RfqProject = {
             ...currentProject,
             id: newClientId,
@@ -875,6 +940,9 @@ export const useBidComparisonStore = create<BidComparisonState>((set, get) => ({
             rfqTitle: newTitle || `${currentProject.rfqTitle} - Round ${nextRound}`,
             status: "Draft",
             version: 1,
+            preparedBy: resolvedCreator,
+            reviewedBy: "",
+            approvedBy: "",
             rejectionReason: undefined,
             approvalRemarks: undefined,
             awardStrategy: "MANUAL",

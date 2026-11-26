@@ -20,7 +20,7 @@ export const metadata = {
     description: "Inspect incoming cargo, record batches, verify raw material expiration lists, and enforce FIFO tracking."
 };
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

@@ -3,7 +3,7 @@
 import React from "react";
 import { DollarSign, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
 import { optimizeSplitAward } from "../../engine/split-award-optimizer";
 import { ItemAward } from "../../types";
@@ -22,7 +22,7 @@ export const AwardStrategyToolbar: React.FC = () => {
         : null;
     const recSupplierSuffix = recBid?.supplierName ? ` (${recBid.supplierName})` : "";
 
-    const isLocked = currentProject.status === "Submitted" || currentProject.status === "Approved";
+    const isLocked = isRfqProjectLocked(currentProject);
 
     // 1. Award All to Recommended
     const handleAwardRecommended = () => {

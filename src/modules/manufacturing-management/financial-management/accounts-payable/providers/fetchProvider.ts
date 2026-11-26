@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import type { NextRequest, NextResponse } from 'next/server';
 
-const COOKIE_KEY = 'springboot_token';
+const COOKIE_KEY = 'vos_mm_springboot_token';
 
 export async function getToken(request?: NextRequest): Promise<string | null> {
   if (request && request.cookies) {

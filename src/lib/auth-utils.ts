@@ -3,10 +3,11 @@
  * Centralized JWT utilities for VOS ERP.
  */
 
-export const COOKIE_NAME = "vos_access_token";
-export const REFRESH_COOKIE_NAME = "refreshToken"; // Matches Spring Boot backend
-export const SPRING_COOKIE_NAME = "springboot_token";
-export const LAST_VISITED_PATH_COOKIE = "vos_last_visited_path";
+export const COOKIE_NAME = "vos_mm_access_token";
+export const REFRESH_COOKIE_NAME = "vos_mm_refresh_token";
+export const BACKEND_REFRESH_COOKIE_NAME = "refreshToken"; // Matches Spring Boot backend
+export const SPRING_COOKIE_NAME = "vos_mm_springboot_token";
+export const LAST_VISITED_PATH_COOKIE = "vos_mm_last_visited_path";
 export const COOKIE_MAX_AGE_CAP = 60 * 60 * 24 * 7; // 7 days cap
 export const REFRESH_PATH = "/api/auth/refresh";
 

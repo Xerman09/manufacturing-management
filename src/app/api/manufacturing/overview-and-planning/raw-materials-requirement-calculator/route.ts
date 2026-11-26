@@ -93,8 +93,8 @@ async function getSpringAuthToken(): Promise<string | undefined> {
     try {
         const cookieStore = await cookies();
         const token =
-            cookieStore.get("springboot_token")?.value ||
-            cookieStore.get("vos_access_token")?.value ||
+            cookieStore.get("vos_mm_springboot_token")?.value ||
+            cookieStore.get("vos_mm_access_token")?.value ||
             cookieStore.get("token")?.value;
         if (token) return token;
     } catch {

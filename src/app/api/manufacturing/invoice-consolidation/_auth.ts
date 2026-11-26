@@ -6,7 +6,7 @@ export async function getAuthToken(): Promise<string | null> {
     try {
         const cookieStore = await cookies();
         return (
-            cookieStore.get("vos_access_token")?.value ||
+            cookieStore.get("vos_mm_access_token")?.value ||
             cookieStore.get("access_token")?.value ||
             cookieStore.get("directus_token")?.value ||
             null
@@ -24,7 +24,7 @@ export async function getSpringAuthHeaders(): Promise<Record<string, string>> {
     const token = await getAuthToken();
     if (token) {
         headers["Authorization"] = `Bearer ${token}`;
-        headers["Cookie"] = `vos_access_token=${token}`;
+        headers["Cookie"] = `vos_mm_access_token=${token}`;
     }
     return headers;
 }
@@ -32,7 +32,7 @@ export async function getSpringAuthHeaders(): Promise<Record<string, string>> {
 export async function getUserIdFromToken(): Promise<number | null> {
     try {
         const cookieStore = await cookies();
-        const token = cookieStore.get("vos_access_token")?.value;
+        const token = cookieStore.get("vos_mm_access_token")?.value;
         if (!token) return null;
         const parts = token.split(".");
         if (parts.length < 2) return null;

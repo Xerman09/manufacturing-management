@@ -52,7 +52,7 @@ export function UserMenu({ fullName, email }: UserMenuProps) {
             router.refresh();
         } catch (error) {
             console.error("Logout failed:", error);
-            document.cookie = "vos_access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+            document.cookie = "vos_mm_access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
             router.push("/login");
         }
     };

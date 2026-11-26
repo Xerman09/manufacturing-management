@@ -2,8 +2,8 @@ import { ChangePasswordRequest } from "../types/change-password.schema";
 import { cookies } from "next/headers";
 
 const SPRING_API_BASE_URL = process.env.SPRING_API_BASE_URL;
-const VOS_COOKIE_NAME = "vos_access_token";
-const SPRING_COOKIE_NAME = "springboot_token";
+const VOS_COOKIE_NAME = "vos_mm_access_token";
+const SPRING_COOKIE_NAME = "vos_mm_springboot_token";
 
 /**
  * Utility to decode JWT without a library
@@ -57,7 +57,7 @@ export class ChangePasswordService {
     static async changePassword(data: ChangePasswordRequest): Promise<{ success: boolean; message: string }> {
         const cookieStore = await cookies();
 
-        // 1. Get user details from vos_access_token
+        // 1. Get user details from vos_mm_access_token
         const vosToken = cookieStore.get(VOS_COOKIE_NAME)?.value;
         if (!vosToken) {
             return { success: false, message: "User not authenticated in VOS" };

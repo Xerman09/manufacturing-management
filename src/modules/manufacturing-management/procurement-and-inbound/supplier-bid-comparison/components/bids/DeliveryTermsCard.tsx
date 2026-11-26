@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { NumericInputField } from "../shared/NumericInputField";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { SupplierBid, Incoterm, FreightBasis, InsuranceBasis, DutyMode, ShipmentType } from "../../types";
 import { INCOTERMS_CONFIG } from "../../constants/incoterms";
 import { calculateSupplierLandedCost } from "../../engine/landed-cost-calculator";
@@ -45,6 +45,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
     const { currentProject, updateProject } = useBidComparisonStore();
     if (!currentProject) return null;
 
+    const isLocked = isRfqProjectLocked(currentProject);
     const items = currentProject.items || [];
     const isLocal = bid.supplierType === "LOCAL";
     const incoterm = bid.incoterm || (isLocal ? "DELIVERED" : "FOB");
@@ -86,7 +87,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
             <CardHeader className="py-3 px-4 border-b bg-muted/20">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                     <Ship className="h-4 w-4 text-primary" />
-                    Delivery terms &amp; import costs
+                    2.3 Delivery Terms &amp; Import Costs
                 </CardTitle>
                 <CardDescription className="text-xs">
                     Choose the Incoterm. Costs borne by the supplier are automatically grayed out so only buyer-paid expenses are computed.
@@ -99,6 +100,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                     <Label className="text-xs font-semibold">Incoterm</Label>
                     <Select
                         value={incoterm}
+                        disabled={isLocked}
                         onValueChange={(val: Incoterm) => handleUpdate({ incoterm: val })}
                     >
                         <SelectTrigger className="h-8 text-xs font-medium w-full max-w-sm">
@@ -148,6 +150,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                             <Label className="text-xs font-medium">VAT Rate (%)</Label>
                             <NumericInputField
                                 value={bid.vatPct}
+                                disabled={isLocked}
                                 onChange={(val) => handleUpdate({ vatPct: val })}
                                 suffix="%"
                                 className="h-8 text-xs font-mono"
@@ -158,10 +161,11 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                             <div className="flex items-center space-x-2 h-8 px-1">
                                 <Checkbox
                                     id="local-prices-incl-vat"
+                                    disabled={isLocked}
                                     checked={bid.pricesIncludeVat}
                                     onCheckedChange={(checked) => handleUpdate({ pricesIncludeVat: Boolean(checked) })}
                                 />
-                                <Label htmlFor="local-prices-incl-vat" className="text-xs cursor-pointer whitespace-nowrap font-medium">
+                                <Label htmlFor="local-prices-incl-vat" className={`text-xs whitespace-nowrap font-medium ${isLocked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>
                                     Prices include VAT
                                 </Label>
                             </div>
@@ -172,6 +176,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                             {incotermConfig.buyerPaysInlandTrucking ? (
                                 <NumericInputField
                                     value={bid.inlandTruckingCompCurr}
+                                    disabled={isLocked}
                                     onChange={(val) => handleUpdate({ inlandTruckingCompCurr: val })}
                                     prefix="₱"
                                     className="h-8 text-xs font-mono font-medium"
@@ -193,7 +198,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <Select
                                     value={bid.freightBasis || "PER_CBM"}
                                     onValueChange={(val: FreightBasis) => handleUpdate({ freightBasis: val })}
-                                    disabled={!incotermConfig.buyerPaysFreight}
+                                    disabled={isLocked || !incotermConfig.buyerPaysFreight}
                                 >
                                     <SelectTrigger className="h-8 text-xs">
                                         <SelectValue />
@@ -212,7 +217,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <NumericInputField
                                     value={bid.freightRate}
                                     onChange={(val) => handleUpdate({ freightRate: val })}
-                                    disabled={!incotermConfig.buyerPaysFreight}
+                                    disabled={isLocked || !incotermConfig.buyerPaysFreight}
                                     className="h-8 text-xs font-mono"
                                 />
                             </div>
@@ -222,7 +227,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <NumericInputField
                                     value={bid.freightMinimum}
                                     onChange={(val) => handleUpdate({ freightMinimum: val })}
-                                    disabled={!incotermConfig.buyerPaysFreight}
+                                    disabled={isLocked || !incotermConfig.buyerPaysFreight}
                                     className="h-8 text-xs font-mono"
                                 />
                             </div>
@@ -234,6 +239,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <Label className="text-xs font-medium">Freight/insurance currency</Label>
                                 <Select
                                     value={bid.freightCurrency || currency}
+                                    disabled={isLocked}
                                     onValueChange={(val) => handleUpdate({ freightCurrency: val, insuranceCurrency: val })}
                                 >
                                     <SelectTrigger className="h-8 text-xs font-mono">
@@ -255,7 +261,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <Select
                                     value={bid.insuranceBasis || "PCT_GOODS_AND_FREIGHT"}
                                     onValueChange={(val: InsuranceBasis) => handleUpdate({ insuranceBasis: val })}
-                                    disabled={!incotermConfig.buyerPaysInsurance}
+                                    disabled={isLocked || !incotermConfig.buyerPaysInsurance}
                                 >
                                     <SelectTrigger className="h-8 text-xs">
                                         <SelectValue />
@@ -274,7 +280,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <NumericInputField
                                     value={bid.insuranceRateOrAmount}
                                     onChange={(val) => handleUpdate({ insuranceRateOrAmount: val })}
-                                    disabled={!incotermConfig.buyerPaysInsurance}
+                                    disabled={isLocked || !incotermConfig.buyerPaysInsurance}
                                     suffix={bid.insuranceBasis === "PCT_GOODS_AND_FREIGHT" ? "%" : undefined}
                                     className="h-8 text-xs font-mono"
                                 />
@@ -288,7 +294,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <Select
                                     value={bid.dutyMode || "PER_ITEM"}
                                     onValueChange={(val: DutyMode) => handleUpdate({ dutyMode: val })}
-                                    disabled={!incotermConfig.buyerPaysDutyAndVat}
+                                    disabled={isLocked || !incotermConfig.buyerPaysDutyAndVat}
                                 >
                                     <SelectTrigger className="h-8 text-xs">
                                         <SelectValue />
@@ -308,7 +314,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                         <Select
                                             value={bid.ftaAgreementName || "ACFTA"}
                                             onValueChange={(val) => handleUpdate({ ftaAgreementName: val })}
-                                            disabled={!incotermConfig.buyerPaysDutyAndVat}
+                                            disabled={isLocked || !incotermConfig.buyerPaysDutyAndVat}
                                         >
                                             <SelectTrigger className="h-8 text-xs">
                                                 <SelectValue />
@@ -328,7 +334,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                         <NumericInputField
                                             value={bid.ftaDutyPct ?? 0}
                                             onChange={(val) => handleUpdate({ ftaDutyPct: val })}
-                                            disabled={!incotermConfig.buyerPaysDutyAndVat}
+                                            disabled={isLocked || !incotermConfig.buyerPaysDutyAndVat}
                                             suffix="%"
                                             className="h-8 text-xs font-mono"
                                         />
@@ -342,7 +348,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                     <NumericInputField
                                         value={bid.singleDutyPct ?? 0}
                                         onChange={(val) => handleUpdate({ singleDutyPct: val })}
-                                        disabled={!incotermConfig.buyerPaysDutyAndVat}
+                                        disabled={isLocked || !incotermConfig.buyerPaysDutyAndVat}
                                         suffix="%"
                                         className="h-8 text-xs font-mono"
                                     />
@@ -363,7 +369,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <NumericInputField
                                     value={bid.vatPct ?? 12}
                                     onChange={(val) => handleUpdate({ vatPct: val })}
-                                    disabled={!incotermConfig.buyerPaysDutyAndVat}
+                                    disabled={isLocked || !incotermConfig.buyerPaysDutyAndVat}
                                     suffix="%"
                                     className="h-8 text-xs font-mono"
                                 />
@@ -374,7 +380,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <NumericInputField
                                     value={bid.brokerageCompCurr}
                                     onChange={(val) => handleUpdate({ brokerageCompCurr: val })}
-                                    disabled={!incotermConfig.buyerPaysBrokerageAndCustoms}
+                                    disabled={isLocked || !incotermConfig.buyerPaysBrokerageAndCustoms}
                                     className="h-8 text-xs font-mono"
                                 />
                             </div>
@@ -384,7 +390,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <NumericInputField
                                     value={bid.otherPortChargesCompCurr}
                                     onChange={(val) => handleUpdate({ otherPortChargesCompCurr: val })}
-                                    disabled={!incotermConfig.buyerPaysBrokerageAndCustoms}
+                                    disabled={isLocked || !incotermConfig.buyerPaysBrokerageAndCustoms}
                                     className="h-8 text-xs font-mono"
                                 />
                             </div>
@@ -396,6 +402,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <Label className="text-xs font-medium">Shipment type</Label>
                                 <Select
                                     value={bid.shipmentType || "AUTO"}
+                                    disabled={isLocked}
                                     onValueChange={(val: ShipmentType) => handleUpdate({ shipmentType: val })}
                                 >
                                     <SelectTrigger className="h-8 text-xs">
@@ -416,6 +423,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                         <Label className="text-xs font-medium">20&apos; containers</Label>
                                         <NumericInputField
                                             value={bid.containers20ft ?? landedResult.estimatedContainers20ft}
+                                            disabled={isLocked}
                                             onChange={(val) => handleUpdate({ containers20ft: Math.max(0, Math.round(val)) })}
                                             className="h-8 text-xs font-mono"
                                         />
@@ -424,6 +432,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                         <Label className="text-xs font-medium">40&apos; containers</Label>
                                         <NumericInputField
                                             value={bid.containers40ft ?? landedResult.estimatedContainers40ft}
+                                            disabled={isLocked}
                                             onChange={(val) => handleUpdate({ containers40ft: Math.max(0, Math.round(val)) })}
                                             className="h-8 text-xs font-mono"
                                         />
@@ -432,6 +441,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                         <Label className="text-xs font-medium">Shipments (goods declarations)</Label>
                                         <NumericInputField
                                             value={bid.declarationsCount || 1}
+                                            disabled={isLocked}
                                             onChange={(val) => handleUpdate({ declarationsCount: Math.max(1, Math.round(val)) })}
                                             className="h-8 text-xs font-mono"
                                         />
@@ -439,10 +449,11 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                     <div className="flex items-center space-x-2 h-8 pb-1">
                                         <Checkbox
                                             id="bid-paid-by-lc"
+                                            disabled={isLocked}
                                             checked={bid.paidByLc}
                                             onCheckedChange={(checked) => handleUpdate({ paidByLc: Boolean(checked) })}
                                         />
-                                        <Label htmlFor="bid-paid-by-lc" className="text-xs font-medium cursor-pointer whitespace-nowrap">
+                                        <Label htmlFor="bid-paid-by-lc" className={`text-xs font-medium whitespace-nowrap ${isLocked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>
                                             Paid by letter of credit
                                         </Label>
                                     </div>
@@ -453,6 +464,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                         <Label className="text-xs font-medium">Shipments (goods declarations)</Label>
                                         <NumericInputField
                                             value={bid.declarationsCount || 1}
+                                            disabled={isLocked}
                                             onChange={(val) => handleUpdate({ declarationsCount: Math.max(1, Math.round(val)) })}
                                             className="h-8 text-xs font-mono"
                                         />
@@ -461,10 +473,11 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                     <div className="flex items-center space-x-2 h-8 pb-1">
                                         <Checkbox
                                             id="bid-paid-by-lc"
+                                            disabled={isLocked}
                                             checked={bid.paidByLc}
                                             onCheckedChange={(checked) => handleUpdate({ paidByLc: Boolean(checked) })}
                                         />
-                                        <Label htmlFor="bid-paid-by-lc" className="text-xs font-medium cursor-pointer whitespace-nowrap">
+                                        <Label htmlFor="bid-paid-by-lc" className={`text-xs font-medium whitespace-nowrap ${isLocked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>
                                             Paid by letter of credit
                                         </Label>
                                     </div>
@@ -487,7 +500,7 @@ export const DeliveryTermsCard: React.FC<DeliveryTermsCardProps> = ({ bid }) => 
                                 <NumericInputField
                                     value={bid.inlandTruckingCompCurr}
                                     onChange={(val) => handleUpdate({ inlandTruckingCompCurr: val })}
-                                    disabled={!incotermConfig.buyerPaysInlandTrucking}
+                                    disabled={isLocked || !incotermConfig.buyerPaysInlandTrucking}
                                     className="h-8 text-xs font-mono"
                                 />
                             </div>

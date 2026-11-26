@@ -90,8 +90,8 @@ export async function GET(req: NextRequest) {
         // Retrieve token from cookies for Spring Boot authorization
         const cookieStore = await cookies();
         const userToken =
-            cookieStore.get("vos_access_token")?.value ||
-            cookieStore.get("springboot_token")?.value ||
+            cookieStore.get("vos_mm_access_token")?.value ||
+            cookieStore.get("vos_mm_springboot_token")?.value ||
             cookieStore.get("token")?.value ||
             "";
 
@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
         };
         if (userToken) {
             springHeaders["Authorization"] = `Bearer ${userToken}`;
-            springHeaders["Cookie"] = `vos_access_token=${userToken}`;
+            springHeaders["Cookie"] = `vos_mm_access_token=${userToken}`;
         }
 
         const timestamp = Date.now();

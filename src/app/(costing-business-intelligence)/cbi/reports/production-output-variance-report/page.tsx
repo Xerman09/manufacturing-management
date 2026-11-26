@@ -48,7 +48,7 @@ function userHeader(token: string | undefined) {
 }
 
 export default async function ProductionOutputVarianceReportPage() {
-    const token = (await cookies()).get("vos_access_token")?.value;
+    const token = (await cookies()).get("vos_mm_access_token")?.value;
     const headerUser = userHeader(token);
 
     return (

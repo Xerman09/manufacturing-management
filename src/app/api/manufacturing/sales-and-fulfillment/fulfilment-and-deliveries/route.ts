@@ -3,7 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DIRECTUS_URL, headers as directusHeaders } from "../../directus-api";
 import { getUserIdFromToken } from "../../invoice-consolidation/_auth";
-import { getPhTimestamp } from "../../invoice-consolidation/_time-utils";
+import { nowUtcSql } from "@/lib/datetime";
 import { ConsolidatedDeliveryRecord, ConsolidatedSalesOrderRecord } from "@/modules/manufacturing-management/mm/sales-and-fulfillment/fulfilment-and-deliveries/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1563,7 +1563,13 @@ export async function POST(req: NextRequest) {
         }
 
         const userId = await getUserIdFromToken();
-        const phNow = getPhTimestamp();
+        const phNow = nowUtcSql();
+        if (!phNow) {
+            return NextResponse.json(
+                { message: "Failed to generate UTC timestamp." },
+                { status: 500 }
+            );
+        }
 
         // ─── DRAFT PATHWAY (Save Progress) ──────────────────────────────────────────
         if (is_draft) {
@@ -2071,7 +2077,11 @@ export async function POST(req: NextRequest) {
                                         await fetch(`${DIRECTUS_URL}/items/sales_order_reservation/${resvId}`, {
                                             method: "PATCH",
                                             headers: directusHeaders,
-                                            body: JSON.stringify({ status: "Consumed" }),
+                                            body: JSON.stringify({
+                                                status: "Consumed",
+                                                updated_at: phNow,
+                                                updated_by: userId,
+                                            }),
                                         }).catch((err) => console.warn(`[POST] Failed to update reservation #${resvId} to Consumed:`, err));
                                     }
                                 }
@@ -2422,7 +2432,13 @@ export async function PATCH(req: NextRequest) {
         }
 
         const userId = await getUserIdFromToken();
-        const phNow = getPhTimestamp();
+        const phNow = nowUtcSql();
+        if (!phNow) {
+            return NextResponse.json(
+                { message: "Failed to generate UTC timestamp." },
+                { status: 500 }
+            );
+        }
 
         const patchRes = await fetch(`${DIRECTUS_URL}/items/sales_invoice/${invoice_id}`, {
             method: "PATCH",

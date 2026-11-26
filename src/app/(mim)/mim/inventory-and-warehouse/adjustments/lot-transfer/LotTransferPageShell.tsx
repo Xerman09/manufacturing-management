@@ -28,7 +28,7 @@ function numberValue(value: unknown) {
 
 export default async function LotTransferPageShell({ mode, title, transferId, backHref }: LotTransferPageShellProps) {
     const cookieStore = await cookies();
-    const token = cookieStore.get("vos_access_token")?.value || cookieStore.get("springboot_token")?.value;
+    const token = cookieStore.get("vos_mm_access_token")?.value || cookieStore.get("vos_mm_springboot_token")?.value;
     const payload = token ? decodeJwtPayload(token) : null;
     const firstName = String(payload?.FirstName || payload?.firstName || "").trim();
     const lastName = String(payload?.LastName || payload?.lastName || "").trim();

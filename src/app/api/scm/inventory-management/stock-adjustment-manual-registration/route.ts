@@ -9,8 +9,8 @@ export async function POST(request: NextRequest) {
 
     // Extract userId from cookie
     const token =
-      request.cookies.get("vos_access_token")?.value ||
-      request.cookies.get("springboot_token")?.value ||
+      request.cookies.get("vos_mm_access_token")?.value ||
+      request.cookies.get("vos_mm_springboot_token")?.value ||
       request.cookies.get("directus_session_token")?.value ||
       request.cookies.get("auth_token")?.value;
     const userId = getUserIdFromToken(token);

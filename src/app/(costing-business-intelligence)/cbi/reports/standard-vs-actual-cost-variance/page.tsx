@@ -31,7 +31,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 }
 
 export default async function StandardVsActualCostVariancePage() {
-    const token = (await cookies()).get("vos_access_token")?.value;
+    const token = (await cookies()).get("vos_mm_access_token")?.value;
     const payload = token ? decodeJwtPayload(token) : null;
     const first = String(payload?.Firstname || payload?.FirstName || payload?.first_name || "");
     const last = String(payload?.LastName || payload?.last_name || "");

@@ -21,7 +21,7 @@ export const metadata = {
   description: "Plan delivery trips, assign 3PL or fleet vehicles, budget cash, and sequence customer drops",
 };
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {

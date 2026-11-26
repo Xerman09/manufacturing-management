@@ -14,7 +14,7 @@ import PurchaseOrderApprovalModule from "@/modules/manufacturing-management/appr
 import type { PurchaseOrderDecisionStage } from "@/modules/manufacturing-management/procurement-and-inbound/incoming-shipments/types";
 import type { PurchaseOrderApprovalMode } from "@/modules/manufacturing-management/approvals-hub/finance-approval/hooks/usePurchaseOrderApproval";
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

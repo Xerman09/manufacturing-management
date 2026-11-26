@@ -53,7 +53,7 @@ function isTruthyClaim(value: unknown): boolean {
 }
 
 async function getWorkflowActor(): Promise<WorkflowActor | null> {
-    const token = (await cookies()).get("vos_access_token")?.value;
+    const token = (await cookies()).get("vos_mm_access_token")?.value;
     if (!token) return null;
     const payload = readTokenPayload(token);
     if (Object.keys(payload).length === 0) return null;

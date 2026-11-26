@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { SupplierBid, PassFailResult } from "../../types";
 import { calculateSupplierLandedCost } from "../../engine/landed-cost-calculator";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,8 @@ interface QualityEvaluationFormProps {
 export const QualityEvaluationForm: React.FC<QualityEvaluationFormProps> = ({ bid }) => {
     const { currentProject, updateProject } = useBidComparisonStore();
     if (!currentProject) return null;
+
+    const isLocked = isRfqProjectLocked(currentProject);
 
     const items = currentProject.items || [];
     const criteria = currentProject.qualityCriteria || [];
@@ -129,6 +131,7 @@ export const QualityEvaluationForm: React.FC<QualityEvaluationFormProps> = ({ bi
                                                 <td className="py-2 px-3">
                                                     <Select
                                                         value={status}
+                                                        disabled={isLocked}
                                                         onValueChange={(val: PassFailResult) => handleUpdatePassFail(c.id, val)}
                                                     >
                                                         <SelectTrigger className={cn(
@@ -155,9 +158,10 @@ export const QualityEvaluationForm: React.FC<QualityEvaluationFormProps> = ({ bi
                                                 <td className="py-2 px-3">
                                                     <Input
                                                         value={scoreObj.evidenceRemarks || ""}
+                                                        disabled={isLocked}
                                                         onChange={(e) => handleUpdateRemarks(c.id, e.target.value)}
                                                         placeholder="e.g. BIR Form 2303 verified, SEC reg active"
-                                                        className="h-7 text-xs"
+                                                        className="h-7 text-xs disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed"
                                                     />
                                                 </td>
                                             </tr>
@@ -206,6 +210,7 @@ export const QualityEvaluationForm: React.FC<QualityEvaluationFormProps> = ({ bi
                                                             <Button
                                                                 key={starVal}
                                                                 type="button"
+                                                                disabled={isLocked}
                                                                 variant={isSelected ? "default" : "outline"}
                                                                 size="sm"
                                                                 onClick={() => handleUpdateScore(c.id, isSelected ? null : starVal)}
@@ -227,9 +232,10 @@ export const QualityEvaluationForm: React.FC<QualityEvaluationFormProps> = ({ bi
                                             <td className="py-2 px-3">
                                                 <Input
                                                     value={scoreObj.evidenceRemarks || ""}
+                                                    disabled={isLocked}
                                                     onChange={(e) => handleUpdateRemarks(c.id, e.target.value)}
                                                     placeholder="e.g. ISO 9001 certified, Lab test report #4912"
-                                                    className="h-7 text-xs"
+                                                    className="h-7 text-xs disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed"
                                                 />
                                             </td>
                                         </tr>

@@ -20,7 +20,7 @@ export const metadata = {
     description: "Monitors active job statuses, work orders in progress, and stage completion across production lines."
 };
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

@@ -717,7 +717,7 @@ export function StockAdjustmentManualForm({
           if (parts.length === 2) return parts.pop()?.split(";").shift() || null;
           return null;
         };
-        const token = getCookie("vos_access_token");
+        const token = getCookie("vos_mm_access_token");
         if (token) {
           const decoded = decodeJwtPayload(token);
           if (decoded) {

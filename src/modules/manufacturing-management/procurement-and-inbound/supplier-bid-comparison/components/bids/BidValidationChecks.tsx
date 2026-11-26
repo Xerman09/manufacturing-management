@@ -255,7 +255,7 @@ export const BidValidationChecks: React.FC<BidValidationChecksProps> = ({ bid })
             <CardHeader className="py-3 px-4 border-b bg-muted/20 flex flex-row items-center justify-between">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                     <AlertTriangle className="h-4 w-4 text-amber-500" />
-                    Checks
+                    2.6 Bid Validation Checks
                 </CardTitle>
             </CardHeader>
 

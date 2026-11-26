@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   DIRECTUS_URL,
   headers as directusHeaders,
-  formatPhtDateTime,
 } from "@/app/api/manufacturing/directus-api";
+import { nowUtcSql } from "@/lib/datetime";
 import {
   directusGet,
   enrichDispatchPlanList,
@@ -348,7 +348,13 @@ export async function POST(req: NextRequest) {
       getUserIdFromToken(),
       generateDispatchNo(),
     ]);
-    const nowPht = formatPhtDateTime();
+    const utcNow = nowUtcSql();
+    if (!utcNow) {
+      return NextResponse.json(
+        { success: false, message: "Failed to generate UTC timestamp." },
+        { status: 500 }
+      );
+    }
 
     // 1. Create dispatch_plan header
     const headerPayload: Record<string, unknown> = {
@@ -363,7 +369,7 @@ export async function POST(req: NextRequest) {
       status: "Pending",
       total_amount: totalAmount,
       remarks: remarks || null,
-      created_at: nowPht,
+      created_at: utcNow,
       is_delete: 0,
     };
     if (userId) headerPayload.created_by = userId;
@@ -441,7 +447,8 @@ export async function POST(req: NextRequest) {
       salesOrderIds.map(async (soId) => {
         const soPatch: Record<string, unknown> = {
           order_status: "For Shipping",
-          modified_date: nowPht,
+          for_shipping_at: utcNow,
+          modified_date: utcNow,
         };
         if (userId) soPatch.modified_by = userId;
         const r = await fetch(`${DIRECTUS_URL}/items/sales_order/${soId}`, {

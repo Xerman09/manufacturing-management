@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   DIRECTUS_URL,
   headers as directusHeaders,
-  formatPhtDateTime,
 } from "@/app/api/manufacturing/directus-api";
+import { nowUtcSql } from "@/lib/datetime";
 import {
   directusGet,
   directusGetOne,
@@ -189,7 +189,13 @@ export async function PATCH(
     }
 
     const userId = await getUserIdFromToken();
-    const nowPht = formatPhtDateTime();
+    const utcNow = nowUtcSql();
+    if (!utcNow) {
+      return NextResponse.json(
+        { success: false, message: "Failed to generate UTC timestamp." },
+        { status: 500 }
+      );
+    }
 
     // 1. Update header
     const headerPatch: Record<string, unknown> = {
@@ -260,7 +266,7 @@ export async function PATCH(
             });
             const soRevert: Record<string, unknown> = {
               order_status: "For Loading",
-              modified_date: nowPht,
+              modified_date: utcNow,
             };
             if (userId) soRevert.modified_by = userId;
             await fetch(`${DIRECTUS_URL}/items/sales_order/${d.sales_order_id}`, {
@@ -300,7 +306,8 @@ export async function PATCH(
           toMarkShipping.map(async (soId) => {
             const soPatch: Record<string, unknown> = {
               order_status: "For Shipping",
-              modified_date: nowPht,
+              for_shipping_at: utcNow,
+              modified_date: utcNow,
             };
             if (userId) soPatch.modified_by = userId;
             await fetch(`${DIRECTUS_URL}/items/sales_order/${soId}`, {

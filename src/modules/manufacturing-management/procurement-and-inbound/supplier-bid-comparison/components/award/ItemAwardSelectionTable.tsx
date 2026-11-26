@@ -4,7 +4,7 @@ import React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
 import { ItemAward } from "../../types";
 import { cn } from "@/lib/utils";
@@ -21,7 +21,7 @@ export const ItemAwardSelectionTable: React.FC = () => {
 
     const items = currentProject.items || [];
     const compCurr = currentProject.comparisonCurrency || "PHP";
-    const isLocked = currentProject.status === "Submitted" || currentProject.status === "Approved";
+    const isLocked = isRfqProjectLocked(currentProject);
 
     const awards = currentProject.awards || [];
     const totalAwardedLanded = awards.reduce((sum, a) => sum + (a.awardedLandedTotal || 0), 0);

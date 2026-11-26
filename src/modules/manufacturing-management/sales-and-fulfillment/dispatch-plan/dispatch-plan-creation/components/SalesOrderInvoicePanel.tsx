@@ -9,9 +9,9 @@ import { cn } from "@/lib/utils";
 import type { EligibleSalesOrder } from "../../shared.types";
 import {
   formatCurrency,
-  formatDateTimeDisplay,
   getOrderStatusBadgeStyle,
 } from "../../shared.utils";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 
 interface SalesOrderInvoicePanelProps {
   orders: EligibleSalesOrder[];
@@ -36,6 +36,7 @@ export const SalesOrderInvoicePanel: React.FC<SalesOrderInvoicePanelProps> = ({
   selectedBranchId,
   selectedBranchName,
 }) => {
+  const { formatDateTime } = useTimeZone();
   const selectedSet = new Set(selectedOrderIds);
   const isBranchMissing = !selectedBranchId && !readOnly;
 
@@ -147,8 +148,8 @@ export const SalesOrderInvoicePanel: React.FC<SalesOrderInvoicePanelProps> = ({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="space-y-0.5 min-w-0">
-                      <p className="text-[10px] text-muted-foreground">
-                        Created at: {formatDateTimeDisplay(order.created_date)}
+                      <p className="text-[10px] text-muted-foreground font-mono">
+                        Created at: {formatDateTime(order.created_date)}
                       </p>
                       <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                         <Badge

@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { cn } from "@/lib/utils";
 
 import { NumericInputField } from "../shared/NumericInputField";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { SupplierBid, ItemQuotation, PriceBreak } from "../../types";
 import { calculateSupplierLandedCost, getExchangeRate } from "../../engine/landed-cost-calculator";
 
@@ -24,9 +24,10 @@ interface ItemQuotationsTableProps {
 }
 
 export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid }) => {
-    const { currentProject, updateProject } = useBidComparisonStore();
+    const { currentProject, updateProject, validationErrors, clearValidationError } = useBidComparisonStore();
     const [showFormula, setShowFormula] = useState(true);
 
+    const isLocked = isRfqProjectLocked(currentProject);
     const compCurr = currentProject?.comparisonCurrency || "PHP";
     const items = React.useMemo(() => currentProject?.items || [], [currentProject?.items]);
 
@@ -183,16 +184,16 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
     };
 
     return (
-        <Card className="shadow-xs border-border/80">
+        <Card className={cn("shadow-xs border-border/80", validationErrors[`bid.${bid.id}.quotes`] && "border-destructive ring-1 ring-destructive/40")}>
             <CardHeader className="py-3 px-4 border-b bg-muted/20">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                         <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                             <Tag className="h-4 w-4 text-primary" />
-                            2.2 Item Quotations &amp; Tiered Price Breaks ({bid.quoteCurrency})
+                            2.2 Item Quotations &amp; Tiered Price Breaks ({bid.quoteCurrency || "-"})
                         </CardTitle>
                         <CardDescription className="text-xs mt-0.5">
-                            Enter unit prices and discounts in {bid.quoteCurrency}. Best price tier is automatically applied and converted to {compCurr} landed costs.
+                            Enter unit prices and discounts in {bid.quoteCurrency || "-"}. Best price tier is automatically applied and converted to {compCurr} landed costs.
                         </CardDescription>
                     </div>
 
@@ -304,7 +305,12 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                                 <Button
                                                     size="sm"
                                                     variant="outline"
-                                                    onClick={() => handleAddPrice(item.id)}
+                                                    disabled={isLocked}
+                                                    onClick={() => {
+                                                        clearValidationError(`bid.${bid.id}.quotes`);
+                                                        clearValidationError(`bid.${bid.id}.quote.${item.id}`);
+                                                        handleAddPrice(item.id);
+                                                    }}
                                                     className="h-7 text-xs gap-1 border-dashed"
                                                 >
                                                     <Plus className="h-3 w-3" />
@@ -318,6 +324,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                                         const tierVariancePct = item.targetUnitPrice > 0
                                                             ? ((tierUnitCompCurr - item.targetUnitPrice) / item.targetUnitPrice) * 100
                                                             : 0;
+                                                        const hasPriceErr = Boolean(validationErrors[`bid.${bid.id}.quote.${item.id}`]);
 
                                                         return (
                                                             <div key={br.id} className="space-y-1">
@@ -328,6 +335,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                                                     <div className="w-24">
                                                                         <NumericInputField
                                                                             value={br.minQuantity}
+                                                                            disabled={isLocked}
                                                                             onChange={(val) =>
                                                                                 handleUpdatePriceBreak(
                                                                                     item.id,
@@ -344,20 +352,24 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                                                     <div className="w-28">
                                                                         <NumericInputField
                                                                             value={br.unitPrice}
-                                                                            onChange={(val) =>
+                                                                            disabled={isLocked}
+                                                                            onChange={(val) => {
+                                                                                clearValidationError(`bid.${bid.id}.quotes`);
+                                                                                clearValidationError(`bid.${bid.id}.quote.${item.id}`);
                                                                                 handleUpdatePriceBreak(
                                                                                     item.id,
                                                                                     br.id,
                                                                                     "unitPrice",
                                                                                     val
-                                                                                )
-                                                                            }
+                                                                                );
+                                                                            }}
                                                                             min={0}
                                                                             precision={4}
-                                                                            prefix={bid.quoteCurrency}
+                                                                            prefix={bid.quoteCurrency || "-"}
                                                                             className={cn(
                                                                                 "h-6 text-[11px] font-bold",
-                                                                                isTierOverTarget && "border-amber-500/80 text-amber-950 dark:text-amber-200 focus-visible:ring-amber-500 bg-amber-500/5"
+                                                                                isTierOverTarget && "border-amber-500/80 text-amber-950 dark:text-amber-200 focus-visible:ring-amber-500 bg-amber-500/5",
+                                                                                hasPriceErr && "border-destructive ring-1 ring-destructive/40"
                                                                             )}
                                                                             placeholder="Price"
                                                                         />
@@ -366,10 +378,11 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                                                         <Button
                                                                             variant="ghost"
                                                                             size="sm"
+                                                                            disabled={isLocked}
                                                                             onClick={() =>
                                                                                 handleRemovePriceBreak(item.id, br.id)
                                                                             }
-                                                                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                                                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive disabled:opacity-40"
                                                                         >
                                                                             <Trash2 className="h-3 w-3" />
                                                                         </Button>
@@ -392,8 +405,9 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                                         <Button
                                                             size="sm"
                                                             variant="ghost"
+                                                            disabled={isLocked}
                                                             onClick={() => handleAddPriceBreak(item.id)}
-                                                            className="h-5 text-[10px] p-0 text-primary hover:underline gap-1"
+                                                            className="h-5 text-[10px] p-0 text-primary hover:underline gap-1 disabled:opacity-40"
                                                         >
                                                             <Plus className="h-2.5 w-2.5" />
                                                             + Price Break Tier
@@ -414,6 +428,7 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                             {quote && (
                                                 <NumericInputField
                                                     value={quote.discountPct}
+                                                    disabled={isLocked}
                                                     onChange={(val) => handleUpdateDiscount(item.id, val)}
                                                     min={0}
                                                     max={100}
@@ -453,8 +468,9 @@ export const ItemQuotationsTable: React.FC<ItemQuotationsTableProps> = ({ bid })
                                                 <Button
                                                     variant="ghost"
                                                     size="sm"
+                                                    disabled={isLocked}
                                                     onClick={() => handleRemoveQuote(item.id)}
-                                                    className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                                    className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive disabled:opacity-40"
                                                     title="Clear quote"
                                                 >
                                                     <Trash2 className="h-3 w-3" />

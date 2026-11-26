@@ -15,6 +15,7 @@ interface NumericInputFieldProps {
     allowDecimals?: boolean;
     precision?: number;
     formatFixed?: boolean;
+    useGrouping?: boolean;
     disabled?: boolean;
     className?: string;
     prefix?: string;
@@ -31,6 +32,7 @@ export const NumericInputField: React.FC<NumericInputFieldProps> = ({
     allowDecimals = true,
     precision = 4,
     formatFixed = false,
+    useGrouping = true,
     disabled = false,
     className,
     prefix,
@@ -46,6 +48,7 @@ export const NumericInputField: React.FC<NumericInputFieldProps> = ({
             allowDecimals,
             precision,
             formatFixed,
+            useGrouping,
         });
 
     const prefixPadding = prefix
@@ -84,9 +87,10 @@ export const NumericInputField: React.FC<NumericInputFieldProps> = ({
                 onClick={handleClick}
                 onBlur={handleBlur}
                 disabled={disabled}
+                readOnly={disabled}
                 placeholder={placeholder}
                 className={cn(
-                    "h-8 text-xs font-mono transition-colors",
+                    "h-8 text-xs font-mono transition-colors disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed",
                     prefixPadding,
                     suffixPadding,
                     className

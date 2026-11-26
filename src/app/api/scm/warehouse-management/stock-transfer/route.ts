@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
   const action = searchParams.get("action");
   const rfid = searchParams.get("rfid");
   const branchId = searchParams.get("branch_id");
-  const token = request.cookies.get("vos_access_token")?.value;
+  const token = request.cookies.get("vos_mm_access_token")?.value;
 
   try {
     // 1. RFID Lookup
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as CreateTransferPayload;
     
     // Extract userId from token — encoder_id must never be null
-    const token = request.cookies.get("vos_access_token")?.value;
+    const token = request.cookies.get("vos_mm_access_token")?.value;
     const decoded = token ? decodeJwtPayload(token) : null;
     const userId = decoded?.sub ? Number(decoded.sub) : null;
 
@@ -146,7 +146,7 @@ export async function PATCH(request: NextRequest) {
     const body = (await request.json()) as UpdateTransferPayload;
     
     // Extract userId from token — approved_by / dispatched_by / receiver_id / rejected_by must never be null
-    const token = request.cookies.get("vos_access_token")?.value;
+    const token = request.cookies.get("vos_mm_access_token")?.value;
     const decoded = token ? decodeJwtPayload(token) : null;
     const userId = decoded?.sub ? Number(decoded.sub) : null;
 

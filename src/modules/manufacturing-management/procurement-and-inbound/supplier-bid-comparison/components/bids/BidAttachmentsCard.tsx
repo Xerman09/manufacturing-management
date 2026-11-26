@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { SupplierBid, BidAttachment } from "../../types";
 import { AttachmentPreviewModal } from "./AttachmentPreviewModal";
 import { toast } from "sonner";
@@ -24,7 +24,8 @@ interface BidAttachmentsCardProps {
 }
 
 export const BidAttachmentsCard: React.FC<BidAttachmentsCardProps> = ({ bid }) => {
-    const { updateProject } = useBidComparisonStore();
+    const { currentProject, updateProject } = useBidComparisonStore();
+    const isLocked = isRfqProjectLocked(currentProject);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [previewAttachment, setPreviewAttachment] = useState<BidAttachment | null>(null);
@@ -163,7 +164,7 @@ export const BidAttachmentsCard: React.FC<BidAttachmentsCardProps> = ({ bid }) =
                 <CardHeader className="py-3 px-4 border-b bg-muted/20 flex flex-row items-center justify-between space-y-0">
                     <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                         <Paperclip className="h-4 w-4 text-primary" />
-                        Attachments (quotation, certificates)
+                        2.7 Attachments (quotation, certificates)
                     </CardTitle>
 
                     <div>
@@ -171,6 +172,7 @@ export const BidAttachmentsCard: React.FC<BidAttachmentsCardProps> = ({ bid }) =
                             type="file"
                             ref={fileInputRef}
                             onChange={handleFileUpload}
+                            disabled={isLocked}
                             multiple
                             className="hidden"
                         />
@@ -178,7 +180,7 @@ export const BidAttachmentsCard: React.FC<BidAttachmentsCardProps> = ({ bid }) =
                             size="sm"
                             variant="outline"
                             onClick={() => fileInputRef.current?.click()}
-                            disabled={isUploading}
+                            disabled={isLocked || isUploading}
                             className="h-7 text-xs gap-1"
                         >
                             {isUploading ? (
@@ -262,9 +264,10 @@ export const BidAttachmentsCard: React.FC<BidAttachmentsCardProps> = ({ bid }) =
                                             <Button
                                                 size="sm"
                                                 variant="ghost"
+                                                disabled={isLocked}
                                                 onClick={() => handleRemoveAttachment(att.id)}
                                                 title="Remove Attachment"
-                                                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                                                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive disabled:opacity-40"
                                             >
                                                 <Trash2 className="w-3.5 h-3.5" />
                                             </Button>

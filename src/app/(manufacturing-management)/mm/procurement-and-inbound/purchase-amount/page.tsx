@@ -20,7 +20,7 @@ export const metadata = {
     description: "Post landed costs, adjust invoice purchase amounts, and manage purchase cost allocations."
 };
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

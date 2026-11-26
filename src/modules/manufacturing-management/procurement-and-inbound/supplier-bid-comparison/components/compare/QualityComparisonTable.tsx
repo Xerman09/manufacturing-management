@@ -55,7 +55,7 @@ export const QualityComparisonTable: React.FC<QualityComparisonTableProps> = ({ 
                 <CardHeader className="py-3 px-4 border-b bg-muted/20">
                     <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                         <Award className="h-4 w-4 text-amber-500" />
-                        3.2 Quality &amp; Compliance Comparison Matrix
+                        3.4 Quality &amp; Compliance Comparison Matrix
                     </CardTitle>
                     <CardDescription className="text-xs">
                         Audit of mandatory pass/fail requirements and scored criteria (1–5). Dots indicate audit evidence attached.

@@ -17,10 +17,10 @@ import type {
   EligibleSalesOrder,
 } from "../../shared.types";
 import {
-  formatDateTimeDisplay,
   getDispatchStatusBadgeStyle,
   toDateTimeLocalValue,
 } from "../../shared.utils";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 import { SalesOrderInvoicePanel } from "../../dispatch-plan-creation/components/SalesOrderInvoicePanel";
 import { TripConfigPanel } from "../../dispatch-plan-creation/components/TripConfigPanel";
 import { BudgetSection } from "../../dispatch-plan-creation/components/BudgetSection";
@@ -46,6 +46,7 @@ export const DispatchApprovalDetailModal: React.FC<DispatchApprovalDetailModalPr
   isSubmitting,
   onDecide,
 }) => {
+  const { formatDateTime, timeZone } = useTimeZone();
   const [orderSearch, setOrderSearch] = useState("");
 
   const orderCards: EligibleSalesOrder[] = useMemo(() => {
@@ -129,7 +130,7 @@ export const DispatchApprovalDetailModal: React.FC<DispatchApprovalDetailModalPr
               <CheckCircle2 className="h-4 w-4 shrink-0" />
               <span>
                 Approved by <strong>{plan.approved_by_name || "-"}</strong> on{" "}
-                {formatDateTimeDisplay(plan.approved_at)} — Sales Orders moved to{" "}
+                <span className="font-mono">{formatDateTime(plan.approved_at)}</span> — Sales Orders moved to{" "}
                 <strong>Dispatched</strong>.
               </span>
             </div>
@@ -141,7 +142,7 @@ export const DispatchApprovalDetailModal: React.FC<DispatchApprovalDetailModalPr
               <div>
                 <span>
                   Returned by <strong>{plan.rejected_by_name || "-"}</strong> on{" "}
-                  {formatDateTimeDisplay(plan.rejected_at)}
+                  <span className="font-mono">{formatDateTime(plan.rejected_at)}</span>
                 </span>
                 {plan.rejection_reason && (
                   <p className="mt-0.5 font-medium">Reason: {plan.rejection_reason}</p>
@@ -213,7 +214,7 @@ export const DispatchApprovalDetailModal: React.FC<DispatchApprovalDetailModalPr
             isSubmitting={isSubmitting}
             onDecide={onDecide}
             onClose={() => onOpenChange(false)}
-            onPrint={() => exportDispatchManifestPDF(plan)}
+            onPrint={() => exportDispatchManifestPDF(plan, timeZone)}
           />
         ) : (
           <div className="px-6 py-3.5 border-t bg-background shrink-0 flex items-center justify-between gap-4">
@@ -225,7 +226,7 @@ export const DispatchApprovalDetailModal: React.FC<DispatchApprovalDetailModalPr
                 type="button"
                 variant="outline"
                 className="gap-1.5"
-                onClick={() => exportDispatchManifestPDF(plan)}
+                onClick={() => exportDispatchManifestPDF(plan, timeZone)}
               >
                 <Printer className="h-4 w-4" />
                 Print PDF

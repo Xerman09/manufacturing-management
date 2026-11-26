@@ -6,7 +6,7 @@ import { numeric } from "./_values";
 export async function getSessionUserId(): Promise<number | null> {
     try {
         const cookieStore = await cookies();
-        const token = cookieStore.get("vos_access_token")?.value || cookieStore.get("springboot_token")?.value;
+        const token = cookieStore.get("vos_mm_access_token")?.value || cookieStore.get("vos_mm_springboot_token")?.value;
         if (!token) return null;
         const parts = token.split(".");
         if (parts.length < 2) return null;
@@ -26,7 +26,7 @@ export async function getSessionUserId(): Promise<number | null> {
 export async function getSessionUserBranchId(): Promise<number | null> {
     try {
         const cookieStore = await cookies();
-        const token = cookieStore.get("vos_access_token")?.value || cookieStore.get("springboot_token")?.value;
+        const token = cookieStore.get("vos_mm_access_token")?.value || cookieStore.get("vos_mm_springboot_token")?.value;
         if (!token) return null;
         const parts = token.split(".");
         if (parts.length < 2) return null;

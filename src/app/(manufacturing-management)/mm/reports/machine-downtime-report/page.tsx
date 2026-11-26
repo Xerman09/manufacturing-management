@@ -44,7 +44,7 @@ function userHeader(token: string | null) {
 }
 
 export default async function MachineDowntimeReportPage() {
-    const token = (await cookies()).get("vos_access_token")?.value ?? null;
+    const token = (await cookies()).get("vos_mm_access_token")?.value ?? null;
     return (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <header className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b bg-background shadow-sm sm:h-16">

@@ -49,6 +49,7 @@ import {
 } from "../../shared/consolidation-api";
 import { ConsolidationStatusBadge } from "../../shared/consolidation-ui";
 import { SearchableSelect, type SearchableSelectOption } from "../../shared/components/SearchableSelect";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 
 interface Props {
     isOpen: boolean;
@@ -109,6 +110,7 @@ export function getLotKey(productId: number, alloc: LotAllocation, idx: number):
 }
 
 export default function PickingModal({ isOpen, batch, onClose, onSuccess }: Props) {
+    const { formatDateTime } = useTimeZone();
     const [fullBatch, setFullBatch] = useState<InvoiceConsolidation | null>(batch);
     const [allocations, setAllocations] = useState<LotAllocation[]>([]);
     const [availableBatches, setAvailableBatches] = useState<AvailableLotBatchItem[]>([]);
@@ -444,7 +446,8 @@ export default function PickingModal({ isOpen, batch, onClose, onSuccess }: Prop
         const candidate = availableBatches.find(
             (b) =>
                 b.productId === productId &&
-                (b.inventoryLotId === invLotId || (b.lotId === lotId && b.batchNo === batchNo))
+                ((invLotId > 0 && b.inventoryLotId === invLotId) ||
+                    (b.lotId === lotId && b.batchNo === batchNo))
         );
         if (!candidate || Number(candidate.availableQuantity || 0) <= 0) {
             toast.error("Selected batch has no available stock.");
@@ -469,7 +472,7 @@ export default function PickingModal({ isOpen, batch, onClose, onSuccess }: Prop
         const exists = allocations.some(
             (a) =>
                 a.productId === productId &&
-                ((invLotId && a.inventoryLotId === invLotId) ||
+                ((invLotId > 0 && a.inventoryLotId === invLotId) ||
                     (a.lotId === lotId && a.batchNo === batchNo))
         );
         if (exists) {
@@ -621,7 +624,12 @@ export default function PickingModal({ isOpen, batch, onClose, onSuccess }: Prop
             });
 
             // Complete picking directly
-            const result = await completePicking(activeBatch.id);
+            const result = await completePicking(
+                activeBatch.id,
+                undefined,
+                pickedReservationIds,
+                pickedLotIds
+            );
             toast.success(result.message || `Batch ${activeBatch.consolidatorNo} successfully marked as Picked!`);
             onSuccess();
             onClose();
@@ -777,15 +785,9 @@ export default function PickingModal({ isOpen, batch, onClose, onSuccess }: Prop
                                         {activeBatch.branchName}
                                     </span>
                                     <span>•</span>
-                                    <span className="flex items-center gap-1">
+                                    <span className="flex items-center gap-1 font-mono">
                                         <Calendar className="h-3.5 w-3.5" />
-                                        {new Date(activeBatch.createdAt).toLocaleString("en-US", {
-                                            month: "short",
-                                            day: "2-digit",
-                                            year: "numeric",
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                        })}
+                                        {formatDateTime(activeBatch.createdAt)}
                                     </span>
                                 </div>
                             </div>

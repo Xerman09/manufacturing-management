@@ -18,7 +18,7 @@ import RequirementsSpecModule from "@/modules/manufacturing-management/shared/Re
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 const RETIRED_RFID_PATH = "supplier-management/purchase-order/purchase-order-receiving-rfid";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {

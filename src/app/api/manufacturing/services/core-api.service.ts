@@ -174,9 +174,43 @@ export function parsePhtDateTime(value: unknown): number | null {
     return Number.isNaN(date.getTime()) ? null : date.getTime();
 }
 
+function getTimezoneOffsetMinutes(tz: string, d = new Date()): number {
+    const localString = d.toLocaleString("en-US", { timeZone: tz });
+    const utcString = d.toLocaleString("en-US", { timeZone: "UTC" });
+    return Math.round((new Date(localString).getTime() - new Date(utcString).getTime()) / 60000);
+}
+
+function formatOffsetMinutes(diffMinutes: number): string {
+    const sign = diffMinutes >= 0 ? "+" : "-";
+    const absDiff = Math.abs(diffMinutes);
+    const hours = String(Math.floor(absDiff / 60)).padStart(2, "0");
+    const minutes = String(absDiff % 60).padStart(2, "0");
+    return `${sign}${hours}:${minutes}`;
+}
+
+/**
+ * Formats a persisted manufacturing event timestamp as a wall-clock value
+ * (`YYYY-MM-DD HH:mm:ss`) in the configured `general_setting.timezone`.
+ */
+export async function formatDateTimeInConfiguredTimezone(now = new Date()): Promise<string> {
+    const tz = await getConfiguredTimezone();
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23"
+    }).formatToParts(now);
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+}
+
 export async function getISOStringInConfiguredTimezone(d = new Date()): Promise<string> {
     const tz = await getConfiguredTimezone();
-    
+
     const formatter = new Intl.DateTimeFormat("en-US", {
         timeZone: tz,
         year: "numeric",
@@ -185,22 +219,50 @@ export async function getISOStringInConfiguredTimezone(d = new Date()): Promise<
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
-        hour12: false
+        hourCycle: "h23"
     });
-    
+
     const parts = formatter.formatToParts(d);
     const m = Object.fromEntries(parts.map(p => [p.type, p.value]));
     const ms = String(d.getMilliseconds()).padStart(3, "0");
-    
-    const tzString = d.toLocaleString("en-US", { timeZone: tz });
-    const localDate = new Date(tzString);
-    const utcString = d.toLocaleString("en-US", { timeZone: "UTC" });
-    const utcDate = new Date(utcString);
-    const diff = Math.round((localDate.getTime() - utcDate.getTime()) / 60000);
-    const sign = diff >= 0 ? "+" : "-";
-    const absDiff = Math.abs(diff);
-    const hours = String(Math.floor(absDiff / 60)).padStart(2, "0");
-    const minutes = String(absDiff % 60).padStart(2, "0");
-    
-    return `${m.year}-${m.month}-${m.day}T${m.hour}:${m.minute}:${m.second}.${ms}${sign}${hours}:${minutes}`;
+    const offset = formatOffsetMinutes(getTimezoneOffsetMinutes(tz, d));
+
+    return `${m.year}-${m.month}-${m.day}T${m.hour}:${m.minute}:${m.second}.${ms}${offset}`;
+}
+
+const EXPLICIT_TZ_PATTERN = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+
+/**
+ * Normalizes a persisted timestamp (either offset-bearing ISO or naive wall-clock
+ * datetime in `general_setting.timezone`) into an offset-bearing ISO string in the
+ * configured timezone so UTC servers and browsers never misinterpret it.
+ */
+export async function normalizeDateTimeInConfiguredTimezone(value: unknown): Promise<string | null> {
+    const raw = String(value ?? "").trim();
+    if (!raw) return null;
+
+    if (EXPLICIT_TZ_PATTERN.test(raw)) {
+        const parsed = new Date(raw);
+        return Number.isNaN(parsed.getTime()) ? raw : getISOStringInConfiguredTimezone(parsed);
+    }
+
+    const wallClock = PHT_WALL_CLOCK_DATE_TIME_PATTERN.exec(raw);
+    if (wallClock) {
+        const tz = await getConfiguredTimezone();
+        const approxUtc = new Date(Date.UTC(
+            Number(wallClock[1]),
+            Number(wallClock[2]) - 1,
+            Number(wallClock[3]),
+            Number(wallClock[4]),
+            Number(wallClock[5]),
+            Number(wallClock[6] || 0)
+        ));
+        const offset = formatOffsetMinutes(getTimezoneOffsetMinutes(tz, approxUtc));
+        const sec = wallClock[6] || "00";
+        const ms = wallClock[7] ? `.${wallClock[7].padEnd(3, "0")}` : "";
+        return `${wallClock[1]}-${wallClock[2]}-${wallClock[3]}T${wallClock[4]}:${wallClock[5]}:${sec}${ms}${offset}`;
+    }
+
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? raw : getISOStringInConfiguredTimezone(parsed);
 }

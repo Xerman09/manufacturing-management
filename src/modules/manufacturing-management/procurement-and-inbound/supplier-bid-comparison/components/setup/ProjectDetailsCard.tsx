@@ -7,9 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { NumericInputField } from "../shared/NumericInputField";
 import { ComboboxSelect, ComboboxOption } from "../shared/ComboboxSelect";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { FRANKFURTER_CURRENCIES } from "../../constants/currencies";
 import { AlertCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export const ProjectDetailsCard: React.FC = () => {
     const {
@@ -18,6 +19,8 @@ export const ProjectDetailsCard: React.FC = () => {
         projectsList,
         saveError,
         fetchForexRates,
+        validationErrors,
+        clearValidationError,
     } = useBidComparisonStore();
 
     const currencyOptions: ComboboxOption[] = React.useMemo(() => {
@@ -43,6 +46,7 @@ export const ProjectDetailsCard: React.FC = () => {
     if (!currentProject) return null;
 
     const compCurr = currentProject.comparisonCurrency || "PHP";
+    const isLocked = isRfqProjectLocked(currentProject);
 
     const isSaveErrorConflict = Boolean(
         saveError && (saveError.toLowerCase().includes("reference") || saveError.toLowerCase().includes("unique"))
@@ -55,18 +59,27 @@ export const ProjectDetailsCard: React.FC = () => {
             <CardHeader className="py-3 px-4 border-b bg-muted/10">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
                     <span className="text-amber-500 font-bold">📁</span>
-                    <span>Project</span>
+                    <span>1.1 Project</span>
                 </CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-3.5 flex-1">
                 {/* Row 1: Title */}
                 <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground font-medium">Project / RFQ title</Label>
+                    <Label className="text-xs text-muted-foreground font-medium">
+                        Project / RFQ title <span className="text-destructive">*</span>
+                    </Label>
                     <Input
                         value={currentProject.rfqTitle}
-                        onChange={(e) => updateProject((prev) => ({ ...prev, rfqTitle: e.target.value }))}
+                        disabled={isLocked}
+                        onChange={(e) => {
+                            clearValidationError("setup.rfqTitle");
+                            updateProject((prev) => ({ ...prev, rfqTitle: e.target.value }));
+                        }}
                         placeholder="e.g. LED lighting retrofit — Warehouse B"
-                        className="h-8 text-xs bg-background"
+                        className={cn(
+                            "h-8 text-xs bg-background disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed",
+                            validationErrors["setup.rfqTitle"] && "border-destructive ring-1 ring-destructive/40"
+                        )}
                     />
                 </div>
 
@@ -86,7 +99,7 @@ export const ProjectDetailsCard: React.FC = () => {
                             onChange={(e) => updateProject((prev) => ({ ...prev, rfqReference: e.target.value }))}
                             placeholder="RFQ-2026-118"
                             disabled
-                            className={`h-8 text-xs font-mono bg-background transition-colors ${
+                            className={`h-8 text-xs font-mono bg-background transition-colors disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed ${
                                 hasRefError
                                     ? "border-destructive text-destructive focus-visible:ring-destructive bg-destructive/5"
                                     : ""
@@ -101,45 +114,68 @@ export const ProjectDetailsCard: React.FC = () => {
                     </div>
 
                     <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground font-medium">Target date</Label>
+                        <Label className="text-xs text-muted-foreground font-medium">
+                            Target date <span className="text-destructive">*</span>
+                        </Label>
                         <Input
                             type="date"
                             min="2000-01-01"
                             max="2099-12-31"
+                            disabled={isLocked}
                             value={currentProject.targetDate ? currentProject.targetDate.slice(0, 10) : ""}
-                            onChange={(e) => updateProject((prev) => ({ ...prev, targetDate: e.target.value }))}
-                            className="h-8 text-xs font-mono bg-background"
+                            onChange={(e) => {
+                                clearValidationError("setup.targetDate");
+                                updateProject((prev) => ({ ...prev, targetDate: e.target.value }));
+                            }}
+                            className={cn(
+                                "h-8 text-xs font-mono bg-background disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed",
+                                validationErrors["setup.targetDate"] && "border-destructive ring-1 ring-destructive/40"
+                            )}
                         />
                     </div>
 
                     <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground font-medium">Compare in</Label>
+                        <Label className="text-xs text-muted-foreground font-medium">
+                            Compare in <span className="text-destructive">*</span>
+                        </Label>
                         <ComboboxSelect
                             options={currencyOptions}
                             value={compCurr}
+                            disabled={isLocked}
                             onChange={(val) => {
                                 if (!val || val === compCurr) return;
+                                clearValidationError("setup.comparisonCurrency");
                                 updateProject((prev) => ({ ...prev, comparisonCurrency: val }));
                                 fetchForexRates(val, true);
                             }}
                             placeholder="Select currency..."
                             searchPlaceholder="Search currency..."
                             allowAdHoc={false}
-                            className="h-8 text-xs font-semibold bg-background"
+                            className={cn(
+                                "h-8 text-xs font-semibold bg-background",
+                                validationErrors["setup.comparisonCurrency"] && "border-destructive ring-1 ring-destructive/40"
+                            )}
                         />
                     </div>
 
                     <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground font-medium">
-                            Budget ({compCurr})
+                            Budget ({compCurr}) <span className="text-destructive">*</span>
                         </Label>
                         <NumericInputField
                             value={currentProject.budget}
-                            onChange={(val) => updateProject((prev) => ({ ...prev, budget: val }))}
+                            disabled={isLocked}
+                            onChange={(val) => {
+                                clearValidationError("setup.budget");
+                                updateProject((prev) => ({ ...prev, budget: val }));
+                            }}
                             min={0}
                             precision={4}
                             placeholder="0.0000"
-                            className="h-8 text-xs font-mono font-semibold bg-background"
+                            className={cn(
+                                "h-8 text-xs font-mono font-semibold bg-background",
+                                validationErrors["setup.budget"] && "border-destructive ring-1 ring-destructive/40"
+                            )}
                         />
                     </div>
                 </div>
@@ -149,9 +185,10 @@ export const ProjectDetailsCard: React.FC = () => {
                     <Label className="text-xs text-muted-foreground font-medium">Notes</Label>
                     <Textarea
                         value={currentProject.notes}
+                        disabled={isLocked}
                         onChange={(e) => updateProject((prev) => ({ ...prev, notes: e.target.value }))}
                         placeholder="Sample project — duty rates and HS codes are illustrative; verify before use."
-                        className="text-xs resize-none h-14 bg-background"
+                        className="text-xs resize-none h-14 bg-background disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed"
                     />
                 </div>
             </CardContent>

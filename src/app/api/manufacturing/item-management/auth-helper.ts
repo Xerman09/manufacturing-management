@@ -18,7 +18,7 @@ function asPositiveUserId(value: unknown): number | null {
 export async function getUserIdFromToken(): Promise<number | null> {
     try {
         const cookieStore = await cookies();
-        const token = cookieStore.get(COOKIE_NAME)?.value || cookieStore.get("vos_access_token")?.value || cookieStore.get("access_token")?.value;
+        const token = cookieStore.get(COOKIE_NAME)?.value || cookieStore.get("vos_mm_access_token")?.value || cookieStore.get("access_token")?.value;
         if (!token) return null;
 
         let jwtUserId: number | null = null;

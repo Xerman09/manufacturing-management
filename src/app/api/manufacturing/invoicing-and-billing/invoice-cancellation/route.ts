@@ -33,7 +33,7 @@ interface DirectusRequest {
 
 export async function GET() {
   const cookieStore = await cookies();
-  const token = cookieStore.get("vos_access_token")?.value;
+  const token = cookieStore.get("vos_mm_access_token")?.value;
 
   if (!token) {
     return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
@@ -101,7 +101,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
-  const token = cookieStore.get("vos_access_token")?.value;
+  const token = cookieStore.get("vos_mm_access_token")?.value;
 
   if (!token) {
     return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });

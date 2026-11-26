@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
     COOKIE_NAME,
     REFRESH_COOKIE_NAME,
+    BACKEND_REFRESH_COOKIE_NAME,
     REFRESH_PATH,
     decodeJwtPayload,
     pickTokenFromPayload,
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
         const response = await fetch(refreshUrl, {
             method: "POST",
             headers: {
-                "Cookie": `${REFRESH_COOKIE_NAME}=${refreshToken}`,
+                "Cookie": `${BACKEND_REFRESH_COOKIE_NAME}=${refreshToken}`,
                 "Accept": "application/json",
             },
             cache: "no-store",
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
 
         // Update Refresh Token if returned in Set-Cookie header
         const setCookies = response.headers.getSetCookie();
-        const refreshCookieStr = setCookies.find(c => c.startsWith(`${REFRESH_COOKIE_NAME}=`));
+        const refreshCookieStr = setCookies.find(c => c.startsWith(`${BACKEND_REFRESH_COOKIE_NAME}=`));
         if (refreshCookieStr) {
             const value = refreshCookieStr.split(';')[0].split('=')[1];
             if (value) {

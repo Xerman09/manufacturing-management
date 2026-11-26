@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Missing branchId" }, { status: 400 });
     }
 
-    const token = request.cookies.get("vos_access_token")?.value;
+    const token = request.cookies.get("vos_mm_access_token")?.value;
     if (!token) {
       return NextResponse.json({ error: "No access token found" }, { status: 401 });
     }

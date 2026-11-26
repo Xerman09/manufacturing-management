@@ -32,6 +32,7 @@ import {
   getDispatchStatusBadgeStyle,
   getOrderStatusBadgeStyle,
 } from "../../shared.utils";
+import { useTimeZone } from "@/providers/TimeZoneProvider";
 
 interface DispatchApprovalTableProps {
   plans: DispatchPlanListItem[];
@@ -60,6 +61,7 @@ export const DispatchApprovalTable: React.FC<DispatchApprovalTableProps> = ({
   onReview,
   onRetry,
 }) => {
+  const { formatDateTime } = useTimeZone();
   const totalPages = Math.max(1, Math.ceil(totalPlans / pageSize));
   const startRow = totalPlans === 0 ? 0 : (page - 1) * pageSize + 1;
   const endRow = Math.min(page * pageSize, totalPlans);
@@ -235,8 +237,8 @@ export const DispatchApprovalTable: React.FC<DispatchApprovalTableProps> = ({
                             </div>
                           )}
                           {(plan.status === "Approved" || plan.status === "Dispatched") && plan.approved_at && (
-                            <span className="text-[11px] text-muted-foreground">
-                              {plan.approved_by_name || "-"} · {formatDateTimeDisplay(plan.approved_at)}
+                            <span className="text-[11px] text-muted-foreground font-mono">
+                              {plan.approved_by_name || "-"} · {formatDateTime(plan.approved_at)}
                             </span>
                           )}
                           {plan.status === "Rejected" && (

@@ -292,8 +292,8 @@ async function getReconciledLotOccupancyServer(targetLotId: number): Promise<num
   try {
     const cookieStore = await cookies();
     token =
-      cookieStore.get("vos_access_token")?.value ||
-      cookieStore.get("springboot_token")?.value ||
+      cookieStore.get("vos_mm_access_token")?.value ||
+      cookieStore.get("vos_mm_springboot_token")?.value ||
       cookieStore.get("token")?.value;
   } catch {
     // ignore
@@ -311,7 +311,7 @@ async function getReconciledLotOccupancyServer(targetLotId: number): Promise<num
   const reqHeaders: Record<string, string> = { Accept: "application/json" };
   if (token) {
     reqHeaders["Authorization"] = `Bearer ${token}`;
-    reqHeaders["Cookie"] = `vos_access_token=${token}`;
+    reqHeaders["Cookie"] = `vos_mm_access_token=${token}`;
   }
 
   // 1. Fetch inventory lots for this target lot from Directus to know which inventory_lot_ids belong to targetLotId

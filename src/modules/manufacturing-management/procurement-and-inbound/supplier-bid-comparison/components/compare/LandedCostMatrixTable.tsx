@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
 import { evaluateAndCompareSuppliers } from "../../engine/scoring-engine";
- 
+import { CURRENCY_MAP } from "../../constants/currencies";
 import { cn } from "@/lib/utils";
 
 interface LandedCostMatrixTableProps {
@@ -55,19 +55,33 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
         return costMap;
     }, [currentProject, summary]);
 
+    const exchangeRatesMap = React.useMemo(() => {
+        const map = new Map<string, number>();
+        for (const r of currentProject?.exchangeRates || []) {
+            if (r.currencyCode && r.rateToComparison > 0) {
+                map.set(r.currencyCode.toUpperCase(), r.rateToComparison);
+            }
+        }
+        return map;
+    }, [currentProject?.exchangeRates]);
+
     if (!currentProject || !summary) return null;
 
     const items = currentProject.items || [];
-    const compCurr = currentProject.comparisonCurrency || "PHP";
+    const compCurr = (currentProject.comparisonCurrency || "PHP").toUpperCase();
+    const compSymbol = CURRENCY_MAP.get(compCurr)?.symbol || `${compCurr} `;
+
+    const formatCompCurr = (val: number) =>
+        `${compSymbol}${val.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`;
 
     return (
         <Card className="shadow-xs border-border/80">
             <CardHeader className="py-3 px-4 border-b bg-muted/20">
                 <CardTitle className="text-sm font-semibold">
-                    3.1 Landed Cost Per Unit by Item ({compCurr})
+                    3.2 Landed Cost Per Unit by Item ({compCurr})
                 </CardTitle>
                 <CardDescription className="text-xs">
-                    Compares unit landed cost across all bidders. Lowest valid cost per item highlighted in green.
+                    Compares unit landed cost across all bidders normalized in {compCurr}. Lowest valid cost per item highlighted in green.
                 </CardDescription>
             </CardHeader>
             <CardContent className="p-0 overflow-x-auto">
@@ -80,15 +94,24 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                             <th className="py-2.5 px-3 w-28 text-right">Target Unit ({compCurr})</th>
                             {bids.map((bid) => {
                                 const res = summary.results[bid.id];
+                                const quoteCurr = (bid.quoteCurrency || compCurr).toUpperCase();
+                                const isForeign = quoteCurr !== compCurr;
+                                const fxRate = exchangeRatesMap.get(quoteCurr);
                                 return (
-                                    <th key={bid.id} className="py-2.5 px-3 min-w-[150px] text-right font-semibold">
+                                    <th key={bid.id} className="py-2.5 px-3 min-w-[175px] text-right font-semibold">
                                         <div className="flex flex-col items-end">
-                                            <span className="truncate max-w-[140px] font-bold text-foreground">
+                                            <span className="truncate max-w-[160px] font-bold text-foreground">
                                                 {bid.supplierName}
                                             </span>
-                                            <div className="flex items-center gap-1 mt-0.5">
+                                            <div className="flex items-center gap-1 mt-0.5 flex-wrap justify-end">
                                                 <span className="text-[10px] text-muted-foreground font-mono">
-                                                    {bid.incoterm} · {bid.quoteCurrency}
+                                                    {bid.incoterm} · {quoteCurr}
+                                                    {isForeign && (
+                                                        <span>
+                                                            {" "}
+                                                            (@ {typeof fxRate === "number" && fxRate > 0 ? `${compSymbol}${fxRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : "-"})
+                                                        </span>
+                                                    )}
                                                 </span>
                                                 {res?.isDisqualified ? (
                                                     <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4">
@@ -131,7 +154,7 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                         {item.quantity.toLocaleString()} {item.uom}
                                     </td>
                                     <td className="py-2.5 px-3 font-mono text-right font-medium text-foreground">
-                                        ₱{item.targetUnitPrice.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                                        {formatCompCurr(item.targetUnitPrice)}
                                     </td>
 
                                     {bids.map((bid) => {
@@ -149,6 +172,17 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                             item.targetUnitPrice > 0 &&
                                             breakdown.landedUnitCostCompCurr > item.targetUnitPrice;
 
+                                        const quoteCurr = (bid.quoteCurrency || compCurr).toUpperCase();
+                                        const isForeign = quoteCurr !== compCurr;
+                                        const fxRate = exchangeRatesMap.get(quoteCurr);
+                                        const formattedQuote = breakdown
+                                            ? breakdown.appliedUnitPriceForeign.toLocaleString(undefined, {
+                                                  minimumFractionDigits: 4,
+                                                  maximumFractionDigits: 4,
+                                              })
+                                            : "";
+                                        const discountLabel = breakdown && breakdown.discountPct > 0 ? ` (-${breakdown.discountPct}%)` : "";
+
                                         return (
                                             <td
                                                 key={bid.id}
@@ -162,16 +196,35 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                                         <div className="flex items-center justify-end gap-1">
                                                             {isCheapest && <Check className="h-3.5 w-3.5 text-emerald-600 inline" />}
                                                             <span className={cn("text-xs font-semibold", isOverTarget ? "text-rose-600" : "text-foreground")}>
-                                                                ₱{breakdown.landedUnitCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                                                                {formatCompCurr(breakdown.landedUnitCostCompCurr)}
                                                             </span>
                                                         </div>
                                                         <span className="text-[10px] text-muted-foreground block">
-                                                            {bid.quoteCurrency} {breakdown.appliedUnitPriceForeign.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}{" "}
-                                                            {breakdown.discountPct > 0 ? `(-${breakdown.discountPct}%)` : ""}
+                                                            {isForeign ? (
+                                                                <>
+                                                                    Base Quote: {quoteCurr} {formattedQuote}
+                                                                    {discountLabel} @{" "}
+                                                                    {typeof fxRate === "number" && fxRate > 0
+                                                                        ? `${compSymbol}${fxRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+                                                                        : "-"}
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    Base Quote: {compSymbol}
+                                                                    {formattedQuote}
+                                                                    {discountLabel}
+                                                                </>
+                                                            )}
                                                         </span>
-                                                        {isOverTarget && (
-                                                            <span className="text-[9px] text-rose-500 block">
-                                                                +{breakdown.varianceVsTargetPct}% vs target
+                                                        {item.targetUnitPrice > 0 && (
+                                                            <span
+                                                                className={cn(
+                                                                    "text-[9px] block",
+                                                                    isOverTarget ? "text-rose-500" : "text-emerald-600"
+                                                                )}
+                                                            >
+                                                                {breakdown.varianceVsTargetPct > 0 ? "+" : ""}
+                                                                {breakdown.varianceVsTargetPct}% vs target
                                                             </span>
                                                         )}
                                                     </div>
@@ -188,10 +241,10 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                         {/* Total Landed Cost Row */}
                         <tr className="bg-muted/30 font-bold border-t-2 border-border text-xs">
                             <td colSpan={3} className="py-3 px-3 uppercase tracking-wider text-foreground">
-                                Total Landed Cost
+                                Total Landed Cost ({compCurr})
                             </td>
                             <td className="py-3 px-3 text-right font-mono text-muted-foreground">
-                                ₱{items.reduce((s, it) => s + (it.quantity * it.targetUnitPrice), 0).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                                {formatCompCurr(items.reduce((s, it) => s + (it.quantity * it.targetUnitPrice), 0))}
                             </td>
                             {bids.map((bid) => {
                                 const res = summary.results[bid.id];
@@ -200,7 +253,7 @@ export const LandedCostMatrixTable: React.FC<LandedCostMatrixTableProps> = ({ su
                                         {res && res.totalLandedCostCompCurr > 0 ? (
                                             <div>
                                                 <span className="text-xs font-bold block text-foreground">
-                                                    ₱{res.totalLandedCostCompCurr.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                                                    {formatCompCurr(res.totalLandedCostCompCurr)}
                                                 </span>
                                                 {!res.isFullBid && (
                                                     <span className="text-[10px] text-amber-600 block font-normal">

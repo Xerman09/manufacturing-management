@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { DispatchPlan, DispatchInvoice, DispatchPlanStaff } from "../types";
 import { X, Truck, User as UserIcon, CheckCircle2, ChevronRight, MapPin, Signature, Camera } from "lucide-react";
 import { toast } from "sonner";
+import { nowUtcSql } from "@/lib/datetime";
 
 interface DispatchDetailModalProps {
     plan: DispatchPlan;
@@ -487,7 +488,7 @@ export default function DispatchDetailModal({
 
                                             {plan.status === "For Dispatch" && (
                                                 <button
-                                                    onClick={() => onUpdateStatus(plan.id, "For Inbound", statusRemarks || "Truck departed origin depot.", new Date().toISOString())}
+                                                    onClick={() => onUpdateStatus(plan.id, "For Inbound", statusRemarks || "Truck departed origin depot.", nowUtcSql())}
                                                     className="bg-emerald-600 hover:bg-emerald-700 text-white border-none px-4 py-2 rounded-xl text-xs font-black cursor-pointer shadow-md hover:shadow-lg transition-all"
                                                 >
                                                     Dispatch Cargo / Truck Departed
@@ -496,7 +497,7 @@ export default function DispatchDetailModal({
 
                                             {plan.status === "For Inbound" && (
                                                 <button
-                                                    onClick={() => onUpdateStatus(plan.id, "For Clearance", statusRemarks || "Truck returned to depot.", undefined, new Date().toISOString())}
+                                                    onClick={() => onUpdateStatus(plan.id, "For Clearance", statusRemarks || "Truck returned to depot.", undefined, nowUtcSql())}
                                                     className="bg-amber-600 hover:bg-amber-700 text-white border-none px-4 py-2 rounded-xl text-xs font-black cursor-pointer shadow-md hover:shadow-lg transition-all"
                                                 >
                                                     Truck Returned / Inbound Complete

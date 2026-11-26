@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { procurementDirectusFetch } from "../procurement/_directus";
 import type { ApprovalStage } from "./_domain";
 
-const ACCESS_TOKEN_COOKIE = "vos_access_token";
+const ACCESS_TOKEN_COOKIE = "vos_mm_access_token";
 
 export const PURCHASE_ORDER_MODULE_PATHS = {
     procurement: "/mm/incoming-purchase-shipments",

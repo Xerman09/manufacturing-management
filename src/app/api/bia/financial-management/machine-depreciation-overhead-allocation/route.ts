@@ -33,7 +33,7 @@ async function fetchSpringBootDepreciation(): Promise<Map<number, Record<string,
     try {
         const cookieStore = await cookies();
         const springToken =
-            cookieStore.get("springboot_token")?.value || cookieStore.get("vos_access_token")?.value;
+            cookieStore.get("vos_mm_springboot_token")?.value || cookieStore.get("vos_mm_access_token")?.value;
 
         const res = await fetch(`${SPRING_API_BASE_URL}/api/asset-depreciation`, {
             headers: {

@@ -8,7 +8,7 @@ export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
   try {
-    const springToken = req.cookies.get('springboot_token')?.value || req.cookies.get('vos_access_token')?.value;
+    const springToken = req.cookies.get('vos_mm_springboot_token')?.value || req.cookies.get('vos_mm_access_token')?.value;
     const { searchParams } = new URL(req.url);
     const type = searchParams.get("type");
     const branchId = searchParams.get("branchId") ? Number(searchParams.get("branchId")) : undefined;

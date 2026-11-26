@@ -11,6 +11,7 @@ interface UseNumericInputOptions {
     allowDecimals?: boolean;
     precision?: number;
     formatFixed?: boolean;
+    useGrouping?: boolean;
 }
 
 export function useNumericInput({
@@ -22,11 +23,21 @@ export function useNumericInput({
     allowDecimals = true,
     precision = 4,
     formatFixed = false,
+    useGrouping = true,
 }: UseNumericInputOptions) {
     const formatValue = useCallback(
         (v: number | null | undefined): string => {
             if (v === null || v === undefined) return "";
             if (typeof v === "number" && !isNaN(v)) {
+                if (useGrouping) {
+                    const maxFrac = allowDecimals ? (precision ?? 4) : 0;
+                    const minFrac = formatFixed && allowDecimals && precision !== undefined ? precision : 0;
+                    return v.toLocaleString("en-US", {
+                        useGrouping: true,
+                        minimumFractionDigits: minFrac,
+                        maximumFractionDigits: Math.max(minFrac, maxFrac),
+                    });
+                }
                 if (formatFixed && allowDecimals && precision !== undefined) {
                     return v.toFixed(precision);
                 }
@@ -34,7 +45,7 @@ export function useNumericInput({
             }
             return String(v);
         },
-        [allowDecimals, precision, formatFixed]
+        [allowDecimals, precision, formatFixed, useGrouping]
     );
 
     const [isFocused, setIsFocused] = useState(false);
@@ -49,7 +60,14 @@ export function useNumericInput({
 
     const handleFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
         setIsFocused(true);
-        e.target.select();
+        const raw = e.target.value.replace(/,/g, "");
+        if (raw !== e.target.value) {
+            setTextValue(raw);
+        }
+        const target = e.currentTarget;
+        requestAnimationFrame(() => {
+            target.select();
+        });
     }, []);
 
     const handleClick = useCallback((e: React.MouseEvent<HTMLInputElement>) => {
@@ -58,7 +76,7 @@ export function useNumericInput({
 
     const handleChange = useCallback(
         (e: React.ChangeEvent<HTMLInputElement>) => {
-            const val = e.target.value;
+            const val = e.target.value.replace(/,/g, "");
             // Allow empty string while typing
             if (val === "") {
                 setTextValue("");
@@ -95,20 +113,17 @@ export function useNumericInput({
 
     const handleBlur = useCallback(() => {
         setIsFocused(false);
-        if (textValue.trim() === "" || isNaN(parseFloat(textValue))) {
+        const cleanText = textValue.replace(/,/g, "").trim();
+        if (cleanText === "" || isNaN(parseFloat(cleanText))) {
             const fallback = fallbackMin;
-            setTextValue(
-                formatFixed && allowDecimals && precision !== undefined
-                    ? fallback.toFixed(precision)
-                    : String(fallback)
-            );
+            setTextValue(formatValue(fallback));
             if (value !== fallback) {
                 onChange(fallback);
             }
             return;
         }
 
-        let num = parseFloat(textValue);
+        let num = parseFloat(cleanText);
         if (min !== undefined && num < min) num = min;
         if (max !== undefined && num > max) num = max;
 
@@ -116,16 +131,12 @@ export function useNumericInput({
             num = parseFloat(num.toFixed(precision));
         }
 
-        setTextValue(
-            formatFixed && allowDecimals && precision !== undefined
-                ? num.toFixed(precision)
-                : String(num)
-        );
+        setTextValue(formatValue(num));
         // Only trigger onChange if the value actually changed to prevent false re-renders
         if (value !== num) {
             onChange(num);
         }
-    }, [textValue, fallbackMin, min, max, allowDecimals, precision, formatFixed, value, onChange]);
+    }, [textValue, fallbackMin, min, max, allowDecimals, precision, formatValue, value, onChange]);
 
     return {
         textValue,

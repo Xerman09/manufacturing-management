@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const productId = searchParams.get("productId");
 
     const springApiUrl = process.env.SPRING_API_BASE_URL?.replace(/\/$/, "");
-    const token = req.cookies.get("springboot_token")?.value || req.cookies.get("vos_access_token")?.value;
+    const token = req.cookies.get("vos_mm_springboot_token")?.value || req.cookies.get("vos_mm_access_token")?.value;
 
     if (!springApiUrl) {
       return NextResponse.json({ error: "Spring API URL not configured" }, { status: 500 });

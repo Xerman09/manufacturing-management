@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatInZone } from "@/lib/datetime";
 import type { ConsolidationStatus } from "./consolidation-types";
 import { CONSOLIDATION_STATUS_LABEL } from "./consolidation-types";
 
@@ -119,9 +120,6 @@ export function formatConsolidationNumber(value: number): string {
     return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
 }
 
-export function formatConsolidationDate(value: string): string {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime())
-        ? value
-        : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+export function formatConsolidationDate(value: string | null | undefined, timeZone?: string | null): string {
+    return formatInZone(value, timeZone);
 }

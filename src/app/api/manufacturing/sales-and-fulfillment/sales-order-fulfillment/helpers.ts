@@ -11,8 +11,8 @@ export async function getAuthToken(req?: Request | { headers: Headers; cookies?:
             }
             if ("cookies" in req && req.cookies && typeof req.cookies.get === "function") {
                 const cVal =
-                    req.cookies.get("vos_access_token")?.value ||
-                    req.cookies.get("springboot_token")?.value ||
+                    req.cookies.get("vos_mm_access_token")?.value ||
+                    req.cookies.get("vos_mm_springboot_token")?.value ||
                     req.cookies.get("access_token")?.value ||
                     req.cookies.get("token")?.value;
                 if (cVal) return cVal;
@@ -20,8 +20,8 @@ export async function getAuthToken(req?: Request | { headers: Headers; cookies?:
         }
         const cookieStore = await cookies();
         return (
-            cookieStore.get("vos_access_token")?.value ||
-            cookieStore.get("springboot_token")?.value ||
+            cookieStore.get("vos_mm_access_token")?.value ||
+            cookieStore.get("vos_mm_springboot_token")?.value ||
             cookieStore.get("access_token")?.value ||
             cookieStore.get("token")?.value ||
             null
@@ -34,7 +34,7 @@ export async function getAuthToken(req?: Request | { headers: Headers; cookies?:
 export async function getUserIdFromToken(): Promise<number | null> {
     try {
         const cookieStore = await cookies();
-        const token = cookieStore.get("vos_access_token")?.value;
+        const token = cookieStore.get("vos_mm_access_token")?.value;
         if (!token) return null;
         const parts = token.split(".");
         if (parts.length < 2) return null;
@@ -80,7 +80,7 @@ export async function fetchLiveProductOnhand(
     };
     if (bearerToken) {
         reqHeaders["Authorization"] = `Bearer ${bearerToken}`;
-        reqHeaders["Cookie"] = `vos_access_token=${bearerToken}`;
+        reqHeaders["Cookie"] = `vos_mm_access_token=${bearerToken}`;
     }
 
     try {

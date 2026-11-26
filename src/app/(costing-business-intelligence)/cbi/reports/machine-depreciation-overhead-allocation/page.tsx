@@ -20,7 +20,7 @@ export const metadata = {
     description: "Converts equipment depreciation into hourly overhead burden rates to absorb machine costs directly into Cost of Goods Manufactured (COGM)."
 };
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

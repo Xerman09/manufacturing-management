@@ -61,7 +61,7 @@ export const LandedCostBreakdownCard: React.FC<LandedCostBreakdownCardProps> = (
             <CardHeader className="py-3 px-4 border-b bg-muted/20">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                     <Receipt className="h-4 w-4 text-primary" />
-                    2.6 Complete Landed Cost Breakdown ({compCurr})
+                    2.8 Complete Landed Cost Breakdown ({compCurr})
                 </CardTitle>
                 <CardDescription className="text-xs">
                     Transparent audit trail from quoted price to site delivery.

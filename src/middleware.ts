@@ -1,6 +1,6 @@
 // src/middleware.ts
 import { NextRequest, NextResponse } from "next/server"
-import { decodeJwtPayload, COOKIE_NAME, REFRESH_COOKIE_NAME, LAST_VISITED_PATH_COOKIE, pickTokenFromPayload, IS_SECURE_COOKIE } from "@/lib/auth-utils"
+import { decodeJwtPayload, COOKIE_NAME, REFRESH_COOKIE_NAME, BACKEND_REFRESH_COOKIE_NAME, LAST_VISITED_PATH_COOKIE, pickTokenFromPayload, IS_SECURE_COOKIE } from "@/lib/auth-utils"
 
 const PUBLIC_FILE = /\.(.*)$/
 const BASELINE_PREFIXES = ["/main-dashboard"]
@@ -408,7 +408,7 @@ export async function middleware(req: NextRequest) {
                 const refreshRes = await fetch(refreshUrl, {
                     method: "POST",
                     headers: {
-                        "Cookie": `${REFRESH_COOKIE_NAME}=${refreshToken}`,
+                        "Cookie": `${BACKEND_REFRESH_COOKIE_NAME}=${refreshToken}`,
                         "Accept": "application/json",
                     },
                     cache: "no-store",
@@ -506,7 +506,7 @@ export async function middleware(req: NextRequest) {
                     headers: requestHeaders,
                 }
             });
-            response.cookies.delete("x-locked-module");
+            response.cookies.delete("vos_mm_x_locked_module");
             applyCommonCookies(response, req, token, pathname);
             return response;
         }
@@ -664,7 +664,7 @@ export async function middleware(req: NextRequest) {
                 headers: requestHeaders,
             }
         });
-        response.cookies.set("x-locked-module", "true", { path: "/" });
+        response.cookies.set("vos_mm_x_locked_module", "true", { path: "/" });
         applyCommonCookies(response, req, token, pathname);
         return response;
     }
@@ -675,7 +675,7 @@ export async function middleware(req: NextRequest) {
             headers: requestHeaders,
         }
     });
-    response.cookies.delete("x-locked-module");
+    response.cookies.delete("vos_mm_x_locked_module");
 
     applyCommonCookies(response, req, token, pathname);
     return response;

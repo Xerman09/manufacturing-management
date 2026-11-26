@@ -8,11 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { ComboboxSelect, ComboboxOption } from "../shared/ComboboxSelect";
 import { NumericInputField } from "../shared/NumericInputField";
-import { useBidComparisonStore } from "../../hooks/useBidComparisonState";
+import { useBidComparisonStore, isRfqProjectLocked } from "../../hooks/useBidComparisonState";
 import { RequestedItem } from "../../types";
+import { cn } from "@/lib/utils";
 
 export const RequestedItemsTable: React.FC = () => {
-    const { currentProject, updateProject, lookups } = useBidComparisonStore();
+    const { currentProject, updateProject, lookups, validationErrors, clearValidationError } = useBidComparisonStore();
 
     const unitOptions: ComboboxOption[] = React.useMemo(() => {
         const fallback = [
@@ -39,8 +40,11 @@ export const RequestedItemsTable: React.FC = () => {
     const items = currentProject.items || [];
     const compCurr = currentProject.comparisonCurrency || "PHP";
     const budget = currentProject.budget || 0;
+    const isLocked = isRfqProjectLocked(currentProject);
 
     const handleAddItem = () => {
+        if (isLocked) return;
+        clearValidationError("setup.items");
         const newItem: RequestedItem = {
             id: "item-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
             itemName: "",
@@ -95,7 +99,7 @@ export const RequestedItemsTable: React.FC = () => {
     const isWithinBudget = budgetVariance >= 0;
 
     return (
-        <Card className="shadow-xs border-border/80 w-full bg-card">
+        <Card className={cn("shadow-xs border-border/80 w-full bg-card", validationErrors["setup.items"] && "border-destructive ring-1 ring-destructive/40")}>
             <CardHeader className="py-3 px-4 border-b bg-muted/10 flex flex-row items-center justify-between">
                 <div>
                     <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
@@ -106,7 +110,7 @@ export const RequestedItemsTable: React.FC = () => {
                         Specify all items for suppliers to quote. Weights and volumes feed into freight &amp; container sizing.
                     </CardDescription>
                 </div>
-                <Button size="sm" onClick={handleAddItem} className="h-7 text-xs gap-1.5 bg-primary text-primary-foreground">
+                <Button size="sm" onClick={handleAddItem} disabled={isLocked} className="h-7 text-xs gap-1.5 bg-primary text-primary-foreground">
                     <Plus className="h-3.5 w-3.5" />
                     Add Item
                 </Button>
@@ -116,11 +120,19 @@ export const RequestedItemsTable: React.FC = () => {
                     <thead className="bg-muted/40 border-b text-muted-foreground font-semibold">
                         <tr>
                             <th className="py-2 px-2.5 w-8 text-center">#</th>
-                            <th className="py-2 px-2.5 min-w-[200px]">Item Name</th>
+                            <th className="py-2 px-2.5 min-w-[200px]">
+                                Item Name <span className="text-destructive">*</span>
+                            </th>
                             <th className="py-2 px-2.5 min-w-[160px]">Specifications</th>
-                            <th className="py-2 px-2.5 w-24">Qty</th>
-                            <th className="py-2 px-2.5 w-22">UOM</th>
-                            <th className="py-2 px-2.5 w-28">Target Unit Price ({compCurr})</th>
+                            <th className="py-2 px-2.5 w-24">
+                                Qty <span className="text-destructive">*</span>
+                            </th>
+                            <th className="py-2 px-2.5 w-22">
+                                UOM <span className="text-destructive">*</span>
+                            </th>
+                            <th className="py-2 px-2.5 w-28">
+                                Target Unit Price ({compCurr}) <span className="text-destructive">*</span>
+                            </th>
                             <th className="py-2 px-2.5 w-32 text-right">Total Target ({compCurr})</th>
                             <th className="py-2 px-2.5 w-26">HS Code</th>
                             <th className="py-2 px-2.5 w-18">Duty %</th>
@@ -148,44 +160,73 @@ export const RequestedItemsTable: React.FC = () => {
                                         <td className="py-2 px-2.5">
                                             <Input
                                                 value={item.itemName}
-                                                onChange={(e) => handleUpdateItem(item.id, { itemName: e.target.value })}
+                                                disabled={isLocked}
+                                                onChange={(e) => {
+                                                    clearValidationError(`item.${item.id}.itemName`);
+                                                    handleUpdateItem(item.id, { itemName: e.target.value });
+                                                }}
                                                 placeholder="Enter item name..."
-                                                className="h-7 text-xs bg-background"
+                                                className={cn(
+                                                    "h-7 text-xs bg-background disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed",
+                                                    validationErrors[`item.${item.id}.itemName`] && "border-destructive ring-1 ring-destructive/40"
+                                                )}
                                             />
                                         </td>
                                         <td className="py-2 px-2.5">
                                             <Input
                                                 value={item.specifications}
+                                                disabled={isLocked}
                                                 onChange={(e) => handleUpdateItem(item.id, { specifications: e.target.value })}
                                                 placeholder="Specs / model / dimensions"
-                                                className="h-7 text-xs bg-background"
+                                                className="h-7 text-xs bg-background disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed"
                                             />
                                         </td>
                                         <td className="py-2 px-2.5">
                                             <NumericInputField
                                                 value={item.quantity}
-                                                onChange={(val) => handleUpdateItem(item.id, { quantity: val })}
+                                                disabled={isLocked}
+                                                onChange={(val) => {
+                                                    clearValidationError(`item.${item.id}.quantity`);
+                                                    handleUpdateItem(item.id, { quantity: val });
+                                                }}
                                                 min={1}
                                                 fallbackMin={1}
-                                                className="h-7 text-xs font-mono bg-background"
+                                                className={cn(
+                                                    "h-7 text-xs font-mono bg-background",
+                                                    validationErrors[`item.${item.id}.quantity`] && "border-destructive ring-1 ring-destructive/40"
+                                                )}
                                             />
                                         </td>
                                         <td className="py-2 px-2.5 w-24">
                                             <ComboboxSelect
                                                 options={unitOptions}
                                                 value={item.uom}
-                                                onChange={(val) => handleUpdateItem(item.id, { uom: val })}
+                                                disabled={isLocked}
+                                                onChange={(val) => {
+                                                    clearValidationError(`item.${item.id}.uom`);
+                                                    handleUpdateItem(item.id, { uom: val });
+                                                }}
                                                 placeholder="UOM"
-                                                className="h-7 text-xs font-mono bg-background"
+                                                className={cn(
+                                                    "h-7 text-xs font-mono bg-background",
+                                                    validationErrors[`item.${item.id}.uom`] && "border-destructive ring-1 ring-destructive/40"
+                                                )}
                                             />
                                         </td>
                                         <td className="py-2 px-2.5">
                                             <NumericInputField
                                                 value={item.targetUnitPrice}
-                                                onChange={(val) => handleUpdateItem(item.id, { targetUnitPrice: val })}
+                                                disabled={isLocked}
+                                                onChange={(val) => {
+                                                    clearValidationError(`item.${item.id}.targetUnitPrice`);
+                                                    handleUpdateItem(item.id, { targetUnitPrice: val });
+                                                }}
                                                 min={0}
                                                 precision={4}
-                                                className="h-7 text-xs font-mono font-medium bg-background"
+                                                className={cn(
+                                                    "h-7 text-xs font-mono font-medium bg-background",
+                                                    validationErrors[`item.${item.id}.targetUnitPrice`] && "border-destructive ring-1 ring-destructive/40"
+                                                )}
                                             />
                                         </td>
                                         <td className="py-2 px-2.5 text-right font-mono font-semibold text-xs text-foreground whitespace-nowrap">
@@ -197,14 +238,16 @@ export const RequestedItemsTable: React.FC = () => {
                                         <td className="py-2 px-2.5">
                                             <Input
                                                 value={item.hsCode}
+                                                disabled={isLocked}
                                                 onChange={(e) => handleUpdateItem(item.id, { hsCode: e.target.value })}
                                                 placeholder="e.g. 9405.11"
-                                                className="h-7 text-xs font-mono bg-background"
+                                                className="h-7 text-xs font-mono bg-background disabled:opacity-75 disabled:bg-muted/40 disabled:cursor-not-allowed"
                                             />
                                         </td>
                                         <td className="py-2 px-2.5">
                                             <NumericInputField
                                                 value={item.dutyPct}
+                                                disabled={isLocked}
                                                 onChange={(val) => handleUpdateItem(item.id, { dutyPct: val })}
                                                 min={0}
                                                 max={100}
@@ -215,6 +258,7 @@ export const RequestedItemsTable: React.FC = () => {
                                         <td className="py-2 px-2.5">
                                             <NumericInputField
                                                 value={item.weightPerUnitKg}
+                                                disabled={isLocked}
                                                 onChange={(val) => handleUpdateItem(item.id, { weightPerUnitKg: val })}
                                                 min={0}
                                                 precision={4}
@@ -224,6 +268,7 @@ export const RequestedItemsTable: React.FC = () => {
                                         <td className="py-2 px-2.5">
                                             <NumericInputField
                                                 value={item.cbmPerUnit}
+                                                disabled={isLocked}
                                                 onChange={(val) => handleUpdateItem(item.id, { cbmPerUnit: val })}
                                                 min={0}
                                                 precision={6}
@@ -234,8 +279,9 @@ export const RequestedItemsTable: React.FC = () => {
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
+                                                disabled={isLocked}
                                                 onClick={() => handleRemoveItem(item.id)}
-                                                className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                                className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive disabled:opacity-40"
                                             >
                                                 <Trash2 className="h-3.5 w-3.5" />
                                             </Button>

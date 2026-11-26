@@ -5,6 +5,7 @@
 import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
+import { nowUtcSql } from "@/lib/datetime";
 import {
     ConsolidatedDeliveryRecord,
     ConsolidatedSalesOrderRecord,
@@ -711,7 +712,7 @@ export default function DeliveryClearanceModal({
             const draftPayload: SavedDeliveryDraft = {
                 consolidator_id: record.consolidator_id,
                 clearanceRemarks,
-                timestamp: new Date().toISOString(),
+                timestamp: nowUtcSql(),
                 orders: orders.map((ord) => ({
                     order_id: ord.order_id,
                     invoice_id: ord.invoice_id,

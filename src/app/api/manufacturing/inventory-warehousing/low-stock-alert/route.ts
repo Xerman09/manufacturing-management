@@ -180,8 +180,8 @@ export async function GET() {
         try {
             const cookieStore = await cookies();
             token =
-                cookieStore.get("vos_access_token")?.value ||
-                cookieStore.get("springboot_token")?.value ||
+                cookieStore.get("vos_mm_access_token")?.value ||
+                cookieStore.get("vos_mm_springboot_token")?.value ||
                 cookieStore.get("token")?.value;
         } catch {
             // ignore
@@ -207,7 +207,7 @@ export async function GET() {
         };
         if (token) {
             springHeaders["Authorization"] = `Bearer ${token}`;
-            springHeaders["Cookie"] = `vos_access_token=${token}`;
+            springHeaders["Cookie"] = `vos_mm_access_token=${token}`;
         }
 
         // 2. Fetch Directus metadata & Spring Boot live on-hand in parallel

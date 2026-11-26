@@ -58,7 +58,7 @@ export async function fetchWipInventoryMovements(
     const cookiePairs: string[] = [];
     try {
         const cookieStore = await cookies();
-        for (const cookieName of ["springboot_token", "vos_access_token", "token"]) {
+        for (const cookieName of ["vos_mm_springboot_token", "vos_mm_access_token", "token"]) {
             const value = cookieStore.get(cookieName)?.value?.trim();
             if (value) {
                 cookiePairs.push(`${cookieName}=${value}`);

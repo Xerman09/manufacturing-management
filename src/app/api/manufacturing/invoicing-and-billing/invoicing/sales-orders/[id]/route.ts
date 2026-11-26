@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { nowUtcSql } from "@/lib/datetime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,13 +23,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
 
         const body = await req.json();
+        const utcNow = nowUtcSql();
+        if (!utcNow) {
+            return NextResponse.json({ error: "Failed to generate UTC timestamp" }, { status: 500 });
+        }
+
+        const patchPayload: Record<string, unknown> = {
+            ...body,
+            modified_date: utcNow,
+        };
+        if ("on_hold_at" in patchPayload && patchPayload.on_hold_at) {
+            patchPayload.on_hold_at = utcNow;
+        }
 
         const url = `${DIRECTUS_BASE}/items/sales_order/${orderId}`;
         
         const response = await fetch(url, {
             method: "PATCH",
             headers: directusHeaders(),
-            body: JSON.stringify(body)
+            body: JSON.stringify(patchPayload)
         });
 
         if (!response.ok) {

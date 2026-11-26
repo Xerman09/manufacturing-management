@@ -5,13 +5,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const SPRING_API_BASE_URL = process.env.SPRING_API_BASE_URL;
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
     const token = req.cookies.get(COOKIE_NAME)?.value;
 
     if (!token) {
-        console.error("[Product Tracing Proxy] No vos_access_token cookie found!");
+        console.error("[Product Tracing Proxy] No vos_mm_access_token cookie found!");
         return NextResponse.json(
             { ok: false, message: "Unauthorized: Missing access token" },
             { status: 401 },

@@ -21,7 +21,7 @@ function directusHeaders(): HeadersInit {
 
 function decodeUserIdFromJwtCookie(
     req: NextRequest,
-    cookieName = "vos_access_token",
+    cookieName = "vos_mm_access_token",
 ): number | null {
     const token = req.cookies.get(cookieName)?.value;
     if (!token) return null;

@@ -45,7 +45,7 @@ export const SupplierSummaryTable: React.FC<SupplierSummaryTableProps> = ({ supp
         <Card className="shadow-xs border-border/80">
             <CardHeader className="py-3 px-4 border-b bg-muted/20">
                 <CardTitle className="text-sm font-semibold">
-                    3.3 Comprehensive Supplier Summary &amp; Rankings
+                    3.5 Comprehensive Supplier Summary &amp; Rankings
                 </CardTitle>
                 <CardDescription className="text-xs">
                     Ranked by weighted overall score. Cost components broken down in {compCurr}.
