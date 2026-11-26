@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import {
     Breadcrumb,
     BreadcrumbItem,
@@ -74,6 +75,21 @@ function buildHeaderUserFromToken(token: string | null | undefined) {
     };
 }
 
+function formatBreadcrumbSegment(segment: string): string {
+    let decoded = segment;
+    try {
+        decoded = decodeURIComponent(segment);
+    } catch {
+        // Keep raw segment if percent-encoding is malformed
+    }
+
+    return decoded
+        .split(/[-_]+/)
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+}
+
 export default async function CatchAllHRMPage(props: { params: Promise<{ slug: string[] }> }) {
     const { slug } = await props.params;
     const pathString = slug.join("/");
@@ -92,11 +108,8 @@ export default async function CatchAllHRMPage(props: { params: Promise<{ slug: s
 
     const headerUser = buildHeaderUserFromToken(token);
 
-    // Format breadcrumb text
-    const breadcrumbText = pathString
-        .split("-")
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" ");
+    // Format each URL segment into a title-cased breadcrumb label
+    const breadcrumbSegments = slug.map(formatBreadcrumbSegment).filter(Boolean);
 
     return (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -116,12 +129,25 @@ export default async function CatchAllHRMPage(props: { params: Promise<{ slug: s
                                 <BreadcrumbItem className="hidden md:block shrink-0">
                                     <BreadcrumbLink href="#">Manufacturing</BreadcrumbLink>
                                 </BreadcrumbItem>
-                                <BreadcrumbSeparator className="hidden md:block shrink-0" />
-                                <BreadcrumbItem className="min-w-0 overflow-hidden">
-                                    <BreadcrumbPage className="truncate max-w-[56vw] sm:max-w-[60vw] md:max-w-none">
-                                        {breadcrumbText}
-                                    </BreadcrumbPage>
-                                </BreadcrumbItem>
+                                {breadcrumbSegments.map((label, index) => {
+                                    const isLast = index === breadcrumbSegments.length - 1;
+                                    return (
+                                        <Fragment key={`${index}-${label}`}>
+                                            <BreadcrumbSeparator className="hidden md:block shrink-0" />
+                                            {isLast ? (
+                                                <BreadcrumbItem className="min-w-0 overflow-hidden">
+                                                    <BreadcrumbPage className="truncate max-w-[56vw] sm:max-w-[60vw] md:max-w-none">
+                                                        {label}
+                                                    </BreadcrumbPage>
+                                                </BreadcrumbItem>
+                                            ) : (
+                                                <BreadcrumbItem className="hidden md:block shrink-0">
+                                                    <BreadcrumbLink href="#">{label}</BreadcrumbLink>
+                                                </BreadcrumbItem>
+                                            )}
+                                        </Fragment>
+                                    );
+                                })}
                             </BreadcrumbList>
                         </Breadcrumb>
                     </div>
