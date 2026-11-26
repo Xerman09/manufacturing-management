@@ -75,7 +75,7 @@ export async function POST(_request: Request, context: RouteParams) {
             body: JSON.stringify({
                 isCancelled: 1,
                 is_cancelled: 1,
-                cancelled_at: new Date().toISOString(),
+                cancelled_at: new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).replace(" ", "T"),
             }),
         });
 

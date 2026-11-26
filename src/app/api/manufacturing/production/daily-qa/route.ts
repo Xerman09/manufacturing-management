@@ -1400,7 +1400,7 @@ export async function GET(request: Request) {
         if (searchParams.get("view") === "queue") {
             return NextResponse.json(paginate(await fetchDailyQAQueue(searchParams), searchParams));
         }
-        
+
         let url = `${DIRECTUS_URL}/items/manufacturing_daily_qa_inspections?limit=-1&sort=-inspected_at`;
         if (joId) {
             url += `&filter[job_order_id][_eq]=${joId}`;
@@ -1756,16 +1756,16 @@ export async function POST(request: Request) {
 
         operationForLog = "save QA parameters and route inspections";
         for (const entry of inspectionsList) {
-            const { 
-                joRouteId, 
-                moisturePercentage, 
-                acidityPh, 
-                sensoryStatus, 
-                weightCheckPassed, 
-                labStatus, 
-                actionTaken, 
-                remarks, 
-                qaParameters 
+            const {
+                joRouteId,
+                moisturePercentage,
+                acidityPh,
+                sensoryStatus,
+                weightCheckPassed,
+                labStatus,
+                actionTaken,
+                remarks,
+                qaParameters
             } = entry;
 
             const payload = {
@@ -2055,7 +2055,7 @@ export async function POST(request: Request) {
                         disposition_status: "Resolved",
                         decision: "Passed Reinspection",
                         supervisor_comments: [pending.supervisor_comments, `Yield ledger ${ledgerId} passed reinspection; Job Order hold retained for supervisor review.`].filter(Boolean).join("\n"),
-                        resolved_at: new Date().toISOString(),
+                        resolved_at: formatPhtDateTime(),
                         resolved_by: authenticatedInspectorId
                     }, saveSignal);
                 }

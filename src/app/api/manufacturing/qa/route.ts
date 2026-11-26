@@ -744,7 +744,7 @@ export async function POST(request: Request) {
                 }
 
                 // 4. Insert Inspection Record into qa_jo_inspection_logs.
-                const inspectionTimestamp = new Date().toISOString();
+                const inspectionTimestamp = formatPhtDateTime();
                 const inspectionLogPayload = {
                     job_order_id: parentJoIdInt,
                     inspected_quantity: inspQty,
@@ -833,7 +833,7 @@ export async function POST(request: Request) {
                 const newRejectedQty = (Number(latestParentJO.rejected_quantity) || 0) + rejQty;
 
                 const qaCompletedAt = formatPhtDateTime();
-                const qaHistoryTimestamp = new Date().toISOString();
+                const qaHistoryTimestamp = qaCompletedAt;
                 await directusMutation(
                     `/items/manufacturing_job_orders/${parentJoIdInt}`,
                     {
@@ -1144,7 +1144,7 @@ export async function POST(request: Request) {
                         disposition_status: "Resolved",
                         decision,
                         supervisor_comments: supervisorComments || "",
-                        resolved_at: new Date().toISOString(),
+                        resolved_at: formatPhtDateTime(),
                         resolved_by: actorUserId
                     });
                 } catch (error) {
@@ -1214,7 +1214,7 @@ export async function POST(request: Request) {
                     disposition_status: "Resolved",
                     decision,
                     supervisor_comments: supervisorComments || "",
-                    resolved_at: new Date().toISOString(),
+                    resolved_at: formatPhtDateTime(),
                     resolved_by: actorUserId
                 });
             } catch (error) {

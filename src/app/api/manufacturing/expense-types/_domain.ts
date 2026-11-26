@@ -385,7 +385,7 @@ export async function createExpenseType(input: ExpenseTypeInput, actorId: number
         description: validateDescription(input.description),
         is_active: true,
         created_by: actorId,
-        created_at: new Date().toISOString(),
+        created_at: new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).replace(" ", "T"),
     });
     return { ...expenseTypeFromRecord(row, new Map([[account.coaId, account]])), chartOfAccount: account };
 }
@@ -418,7 +418,7 @@ export async function updateExpenseType(id: number, input: ExpenseTypeInput, act
             description: validateDescription(input.description),
             is_active: isActive,
             updated_by: actorId,
-            updated_at: new Date().toISOString(),
+            updated_at: new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).replace(" ", "T"),
         }),
     });
     const row = unwrapData<ExpenseTypeRecord>(body);

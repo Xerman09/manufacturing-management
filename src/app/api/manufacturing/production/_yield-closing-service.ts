@@ -1405,7 +1405,7 @@ async function completeYieldClosingInternal(
         }
         const completedAtInstant = new Date();
         const completedAt = formatPhtDateTime(completedAtInstant);
-        const completedHistoryAt = completedAtInstant.toISOString();
+        const completedHistoryAt = completedAt;
         await journal.patch(
             "manufacturing_job_orders",
             jobOrder.jobOrderId,
@@ -2100,7 +2100,7 @@ export async function finalizeHaltedJobOrder(input: FinalizeHaltedJobOrderInput)
         const previousCompleted = Number(jobOrder.completedQuantity || 0);
         const completedAtInstant = new Date();
         const completedAt = formatPhtDateTime(completedAtInstant);
-        const completedHistoryAt = completedAtInstant.toISOString();
+        const completedHistoryAt = completedAt;
         await journal.patch(
             "manufacturing_job_orders",
             jobOrder.jobOrderId,

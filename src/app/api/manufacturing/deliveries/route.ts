@@ -269,7 +269,7 @@ export async function POST(request: Request) {
             amount: amount ? Number(amount) : 0,
             estimated_time_of_dispatch: estimated_time_of_dispatch || null,
             estimated_time_of_arrival: estimated_time_of_arrival || null,
-            date_encoded: new Date().toISOString(),
+            date_encoded: new Date().toLocaleString("sv-SE", { timeZone: "Asia/Manila" }).replace(" ", "T"),
             remarks: remarks || ""
         };
 

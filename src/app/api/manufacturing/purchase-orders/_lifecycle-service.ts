@@ -575,7 +575,7 @@ async function reviseRejectedPurchaseOrderUnlocked(id: number, command: Revision
             revision,
             order,
             oldLines,
-            new Date().toISOString()
+            formatPhtDateTime()
         );
     } catch {
         throw new PurchaseOrderLifecycleError("The prior purchase-order version could not be captured for audit.", 503);
