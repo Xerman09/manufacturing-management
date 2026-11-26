@@ -27,7 +27,7 @@ import { recordShiftRunSession } from "../_shift-run-session-service";
 async function getUserIdFromSession(): Promise<number> {
     try {
         const cookieStore = await cookies();
-        const token = cookieStore.get("vos_access_token")?.value;
+        const token = cookieStore.get("vos_mm_access_token")?.value;
         if (token) {
             const parts = token.split(".");
             if (parts.length >= 2) {

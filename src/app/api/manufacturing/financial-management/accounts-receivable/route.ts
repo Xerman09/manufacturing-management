@@ -15,7 +15,7 @@ import { summaryTotalInvoices, tableTotalInvoices } from './_arRouteCounts';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const COOKIE_NAME = 'vos_access_token';
+const COOKIE_NAME = 'vos_mm_access_token';
 const CACHE_TTL_SEC = 60;
 
 function parseFilters(searchParams: URLSearchParams): ARTableFilters {

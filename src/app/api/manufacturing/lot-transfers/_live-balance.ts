@@ -91,8 +91,8 @@ async function springHeaders(): Promise<Record<string, string>> {
     try {
         const cookieStore = await cookies();
         token =
-            cookieStore.get("vos_access_token")?.value ||
-            cookieStore.get("springboot_token")?.value ||
+            cookieStore.get("vos_mm_access_token")?.value ||
+            cookieStore.get("vos_mm_springboot_token")?.value ||
             cookieStore.get("token")?.value;
     } catch {
         // Requests outside a Next request context can still use the local token cache.
@@ -102,7 +102,7 @@ async function springHeaders(): Promise<Record<string, string>> {
     const requestHeaders: Record<string, string> = { Accept: "application/json" };
     if (token) {
         requestHeaders.Authorization = `Bearer ${token}`;
-        requestHeaders.Cookie = `vos_access_token=${token}`;
+        requestHeaders.Cookie = `vos_mm_access_token=${token}`;
     }
     return requestHeaders;
 }

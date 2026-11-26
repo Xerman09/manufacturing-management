@@ -428,7 +428,7 @@ async function validateSalesOrderScheduling(
 async function resolvePlanningOverrideAccess(): Promise<boolean> {
     try {
         const cookieStore = await cookies();
-        const token = cookieStore.get("vos_access_token")?.value;
+        const token = cookieStore.get("vos_mm_access_token")?.value;
         if (!token) return false;
         const parts = token.split(".");
         if (parts.length < 2) return false;

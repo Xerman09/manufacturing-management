@@ -125,7 +125,7 @@ async function lockAppliedMemos(payablesList: PayableRow[], supplierId: number) 
 // 🚀 PATCH Handler - Status Transitions
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const cookieStore = await cookies();
-    const token = cookieStore.get("vos_access_token")?.value;
+    const token = cookieStore.get("vos_mm_access_token")?.value;
 
     if (!token) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 

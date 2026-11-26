@@ -34,7 +34,7 @@ function supplierParams(type: string) {
 
 export async function GET(request: NextRequest) {
     const cookieStore = await cookies();
-    const token = cookieStore.get("vos_access_token")?.value;
+    const token = cookieStore.get("vos_mm_access_token")?.value;
 
     if (!token) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 

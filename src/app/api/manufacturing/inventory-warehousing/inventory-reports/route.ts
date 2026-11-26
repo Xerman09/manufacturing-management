@@ -98,8 +98,8 @@ export async function GET(request: Request) {
         try {
             const cookieStore = await cookies();
             token =
-                cookieStore.get("springboot_token")?.value ||
-                cookieStore.get("vos_access_token")?.value ||
+                cookieStore.get("vos_mm_springboot_token")?.value ||
+                cookieStore.get("vos_mm_access_token")?.value ||
                 cookieStore.get("token")?.value;
         } catch {
             // ignore
@@ -125,7 +125,7 @@ export async function GET(request: Request) {
         };
         if (token) {
             springReqHeaders["Authorization"] = `Bearer ${token}`;
-            springReqHeaders["Cookie"] = `vos_access_token=${token}`;
+            springReqHeaders["Cookie"] = `vos_mm_access_token=${token}`;
         }
 
         // 2. Fetch Directus metadata in parallel (including mm_lots, mm_inventory_lots, and product_type)

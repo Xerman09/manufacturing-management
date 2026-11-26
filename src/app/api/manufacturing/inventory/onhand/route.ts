@@ -14,14 +14,14 @@ export async function GET(request: Request) {
         const branchId = searchParams.get("branchId");
 
         const cookieStore = await cookies();
-        const token = cookieStore.get("springboot_token")?.value || cookieStore.get("vos_access_token")?.value;
+        const token = cookieStore.get("vos_mm_springboot_token")?.value || cookieStore.get("vos_mm_access_token")?.value;
         const requestHeaders: Record<string, string> = {
             "Accept": "application/json"
         };
         
         if (token) {
             requestHeaders["Authorization"] = `Bearer ${token}`;
-            requestHeaders["Cookie"] = `vos_access_token=${token}`;
+            requestHeaders["Cookie"] = `vos_mm_access_token=${token}`;
         }
         
         const params = new URLSearchParams();

@@ -33,8 +33,8 @@ export async function GET(req: Request) {
     try {
       const cookieStore = await cookies();
       token =
-        cookieStore.get("springboot_token")?.value ||
-        cookieStore.get("vos_access_token")?.value ||
+        cookieStore.get("vos_mm_springboot_token")?.value ||
+        cookieStore.get("vos_mm_access_token")?.value ||
         cookieStore.get("token")?.value;
     } catch {
       // ignore

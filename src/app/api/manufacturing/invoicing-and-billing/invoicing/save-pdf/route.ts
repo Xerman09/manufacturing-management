@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { nowUtcSql } from "@/lib/datetime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
         let userId: number | null = null;
         try {
             const cookieStore = await cookies();
-            const token = cookieStore.get('vos_access_token');
+            const token = cookieStore.get('vos_mm_access_token');
             if (token && token.value) {
                 const payload = token.value.split('.')[1];
                 const decoded = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8')) as { sub: string };
@@ -56,7 +57,10 @@ export async function POST(req: NextRequest) {
             console.warn("[Save PDF API] Failed to decode token:", e);
         }
 
-        const now = new Date().toISOString();
+        const now = nowUtcSql();
+        if (!now) {
+            return NextResponse.json({ error: "Failed to generate UTC timestamp" }, { status: 500 });
+        }
 
         // 1. Upload the PDF to Directus Files
         const directusFormData = new FormData();

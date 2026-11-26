@@ -18,7 +18,7 @@ export async function GET(request: Request) {
         let token: string | undefined;
         try {
             const cookieStore = await cookies();
-            token = cookieStore.get("vos_access_token")?.value;
+            token = cookieStore.get("vos_mm_access_token")?.value;
         } catch {
             // ignore
         }
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
         };
         if (token) {
             reqHeaders["Authorization"] = `Bearer ${token}`;
-            reqHeaders["Cookie"] = `vos_access_token=${token}`;
+            reqHeaders["Cookie"] = `vos_mm_access_token=${token}`;
         }
 
         let mmUrl = `${DIRECTUS_URL}/items/mm_inventory_lots?limit=-1&sort=-updated_at,-created_at,-inventory_lot_id&_t=${timestamp}`;
@@ -933,7 +933,7 @@ export async function POST(request: Request) {
         let userId: number | null = null;
         try {
             const cookieStore = await cookies();
-            const token = cookieStore.get("vos_access_token")?.value;
+            const token = cookieStore.get("vos_mm_access_token")?.value;
             if (token) {
                 const parts = token.split(".");
                 if (parts.length >= 2) {

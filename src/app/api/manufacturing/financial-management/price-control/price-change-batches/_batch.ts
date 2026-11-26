@@ -195,7 +195,7 @@ export async function fetchDirectus<T>(url: string, init?: RequestInit): Promise
     return text ? (JSON.parse(text) as T) : ({} as T);
 }
 
-export function decodeUserIdFromJwtCookie(req: NextRequest, cookieName = "vos_access_token") {
+export function decodeUserIdFromJwtCookie(req: NextRequest, cookieName = "vos_mm_access_token") {
     const token = req.cookies.get(cookieName)?.value;
     if (!token) return null;
 

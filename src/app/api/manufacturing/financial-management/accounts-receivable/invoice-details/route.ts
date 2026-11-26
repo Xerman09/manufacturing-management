@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 
 const DIRECTUS_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || '').trim().replace(/\/$/, '');
 const DIRECTUS_STATIC_TOKEN = (process.env.DIRECTUS_STATIC_TOKEN || '').trim();
-const COOKIE_NAME = 'vos_access_token';
+const COOKIE_NAME = 'vos_mm_access_token';
 
 interface SalesInvoiceHeader {
   invoice_id: number;

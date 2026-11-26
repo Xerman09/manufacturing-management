@@ -31,7 +31,7 @@ interface DirectusItemClassification {
 async function getUserIdFromToken(): Promise<number | null> {
     try {
         const cookieStore = await cookies();
-        const token = cookieStore.get("vos_access_token")?.value || cookieStore.get("springboot_token")?.value;
+        const token = cookieStore.get("vos_mm_access_token")?.value || cookieStore.get("vos_mm_springboot_token")?.value;
         if (!token) return null;
         const payload = decodeJwtPayload(token);
         const id = payload?.id || payload?.user_id || payload?.userId || payload?.sub;
@@ -100,7 +100,7 @@ async function fetchSpringBootAssetDepreciation(searchParams?: URLSearchParams):
     if (!springBase) return [];
     try {
         const cookieStore = await cookies();
-        const springToken = cookieStore.get("springboot_token")?.value || cookieStore.get("vos_access_token")?.value;
+        const springToken = cookieStore.get("vos_mm_springboot_token")?.value || cookieStore.get("vos_mm_access_token")?.value;
 
         const query = new URLSearchParams();
         if (searchParams) {

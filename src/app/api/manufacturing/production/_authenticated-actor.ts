@@ -12,7 +12,7 @@ export class AuthenticatedActorError extends Error {
 }
 
 export async function requireManufacturingActorId(signal?: AbortSignal): Promise<number> {
-    const token = (await cookies()).get("vos_access_token")?.value;
+    const token = (await cookies()).get("vos_mm_access_token")?.value;
     if (!token) {
         throw new AuthenticatedActorError("Authentication is required for this operation.", 401, "AUTHENTICATION_REQUIRED");
     }

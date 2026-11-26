@@ -47,7 +47,7 @@ export async function fetchSpringMovements(branchId: number, productTypeId?: num
         if (!token) {
             try {
                 const cookieStore = await cookies();
-                token = cookieStore.get("vos_access_token")?.value;
+                token = cookieStore.get("vos_mm_access_token")?.value;
             } catch {
                 // Ignore if cookies store unavailable outside request context
             }
@@ -66,7 +66,7 @@ export async function fetchSpringMovements(branchId: number, productTypeId?: num
         };
         if (token) {
             reqHeaders["Authorization"] = `Bearer ${token}`;
-            reqHeaders["Cookie"] = `vos_access_token=${token}`;
+            reqHeaders["Cookie"] = `vos_mm_access_token=${token}`;
         }
 
         const endpointsToTry = [

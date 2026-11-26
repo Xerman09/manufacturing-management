@@ -72,7 +72,7 @@ async function fetchDirectus<T>(url: string, init?: RequestInit): Promise<T> {
 /**
  * Decode JWT payload (NO VERIFY) and extract numeric userId from `sub`.
  */
-function decodeUserIdFromJwtCookie(req: NextRequest, cookieName = "vos_access_token") {
+function decodeUserIdFromJwtCookie(req: NextRequest, cookieName = "vos_mm_access_token") {
     const token = req.cookies.get(cookieName)?.value;
     if (!token) return null;
 

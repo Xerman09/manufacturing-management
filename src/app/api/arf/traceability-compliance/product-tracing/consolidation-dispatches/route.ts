@@ -16,7 +16,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         const docNo = searchParams.get("doc_no");
         const protocolNo = searchParams.get("protocol_no");
         const orderNo = searchParams.get("order_no");
-        const token = req.cookies.get("vos_access_token")?.value;
+        const token = req.cookies.get("vos_mm_access_token")?.value;
 
         if (!productId) {
             return NextResponse.json({ error: "product_id is required" }, { status: 400 });

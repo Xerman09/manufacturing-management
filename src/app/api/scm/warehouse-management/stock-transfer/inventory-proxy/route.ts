@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Extract auth token from cookies or cache
-  let token = request.cookies.get('vos_access_token')?.value || request.cookies.get('springboot_token')?.value;
+  let token = request.cookies.get('vos_mm_access_token')?.value || request.cookies.get('vos_mm_springboot_token')?.value;
   if (!token) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
         'Accept': 'application/json',
         ...(token ? { 
           'Authorization': `Bearer ${token}`,
-          'Cookie': `vos_access_token=${token}`
+          'Cookie': `vos_mm_access_token=${token}`
         } : {}),
       },
       cache: 'no-store',

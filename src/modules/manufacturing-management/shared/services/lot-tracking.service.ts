@@ -765,8 +765,8 @@ export async function fetchBatchOnhand(params: {
         const { cookies } = await import("next/headers");
         const cookieStore = await cookies();
         authToken =
-          cookieStore.get("vos_access_token")?.value ||
-          cookieStore.get("springboot_token")?.value ||
+          cookieStore.get("vos_mm_access_token")?.value ||
+          cookieStore.get("vos_mm_springboot_token")?.value ||
           cookieStore.get("token")?.value;
       } catch {
         // cookies() unavailable in non-request contexts

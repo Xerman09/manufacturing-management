@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 async function getSessionUserId(): Promise<number | null> {
   try {
     const cookieStore = await cookies();
-    const token = cookieStore.get("vos_access_token")?.value || cookieStore.get("springboot_token")?.value;
+    const token = cookieStore.get("vos_mm_access_token")?.value || cookieStore.get("vos_mm_springboot_token")?.value;
     if (!token) return null;
     const parts = token.split(".");
     if (parts.length < 2) return null;

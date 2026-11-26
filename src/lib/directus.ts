@@ -35,6 +35,6 @@ export function decodeJwtSub(token: string | null | undefined): number | null {
  * ✅ Route Handlers should use req.cookies (not next/headers cookies()).
  */
 export function getJwtSubFromReq(req: NextRequest): number | null {
-    const token = req.cookies.get("vos_access_token")?.value ?? null;
+    const token = req.cookies.get("vos_mm_access_token")?.value ?? null;
     return decodeJwtSub(token);
 }

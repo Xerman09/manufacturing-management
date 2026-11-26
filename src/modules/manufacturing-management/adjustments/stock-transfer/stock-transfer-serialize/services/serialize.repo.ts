@@ -27,7 +27,7 @@ export async function fetchSerialAvailability(serialNumber: string, branchId?: n
         "Accept": "application/json",
         ...(token ? { 
           "Authorization": `Bearer ${token}`,
-          "Cookie": `vos_access_token=${token}`
+          "Cookie": `vos_mm_access_token=${token}`
         } : {}),
       },
       cache: "no-store",

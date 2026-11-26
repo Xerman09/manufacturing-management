@@ -24,7 +24,7 @@ function positiveId(value: unknown): number | null {
 }
 
 export async function authorizeStandardVsActualCostVarianceReport(): Promise<ReportAccessResult> {
-    const token = (await cookies()).get("vos_access_token")?.value;
+    const token = (await cookies()).get("vos_mm_access_token")?.value;
     if (!token) return { ok: false, status: 401, error: "Authentication is required." };
 
     const springBase = process.env.SPRING_API_BASE_URL?.replace(/\/+$/, "");

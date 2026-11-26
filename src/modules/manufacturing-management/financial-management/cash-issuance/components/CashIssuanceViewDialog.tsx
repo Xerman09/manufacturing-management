@@ -128,7 +128,7 @@ export function CashIssuanceViewDialog({ disbursement, open, onOpenChange, onUpd
 
     if (!disbursement) return null;
 
-    const token = getCookie("vos_access_token");
+    const token = getCookie("vos_mm_access_token");
     const tokenPayload = decodeToken(token);
     const currentUserId = tokenPayload?.sub;
     const isApprover = disbursement.approverId != null && currentUserId != null && String(disbursement.approverId) === String(currentUserId);

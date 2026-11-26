@@ -79,8 +79,8 @@ export async function GET(request: Request) {
     try {
       const cookieStore = await cookies();
       token =
-        cookieStore.get("springboot_token")?.value ||
-        cookieStore.get("vos_access_token")?.value ||
+        cookieStore.get("vos_mm_springboot_token")?.value ||
+        cookieStore.get("vos_mm_access_token")?.value ||
         cookieStore.get("token")?.value;
     } catch {
       // ignore
@@ -91,7 +91,7 @@ export async function GET(request: Request) {
     };
     if (token) {
       reqHeaders["Authorization"] = `Bearer ${token}`;
-      reqHeaders["Cookie"] = `vos_access_token=${token}`;
+      reqHeaders["Cookie"] = `vos_mm_access_token=${token}`;
     }
 
     let mmLotsUrl = `${DIRECTUS_URL}/items/mm_lots?limit=-1&_t=${timestamp}`;

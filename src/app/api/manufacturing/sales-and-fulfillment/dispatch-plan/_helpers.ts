@@ -116,7 +116,7 @@ export function formatUserName(u?: RawUserRow | null): string {
 export async function getUserIdFromToken(): Promise<number | null> {
   try {
     const cookieStore = await cookies();
-    const token = cookieStore.get("vos_access_token")?.value;
+    const token = cookieStore.get("vos_mm_access_token")?.value;
     if (!token) return null;
     const parts = token.split(".");
     if (parts.length < 2) return null;

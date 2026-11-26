@@ -13,7 +13,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Extract userId from token — receiver_id must never be null
-    const token = request.cookies.get("vos_access_token")?.value;
+    const token = request.cookies.get("vos_mm_access_token")?.value;
     const decoded = token ? decodeJwtPayload(token) : null;
     const userId = decoded?.sub ? Number(decoded.sub) : null;
 

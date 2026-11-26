@@ -27,7 +27,7 @@ export function CashIssuanceApprovalTable({
     onSelectChange
 }: CashIssuanceApprovalTableProps) {
 
-    const token = getCookie("vos_access_token");
+    const token = getCookie("vos_mm_access_token");
     const tokenPayload = useMemo(() => decodeToken(token), [token]);
     const currentUserId = tokenPayload?.sub;
 

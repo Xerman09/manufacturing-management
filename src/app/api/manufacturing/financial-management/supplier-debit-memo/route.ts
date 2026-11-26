@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 const DIRECTUS_URL        = process.env.NEXT_PUBLIC_API_BASE_URL;
 const DIRECTUS_TOKEN      = process.env.DIRECTUS_STATIC_TOKEN;
-const COOKIE_NAME         = 'vos_access_token';
+const COOKIE_NAME         = 'vos_mm_access_token';
 
 /**
  * Decode JWT payload (No Verify) and extract numeric userId from 'sub'.

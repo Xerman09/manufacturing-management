@@ -21,8 +21,8 @@ async function getSpringHeaders(): Promise<Record<string, string>> {
     try {
         const cookieStore = await cookies();
         token =
-            cookieStore.get("springboot_token")?.value ||
-            cookieStore.get("vos_access_token")?.value ||
+            cookieStore.get("vos_mm_springboot_token")?.value ||
+            cookieStore.get("vos_mm_access_token")?.value ||
             cookieStore.get("token")?.value;
     } catch {
         // ignore
@@ -44,7 +44,7 @@ async function getSpringHeaders(): Promise<Record<string, string>> {
     };
     if (token) {
         h["Authorization"] = `Bearer ${token}`;
-        h["Cookie"] = `vos_access_token=${token}`;
+        h["Cookie"] = `vos_mm_access_token=${token}`;
     }
     return h;
 }

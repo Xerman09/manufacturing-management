@@ -12,8 +12,8 @@ function cookieValue(header: string | null, name: string): string | null {
 export async function getMaterialStagingActorId(request: Request): Promise<number | null> {
     try {
         const cookieStore = await cookies();
-        const token = cookieValue(request.headers.get("cookie"), "vos_access_token")
-            || cookieStore.get("vos_access_token")?.value;
+        const token = cookieValue(request.headers.get("cookie"), "vos_mm_access_token")
+            || cookieStore.get("vos_mm_access_token")?.value;
         if (!token) return null;
         const [, encodedPayload] = token.split(".");
         if (!encodedPayload) return null;

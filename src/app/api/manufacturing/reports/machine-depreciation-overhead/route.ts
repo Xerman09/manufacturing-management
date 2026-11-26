@@ -240,8 +240,8 @@ async function fetchSpringBootUopRecords(
 
   const cookieStore = await cookies();
   const springToken =
-    cookieStore.get("springboot_token")?.value ||
-    cookieStore.get("vos_access_token")?.value;
+    cookieStore.get("vos_mm_springboot_token")?.value ||
+    cookieStore.get("vos_mm_access_token")?.value;
 
   const queryStr = searchParams && searchParams.toString() ? `?${searchParams.toString()}` : "";
   const res = await fetch(`${SPRING_API_BASE_URL}/api/asset-depreciation${queryStr}`, {

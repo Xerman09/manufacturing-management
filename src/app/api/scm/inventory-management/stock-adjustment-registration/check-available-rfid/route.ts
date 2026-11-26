@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     const supplierId = searchParams.get("supplierId");
     const productId = searchParams.get("productId");
 
-    const token = request.cookies.get("vos_access_token")?.value;
+    const token = request.cookies.get("vos_mm_access_token")?.value;
 
     if (!rfid) {
       return NextResponse.json({ error: "Missing rfid" }, { status: 400 });

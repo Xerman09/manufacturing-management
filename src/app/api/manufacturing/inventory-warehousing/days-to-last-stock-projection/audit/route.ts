@@ -12,7 +12,7 @@ export async function GET(request: Request) {
         const end = params.get("assessment_end") || "";
         if (!product || !branch || !Number.isFinite(Date.parse(end)) || start && !Number.isFinite(Date.parse(start))) return NextResponse.json({ error: "Valid product, branch and applied assessment dates are required." }, { status: 400 });
         const store = await cookies();
-        const token = ["springboot_token", "vos_access_token", "token"].map(key => store.get(key)?.value).find(Boolean);
+        const token = ["vos_mm_springboot_token", "vos_mm_access_token", "token"].map(key => store.get(key)?.value).find(Boolean);
         const base = (process.env.SPRING_API_BASE_URL || process.env.NEXT_PUBLIC_SPRING_API_URL || "").replace(/\/+$/, "");
         const rows = await loadConsumption(base, token ? { Authorization: `Bearer ${token}` } : {}, start, end);
         const data = rows.filter(row => row.product_id === product && row.branch_id === branch);

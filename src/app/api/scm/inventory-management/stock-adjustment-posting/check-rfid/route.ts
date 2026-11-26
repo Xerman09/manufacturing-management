@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     const productId = searchParams.get("productId");
     const branchId = searchParams.get("branchId");
 
-    const token = request.cookies.get("vos_access_token")?.value;
+    const token = request.cookies.get("vos_mm_access_token")?.value;
 
     if (!productId || !branchId) {
       return NextResponse.json({ error: "Missing productId or branchId" }, { status: 400 });

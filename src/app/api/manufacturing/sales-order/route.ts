@@ -132,7 +132,7 @@ interface AuthenticatedUser {
 
 async function requireAuthenticatedUser(): Promise<AuthenticatedUser> {
     const cookieStore = await cookies();
-    const token = cookieStore.get("vos_access_token")?.value;
+    const token = cookieStore.get("vos_mm_access_token")?.value;
     if (!token) throw new ApiError(401, "Authentication is required.");
 
     const springBase = process.env.SPRING_API_BASE_URL;
