@@ -17,7 +17,7 @@ import MarginSimulatorModule from "@/modules/manufacturing-management/margin-sim
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

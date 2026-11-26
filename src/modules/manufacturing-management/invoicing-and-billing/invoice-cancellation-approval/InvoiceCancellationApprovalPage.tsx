@@ -75,7 +75,7 @@ export default function InvoiceCancellationApprovalPage() {
     // Dynamically resolve current user ID from session token
     let currentUserId = 0;
     if (typeof document !== "undefined") {
-      const match = document.cookie.match(/vos_access_token=([^;]+)/);
+      const match = document.cookie.match(/vos_mm_access_token=([^;]+)/);
       const token = match ? match[1] : (typeof localStorage !== "undefined" ? localStorage.getItem("token") : null);
       if (token) {
         try {

@@ -21,7 +21,7 @@ export const metadata = {
         "Tracks asset acquisition cost, salvage value, accumulated depreciation, and net book value for balance sheet carrying amounts and audit reporting."
 };
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

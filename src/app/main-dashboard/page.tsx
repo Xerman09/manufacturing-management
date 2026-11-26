@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import MainDashboardClient from "./_components/main-dashboard-client";
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 // Strict Payload Schema
 const JwtPayloadSchema = z.object({

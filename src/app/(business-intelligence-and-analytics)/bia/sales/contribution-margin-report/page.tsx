@@ -20,7 +20,7 @@ export const metadata = {
     description: "Measures net sales revenue minus variable manufacturing costs (direct materials, direct labor, variable overhead) per unit and line."
 };
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

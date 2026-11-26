@@ -21,7 +21,7 @@ export const metadata = {
     description: "Audit historical bill-of-materials costs frozen at quotation issuance against live recipe costs."
 };
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 interface DecodedToken {
     Firstname?: string;

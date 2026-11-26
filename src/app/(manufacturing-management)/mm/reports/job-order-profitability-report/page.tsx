@@ -31,7 +31,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 }
 
 export default async function JobOrderProfitabilityReportPage() {
-    const token = (await cookies()).get("vos_access_token")?.value;
+    const token = (await cookies()).get("vos_mm_access_token")?.value;
     const user = token ? decodeJwtPayload(token) : null;
     const first = String(user?.Firstname || user?.FirstName || user?.first_name || "");
     const last = String(user?.LastName || user?.last_name || "");

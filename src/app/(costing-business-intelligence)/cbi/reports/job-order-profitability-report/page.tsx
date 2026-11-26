@@ -20,7 +20,7 @@ export const metadata = {
     description: "Calculates exact gross margin per production run by comparing total manufacturing costs against order sales price."
 };
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

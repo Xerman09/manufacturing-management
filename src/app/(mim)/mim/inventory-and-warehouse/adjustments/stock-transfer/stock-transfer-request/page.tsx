@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 
 export default async function StockTransferRequestPage() {
     const cookieStore = await cookies();
-    const token = cookieStore.get("vos_access_token")?.value;
+    const token = cookieStore.get("vos_mm_access_token")?.value;
     const payload = token ? decodeJwtPayload(token) : null;
 
     const headerUser = {

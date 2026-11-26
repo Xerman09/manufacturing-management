@@ -20,7 +20,7 @@ export const metadata = {
     description: "Operational inventory control and financial risk monitoring for perishable batches, ingredients, and finished goods.",
 };
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

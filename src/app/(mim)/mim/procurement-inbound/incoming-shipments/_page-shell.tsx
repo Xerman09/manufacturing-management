@@ -12,7 +12,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/shared/app-sidebar/nav-user";
 import { cookies } from "next/headers";
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {

@@ -16,7 +16,7 @@ import { cookies } from "next/headers";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const COOKIE_NAME = "vos_access_token";
+const COOKIE_NAME = "vos_mm_access_token";
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
@@ -83,7 +83,7 @@ function buildHeaderUserFromToken(token: string | null | undefined): {
 export default async function StockConversionPage() {
   const cookieStore = await cookies();
   const token =
-    cookieStore.get("springboot_token")?.value ??
+    cookieStore.get("vos_mm_springboot_token")?.value ??
     cookieStore.get(COOKIE_NAME)?.value ??
     null;
 
