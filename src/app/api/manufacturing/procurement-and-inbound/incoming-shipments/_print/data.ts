@@ -229,17 +229,6 @@ async function loadBranch(value: unknown): Promise<string> {
     return code ? `${name} (${code})` : name;
 }
 
-function paymentArrangement(value: unknown): string {
-    switch (Number(value)) {
-        case 1: return "Advance Payment";
-        case 2: return "Partial Payment";
-        case 3: return "Full Payment";
-        case 4: return "Refund";
-        case 5: return "Installment";
-        default: return value == null || value === "" ? "N/A" : `Payment Type #${value}`;
-    }
-}
-
 async function loadLines(purchaseOrderId: number, currency: LandedCostCurrencyContract): Promise<PurchaseOrderPrintLine[]> {
     const lines = await fetchShipmentLineItems(purchaseOrderId);
     if (lines.length > 0) {
@@ -616,11 +605,12 @@ export async function loadPurchaseOrderPrintableData(input: {
 }): Promise<PurchaseOrderPrintableSnapshot> {
     const purchaseOrder = await directusRow(`/items/purchase_order/${input.purchaseOrderId}?fields=*`, "Purchase order was not found.");
     const currency = resolveLandedCostCurrency(purchaseOrder);
-    const [supplier, branch, paymentTerms, paymentMode, company, template, lines, approvals] = await Promise.all([
+    const [supplier, branch, paymentTerms, paymentMode, paymentType, company, template, lines, approvals] = await Promise.all([
         loadSupplier(purchaseOrder.supplier_name),
         loadBranch(purchaseOrder.branch_id),
         lookupRow("payment_terms", relationId(purchaseOrder.payment_terms, ["id"]), "id,payment_name,payment_days,payment_description"),
         lookupRow("purchase_order_payment_modes", relationId(purchaseOrder.payment_mode, ["id"]), "id,mode_name,code"),
+        lookupRow("payment_type", relationId(purchaseOrder.payment_type, ["id"]), "id,payment_type_name"),
         loadCompanyHeader(),
         loadPrintableTemplate(),
         loadLines(input.purchaseOrderId, currency),
@@ -672,7 +662,7 @@ export async function loadPurchaseOrderPrintableData(input: {
         paymentTerms: text(paymentTerms?.payment_name || paymentTerms?.payment_description, purchaseOrder.payment_terms ? `Payment Terms #${purchaseOrder.payment_terms}` : "N/A"),
         deliveryTerms: text(purchaseOrder.delivery_terms),
         paymentMode: text(paymentMode?.mode_name || paymentMode?.code, purchaseOrder.payment_mode ? `Payment Mode #${purchaseOrder.payment_mode}` : "N/A"),
-        paymentArrangement: paymentArrangement(purchaseOrder.payment_type),
+        paymentArrangement: text(paymentType?.payment_type_name, purchaseOrder.payment_type ? `Payment Type #${purchaseOrder.payment_type}` : "N/A"),
         priceType: text(purchaseOrder.price_type),
         currencyCode: currency.currencyCode,
         exchangeRate: currency.exchangeRate,

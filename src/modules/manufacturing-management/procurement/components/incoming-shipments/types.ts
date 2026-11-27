@@ -140,6 +140,8 @@ export interface IncomingShipmentsProps {
     };
     canonicalDrafting?: boolean;
     jobOrders?: Array<{ job_order_id: number; job_order_no?: string }>;
+    branches?: Array<{ id: number; branch_name?: string; branch_code?: string; branchName?: string; branchCode?: string }>;
+    paymentTypes?: Array<{ id: number; payment_type_name?: string; payment_name?: string; name?: string }>;
     paymentTerms?: Array<{
         id: number;
         payment_name: string;

@@ -22,8 +22,11 @@ import {
     type DecimalInput
 } from "@/modules/manufacturing-management/decimal";
 import { normalizeProductRelationId } from "@/modules/manufacturing-management/procurement/product-relation";
-import { validatePurchaseOrderPaymentMode } from "./_payment-modes";
-import { PurchaseOrderPaymentModeError } from "./_payment-modes";
+import {
+    fetchPurchaseOrderPaymentModes,
+    PurchaseOrderPaymentModeError,
+    validatePurchaseOrderPaymentMode
+} from "./_payment-modes";
 import {
     assertEnteredPricesForMissingPriceControl,
     fetchPurchaseOrderPriceTypeRules,
@@ -252,9 +255,25 @@ async function validateDraft(order: PurchaseOrderDraft) {
         )
     ]);
 
+function isDirectusTruthy(value: unknown): boolean {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (typeof value === "string") {
+        const lower = value.trim().toLowerCase();
+        return lower === "1" || lower === "true";
+    }
+    if (value && typeof value === "object") {
+        const bufferValue = value as { data?: unknown };
+        if (Array.isArray(bufferValue.data) && bufferValue.data.length > 0) {
+            return Number(bufferValue.data[0]) !== 0;
+        }
+    }
+    return false;
+}
+
     const branch = branchRows && branchRows.length > 0 ? branchRows[0] : null;
 
-    if (!(supplier.isActive === true || Number(supplier.isActive) === 1) || supplier.nonBuy === true || Number(supplier.nonBuy) === 1) {
+    if (!isDirectusTruthy(supplier.isActive)) {
         throw new PurchaseOrderDraftError("The selected supplier is not purchasing eligible.");
     }
 
@@ -556,22 +575,85 @@ export async function createPurchaseOrderDraft(order: PurchaseOrderDraft, actorI
     };
 }
 
+async function safeCatalogFetch<T>(loader: () => Promise<T>, fallback: T, label: string): Promise<T> {
+    try {
+        return await loader();
+    } catch (error) {
+        console.warn(`[PurchaseOrderCatalog] Failed to load ${label}:`, error);
+        return fallback;
+    }
+}
+
 export async function fetchPurchaseOrderCatalog() {
-    const [suppliers, branches, jobOrders, paymentTerms, paymentModes, priceTypeRules] = await Promise.all([
-        directusData<unknown[]>("/items/suppliers?filter[isActive][_eq]=1&filter[nonBuy][_eq]=0&fields=id,supplier_name,is_foreign,currency,country,payment_terms,delivery_terms&sort=supplier_name&limit=-1", "Unable to load eligible suppliers."),
-        directusData<unknown[]>("/items/branches?filter[isActive][_eq]=1&fields=id,branch_name,branch_code&sort=branch_name&limit=200", "Unable to load branches."),
-        directusData<unknown[]>("/items/manufacturing_job_orders?fields=job_order_id,job_order_no,status&sort=-job_order_id&limit=250", "Unable to load job orders."),
-        directusData<unknown[]>("/items/payment_terms?fields=id,payment_name,payment_days,payment_description&sort=payment_name&limit=-1", "Unable to load payment terms."),
-        directusData<unknown[]>("/items/purchase_order_payment_modes?filter[is_active][_eq]=1&fields=id,mode_name,code,is_active,sort_order&sort=sort_order,mode_name&limit=-1", "Unable to load configured payment types."),
-        fetchPurchaseOrderPriceTypeRules()
+    const [suppliers, branches, jobOrders, paymentTerms, paymentModes, paymentTypeRows, priceTypeRules] = await Promise.all([
+        safeCatalogFetch(
+            async () => {
+                try {
+                    return await directusData<unknown[]>(
+                        "/items/suppliers?filter[isActive][_eq]=1&fields=id,supplier_name,is_foreign,currency,country,payment_terms,delivery_terms&sort=supplier_name&limit=-1",
+                        "Unable to load eligible suppliers."
+                    );
+                } catch {
+                    return await directusData<unknown[]>(
+                        "/items/suppliers?filter[isActive][_eq]=1&fields=id,supplier_name,is_foreign,currency,country,payment_terms&sort=supplier_name&limit=-1",
+                        "Unable to load eligible suppliers."
+                    );
+                }
+            },
+            [],
+            "suppliers"
+        ),
+        safeCatalogFetch(
+            () => directusData<unknown[]>("/items/branches?filter[isActive][_eq]=1&fields=id,branch_name,branch_code&sort=branch_name&limit=200", "Unable to load branches."),
+            [],
+            "branches"
+        ),
+        safeCatalogFetch(
+            () => directusData<unknown[]>("/items/manufacturing_job_orders?fields=job_order_id,job_order_no,status&sort=-job_order_id&limit=250", "Unable to load job orders."),
+            [],
+            "jobOrders"
+        ),
+        safeCatalogFetch(
+            async () => {
+                try {
+                    return await directusData<unknown[]>(
+                        "/items/payment_terms?fields=id,payment_name,payment_days,payment_description&sort=payment_name&limit=-1",
+                        "Unable to load payment terms."
+                    );
+                } catch {
+                    return await directusData<unknown[]>(
+                        "/items/payment_terms?sort=payment_name&limit=-1",
+                        "Unable to load payment terms."
+                    );
+                }
+            },
+            [],
+            "paymentTerms"
+        ),
+        safeCatalogFetch(
+            () => fetchPurchaseOrderPaymentModes(),
+            [],
+            "paymentModes"
+        ),
+        safeCatalogFetch(
+            () => directusData<Array<{ id: number; payment_type_name: string }>>(
+                "/items/payment_type?fields=id,payment_type_name&sort=id&limit=-1",
+                "Unable to load payment arrangements."
+            ),
+            [],
+            "paymentTypes"
+        ),
+        safeCatalogFetch(
+            () => fetchPurchaseOrderPriceTypeRules(),
+            [],
+            "priceTypeRules"
+        )
     ]);
-    const paymentTypes = [
-        { id: 1, name: "Advance Payment" },
-        { id: 2, name: "Partial Payment" },
-        { id: 3, name: "Full Payment" },
-        { id: 4, name: "Refund" },
-        { id: 5, name: "Installment" }
-    ];
+    const paymentTypes = paymentTypeRows.map(row => ({
+        id: Number(row.id),
+        payment_type_name: String(row.payment_type_name || ""),
+        name: String(row.payment_type_name || "")
+    }));
     return { suppliers, branches, paymentTypes, paymentModes, paymentTerms, jobOrders, priceTypeRules };
 }
 

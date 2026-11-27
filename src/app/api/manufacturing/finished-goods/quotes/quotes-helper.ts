@@ -162,7 +162,10 @@ export async function saveQuotation(
                 headers,
                 body: JSON.stringify(nodePayload)
             });
-            if (!nodeRes.ok) throw new Error(`Failed to save quote node: ${nodeRes.status}`);
+            if (!nodeRes.ok) {
+                const errText = await nodeRes.text().catch(() => "");
+                throw new Error(`Failed to save quote node: ${nodeRes.status}${errText ? ` - ${errText}` : ""}`);
+            }
             const nodeJson = await nodeRes.json();
             createdSnapshotIds.push(nodeJson.data.id);
         }

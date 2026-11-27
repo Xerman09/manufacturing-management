@@ -31,32 +31,61 @@ function hasNumericPaymentDays(term: PaymentTerm): boolean {
 }
 
 export function resolveSupplierPaymentTermId(
-    profileValue: string | null | undefined,
+    profileValue: string | number | null | undefined,
     paymentTerms: PaymentTerm[]
 ): number | null {
-    const normalizedProfile = normalizeTerm(profileValue);
+    if (!profileValue || !Array.isArray(paymentTerms) || paymentTerms.length === 0) return null;
+
+    const trimmedValue = String(profileValue).trim();
+    if (!trimmedValue) return null;
+
+    // 1. Direct ID match if profileValue is or contains a valid numeric term id
+    const numericDirect = Number(trimmedValue);
+    if (Number.isSafeInteger(numericDirect) && numericDirect > 0) {
+        const idMatch = paymentTerms.find(term => term.id === numericDirect);
+        if (idMatch) return idMatch.id;
+    }
+
+    const normalizedProfile = normalizeTerm(trimmedValue);
     if (!normalizedProfile) return null;
 
+    // 2. Exact normalized name match
     const exactMatch = paymentTerms.find(term => normalizeTerm(term.payment_name) === normalizedProfile);
     if (exactMatch) return exactMatch.id;
 
+    // 3. Match by number of days (e.g. "Net 30 Days", "30 Days", "30")
     const profileDays = normalizedProfile.match(/\b(\d+)\b/);
     if (profileDays) {
         const days = Number(profileDays[1]);
         const dayMatch = paymentTerms.find(term => hasNumericPaymentDays(term) && Number(term.payment_days) === days);
         if (dayMatch) return dayMatch.id;
+
+        // Also check if any payment_name has the same days
+        const nameDayMatch = paymentTerms.find(term => {
+            const termMatch = normalizeTerm(term.payment_name).match(/\b(\d+)\b/);
+            return termMatch ? Number(termMatch[1]) === days : false;
+        });
+        if (nameDayMatch) return nameDayMatch.id;
     }
 
-    if (normalizedProfile.includes("cash on delivery") || normalizedProfile === "cod") {
+    // 4. Cash on delivery / COD match
+    if (normalizedProfile.includes("cash on delivery") || normalizedProfile === "cod" || normalizedProfile.includes("cash")) {
         const cashMatch = paymentTerms.find(term => {
             const name = normalizeTerm(term.payment_name);
-            return name.includes("cash on delivery") || name === "cod";
+            return name.includes("cash on delivery") || name === "cod" || name.includes("cash");
         });
         if (cashMatch) return cashMatch.id;
 
         const zeroDayMatch = paymentTerms.find(term => hasNumericPaymentDays(term) && Number(term.payment_days) === 0);
         if (zeroDayMatch) return zeroDayMatch.id;
     }
+
+    // 5. Substring / partial match fallback
+    const partialMatch = paymentTerms.find(term => {
+        const normName = normalizeTerm(term.payment_name);
+        return normName.includes(normalizedProfile) || normalizedProfile.includes(normName);
+    });
+    if (partialMatch) return partialMatch.id;
 
     return null;
 }

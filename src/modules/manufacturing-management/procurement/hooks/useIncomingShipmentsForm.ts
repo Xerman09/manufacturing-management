@@ -46,6 +46,7 @@ export interface UseIncomingShipmentsFormProps {
     onCreateShipment: (e: React.FormEvent) => void;
     onEditShipment: (shipmentId: number, shipmentData: ShipmentFormState, lineItems: ManifestLineFormItem[]) => void | Promise<boolean | void>;
     canonicalDrafting?: boolean;
+    branches?: Array<{ id: number; branch_name?: string; branch_code?: string; branchName?: string; branchCode?: string }>;
     priceTypeRules?: PurchaseOrderPriceTypeRule[];
     paymentTerms?: Array<{
         id: number;
@@ -76,6 +77,7 @@ export function useIncomingShipmentsForm({
     onCreateShipment,
     onEditShipment,
     canonicalDrafting = false,
+    branches = [],
     paymentTerms = [],
     paymentModes = []
 }: UseIncomingShipmentsFormProps) {
@@ -88,7 +90,7 @@ export function useIncomingShipmentsForm({
     const [priceControlError, setPriceControlError] = useState<string | null>(null);
     const [priceControlMissingProductIds, setPriceControlMissingProductIds] = useState<number[]>([]);
     const [commercialResolution, setCommercialResolution] = useState<PurchaseOrderCommercialResolution | null>(null);
-    const [dynamicBranches, setDynamicBranches] = useState<Array<{ id: number; branchName: string; branchCode: string }>>([]);
+    const [fetchedBranches, setFetchedBranches] = useState<Array<{ id: number; branchName: string; branchCode: string }>>([]);
     const modalRef = React.useRef<HTMLDivElement>(null);
     const restoreFocusRef = React.useRef<HTMLElement | null>(null);
     const fxRateController = React.useRef<AbortController | null>(null);
@@ -130,15 +132,27 @@ export function useIncomingShipmentsForm({
     }, [setShipmentForm]);
 
     useEffect(() => {
+        if (Array.isArray(branches) && branches.length > 0) return;
         fetch("/api/manufacturing/branches")
             .then(res => res.json())
             .then(data => {
                 if (Array.isArray(data) && data.length > 0) {
-                    setDynamicBranches(data);
+                    setFetchedBranches(data);
                 }
             })
             .catch(err => console.error("Error fetching branches:", err));
-    }, []);
+    }, [branches]);
+
+    const dynamicBranches = React.useMemo(() => {
+        if (Array.isArray(branches) && branches.length > 0) {
+            return branches.map(b => ({
+                id: Number(b.id),
+                branchName: String(b.branchName || b.branch_name || `Branch #${b.id}`),
+                branchCode: String(b.branchCode || b.branch_code || "")
+            }));
+        }
+        return fetchedBranches;
+    }, [branches, fetchedBranches]);
 
     useEffect(() => {
         if (!isModalOpen) return;
@@ -288,8 +302,8 @@ export function useIncomingShipmentsForm({
             exchange_rate: activeShipment.exchange_rate == null ? "" : DecimalValue.from(activeShipment.exchange_rate).toFixed(6),
             total_php_value: String(activeShipment.total_php_value),
             status: "Ordered",
-            branch_id: activeShipment.branch_id || 182,
-            payment_type: activeShipment.payment_type || 1,
+            branch_id: activeShipment.branch_id || null,
+            payment_type: activeShipment.payment_type || null,
             payment_mode: activeShipment.payment_mode || null,
             payment_terms: activeShipment.payment_terms || resolveSupplierPaymentTermId(storedSupplier?.payment_terms, paymentTerms),
             delivery_terms: activeShipment.delivery_terms || storedSupplier?.delivery_terms || "",
@@ -300,7 +314,7 @@ export function useIncomingShipmentsForm({
 
         let freshLines: ShipmentLineItem[] = [];
         try {
-            const res = await fetch(`/api/manufacturing/purchase-orders/${activeShipment.shipment_id}`);
+            const res = await fetch(`/api/manufacturing/procurement-and-inbound/incoming-shipments/${activeShipment.shipment_id}`);
             if (res.ok) {
                 const data = await res.json();
                 freshLines = Array.isArray(data) ? data : (data.data || data.lines || []);

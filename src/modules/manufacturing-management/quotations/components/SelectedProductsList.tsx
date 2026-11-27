@@ -50,6 +50,16 @@ export function SelectedProductsList({
             const pid = item.product?.product_id || item.parent_product_id;
             if (!pid) return;
 
+            if (item.product && !requiresBom(item.product)) {
+                if (versionsMap[pid] === undefined) {
+                    setVersionsMap(prev => ({ ...prev, [pid]: [] }));
+                }
+                if (item.versionId && item.line_id) {
+                    changeProductVersion(item.line_id, null, null);
+                }
+                return;
+            }
+
             if (versionsMap[pid] !== undefined || loadingVersions[pid]) return;
 
             setLoadingVersions(prev => ({ ...prev, [pid]: true }));
@@ -69,8 +79,8 @@ export function SelectedProductsList({
                     });
                     setVersionsMap(prev => ({ ...prev, [pid]: sorted }));
 
-                    // Auto-default if product is already selected
-                    if (item.product && sorted.length > 0 && !item.versionId && item.line_id) {
+                    // Auto-default if product is already selected and requires BOM
+                    if (item.product && requiresBom(item.product) && sorted.length > 0 && !item.versionId && item.line_id) {
                         changeProductVersion(item.line_id, sorted[0].id, sorted[0].version_name);
                     }
                 })
@@ -289,8 +299,10 @@ export function SelectedProductsList({
                                 .sort((a, b) => Number((b as unknown as Record<string, unknown>).is_parent) - Number((a as unknown as Record<string, unknown>).is_parent) || Number((a as unknown as Record<string, unknown>).unit_count) - Number((b as unknown as Record<string, unknown>).unit_count))
                                 .map(p => ({ value: String(p.product_id), label: formatUomLabel(p as unknown as Record<string, unknown>) }));
 
-                            const activeVersions = (pid && versionsMap[pid]) || (parentId && versionsMap[parentId]) || [];
                             const isBomNotRequired = Boolean(item.product && !requiresBom(item.product));
+                            const activeVersions = isBomNotRequired
+                                ? []
+                                : ((pid && versionsMap[pid]) || (parentId && versionsMap[parentId]) || []);
 
                             return (
                                 <tr key={lineId} className="hover:bg-muted/35 transition-colors group">

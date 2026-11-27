@@ -16,14 +16,15 @@ export async function fetchQuotationSnapshots(quoteId: number): Promise<unknown[
         const promises: Promise<void>[] = [];
 
         if (versionIds.length > 0) {
-            const verUrl = `${DIRECTUS_URL}/items/product_manufacturing_version?filter[id][_in]=${versionIds.join(",")}&limit=-1&fields=id,version_name`;
+            const verUrl = `${DIRECTUS_URL}/items/product_manufacturing_version?filter[version_id][_in]=${versionIds.join(",")}&limit=-1&fields=version_id,version_name`;
             promises.push(
                 fetch(verUrl, { headers, cache: "no-store" })
                     .then(async vRes => {
                         if (vRes.ok) {
                             const vData = (await vRes.json()).data || [];
-                            vData.forEach((v: { id: number; version_name: string }) => {
-                                if (v.id && v.version_name) versionMap.set(Number(v.id), v.version_name);
+                            vData.forEach((v: { version_id?: number; id?: number; version_name: string }) => {
+                                const verId = v.version_id ?? v.id;
+                                if (verId && v.version_name) versionMap.set(Number(verId), v.version_name);
                             });
                         }
                     })
@@ -55,6 +56,8 @@ export async function fetchQuotationSnapshots(quoteId: number): Promise<unknown[
             const mapped = { ...s };
             if (!mapped.version_name && mapped.version_id) {
                 mapped.version_name = versionMap.get(Number(mapped.version_id)) || `v${mapped.version_id}.0`;
+            } else if (!mapped.version_name && !mapped.version_id) {
+                mapped.version_name = "Standard / Non-BOM";
             }
             if (!mapped.product_type_name && mapped.product_type_id) {
                 mapped.product_type_name = typeMap.get(Number(mapped.product_type_id)) || "Finished Goods";

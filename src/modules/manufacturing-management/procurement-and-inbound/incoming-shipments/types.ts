@@ -57,7 +57,7 @@ export interface PurchaseOrderCatalog {
         country?: string;
     }>;
     branches: Array<{ id: number; branch_name: string; branch_code?: string }>;
-    paymentTypes: Array<{ id: number; payment_name?: string; name?: string }>;
+    paymentTypes: Array<{ id: number; payment_type_name?: string; payment_name?: string; name?: string }>;
     paymentModes: PurchaseOrderPaymentMode[];
     paymentTerms: Array<{
         id: number;

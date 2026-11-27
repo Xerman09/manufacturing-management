@@ -12,6 +12,7 @@ interface PurchaseOrderDetailModalProps {
     loading: boolean;
     detailLoading: boolean;
     canonicalDrafting: boolean;
+    paymentTypes?: Array<{ id: number; payment_type_name?: string; payment_name?: string; name?: string }>;
     paymentTerms?: Array<{
         id: number;
         payment_name: string;
@@ -39,6 +40,7 @@ export default function PurchaseOrderDetailModal({
     loading,
     detailLoading,
     canonicalDrafting,
+    paymentTypes,
     paymentTerms,
     paymentModes,
     suppliers,
@@ -85,6 +87,7 @@ export default function PurchaseOrderDetailModal({
                         loading={loading || detailLoading}
                         activeShipment={activeShipment}
                         canonicalDrafting={canonicalDrafting}
+                        paymentTypes={paymentTypes}
                         paymentTerms={paymentTerms}
                         paymentModes={paymentModes}
                         suppliers={suppliers}

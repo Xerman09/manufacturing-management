@@ -40,7 +40,7 @@ export async function downloadPurchaseOrderPrintable(input: {
     const params = new URLSearchParams({ documentType: input.documentType });
     if (input.historyId) params.set("historyId", String(input.historyId));
     if (input.receivingHeaderId) params.set("receivingHeaderId", String(input.receivingHeaderId));
-    const response = await fetch(`/api/manufacturing/purchase-orders/${input.purchaseOrderId}/print?${params.toString()}`, {
+    const response = await fetch(`/api/manufacturing/procurement-and-inbound/incoming-shipments/${input.purchaseOrderId}/print?${params.toString()}`, {
         cache: "no-store"
     });
     if (!response.ok) {
@@ -65,7 +65,7 @@ export async function downloadPurchaseOrderPrintable(input: {
 }
 
 export async function fetchPurchaseOrderArchiveStatus(purchaseOrderId: number): Promise<PurchaseOrderArchiveStatus> {
-    const response = await fetch(`/api/manufacturing/purchase-orders/${purchaseOrderId}/archive`, {
+    const response = await fetch(`/api/manufacturing/procurement-and-inbound/incoming-shipments/${purchaseOrderId}/archive`, {
         cache: "no-store"
     });
     const body = await response.json().catch(() => ({}));

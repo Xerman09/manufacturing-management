@@ -126,6 +126,8 @@ export function usePurchaseOrder({ mode = "queue", shipmentId, onCreated }: UseP
     const [shipments, setShipments] = useState<IncomingShipment[]>([]);
     const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
     const [supplierLinkedProducts, setSupplierLinkedProducts] = useState<LinkedProduct[]>([]);
+    const [branches, setBranches] = useState<PurchaseOrderCatalog["branches"]>([]);
+    const [paymentTypes, setPaymentTypes] = useState<PurchaseOrderCatalog["paymentTypes"]>([]);
     const [paymentModes, setPaymentModes] = useState<PurchaseOrderCatalog["paymentModes"]>([]);
     const [paymentTerms, setPaymentTerms] = useState<PurchaseOrderCatalog["paymentTerms"]>([]);
     const [priceTypeRules, setPriceTypeRules] = useState<PurchaseOrderCatalog["priceTypeRules"]>([]);
@@ -155,11 +157,22 @@ export function usePurchaseOrder({ mode = "queue", shipmentId, onCreated }: UseP
 
         const request = fetchPurchaseOrderCatalog()
             .then(catalog => {
-                setSuppliers(catalog.suppliers);
-                setPaymentModes(catalog.paymentModes);
-                setPaymentTerms(catalog.paymentTerms);
-                setPriceTypeRules(catalog.priceTypeRules);
-                setJobOrders(catalog.jobOrders);
+                if (Array.isArray(catalog.suppliers) && catalog.suppliers.length > 0) {
+                    setSuppliers(previous => {
+                        if (previous.length === 0) return catalog.suppliers;
+                        const catalogById = new Map(catalog.suppliers.map(s => [Number(s.id), s]));
+                        return previous.map(s => {
+                            const match = catalogById.get(Number(s.id));
+                            return match ? { ...s, ...match } : s;
+                        });
+                    });
+                }
+                setBranches(catalog.branches || []);
+                setPaymentTypes(catalog.paymentTypes || []);
+                setPaymentModes(catalog.paymentModes || []);
+                setPaymentTerms(catalog.paymentTerms || []);
+                setPriceTypeRules(catalog.priceTypeRules || []);
+                setJobOrders(catalog.jobOrders || []);
                 catalogLoaded.current = true;
             })
             .catch(error => {
@@ -283,10 +296,8 @@ export function usePurchaseOrder({ mode = "queue", shipmentId, onCreated }: UseP
     }, [isCreateMode, isDetailMode, loadDetail, loadQueueSuppliers, loadShipments]);
 
     useEffect(() => {
-        if (isDetailMode || isCreateMode) {
-            void loadCatalog().catch(() => undefined);
-        }
-    }, [isCreateMode, isDetailMode, loadCatalog]);
+        void loadCatalog().catch(() => undefined);
+    }, [loadCatalog]);
 
     useEffect(() => {
         if (isCreateMode) {
@@ -531,7 +542,7 @@ export function usePurchaseOrder({ mode = "queue", shipmentId, onCreated }: UseP
 
     return {
         loading, listLoading, detailLoading, listError, detailError, referenceError,
-        suppliers, shipments, rawMaterials, supplierLinkedProducts, paymentModes, paymentTerms, priceTypeRules, jobOrders,
+        suppliers, shipments, rawMaterials, supplierLinkedProducts, branches, paymentTypes, paymentModes, paymentTerms, priceTypeRules, jobOrders,
         listMeta, loadShipments, retryList: () => loadShipments(lastQuery.current), retryDetail: () => loadDetail(),
         selectedShipment, setSelectedShipment: handleSelectShipment, selectedShipmentLines,
         isShipmentModalOpen, setIsShipmentModalOpen,

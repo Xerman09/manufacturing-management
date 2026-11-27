@@ -45,6 +45,8 @@ export default function IncomingShipments(props: IncomingShipmentsProps) {
         serverList,
         canonicalDrafting = false,
         jobOrders = [],
+        branches = [],
+        paymentTypes = [],
         paymentTerms = [],
         paymentModes = [],
         priceTypeRules = []
@@ -117,6 +119,7 @@ export default function IncomingShipments(props: IncomingShipmentsProps) {
         onCreateShipment,
         onEditShipment,
         canonicalDrafting,
+        branches,
         priceTypeRules,
         paymentTerms,
         paymentModes
@@ -333,6 +336,7 @@ export default function IncomingShipments(props: IncomingShipmentsProps) {
                     loading={loading || detailLoading}
                     activeShipment={activeShipment}
                     canonicalDrafting={canonicalDrafting}
+                    paymentTypes={paymentTypes}
                     paymentTerms={paymentTerms}
                     paymentModes={paymentModes}
                     suppliers={suppliers}
@@ -359,6 +363,7 @@ export default function IncomingShipments(props: IncomingShipmentsProps) {
                     loading={loading}
                     detailLoading={detailLoading}
                     canonicalDrafting={canonicalDrafting}
+                    paymentTypes={paymentTypes}
                     paymentTerms={paymentTerms}
                     paymentModes={paymentModes}
                     suppliers={suppliers}
@@ -404,6 +409,7 @@ export default function IncomingShipments(props: IncomingShipmentsProps) {
                 discountTypes={discountTypes}
                 productPerSupplierMap={productPerSupplierMap}
                 jobOrders={jobOrders}
+                paymentTypes={paymentTypes}
                 paymentTerms={paymentTerms}
                 paymentModes={paymentModes}
                 priceControlStatus={priceControlStatus}
