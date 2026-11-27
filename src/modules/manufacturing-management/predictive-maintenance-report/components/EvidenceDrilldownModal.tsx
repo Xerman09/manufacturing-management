@@ -14,12 +14,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription
-} from "@/components/ui/dialog";
+    LocalizedDialog,
+    LocalizedDialogContent,
+    LocalizedDialogHeader,
+    LocalizedDialogTitle,
+    LocalizedDialogDescription
+} from "./ui/LocalizedDialog";
 import type { AssetRiskRow, BreakdownEpisodeDetail } from "../types";
 
 interface EvidenceDrilldownModalProps {
@@ -53,20 +53,20 @@ export function EvidenceDrilldownModal({
     };
 
     return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto p-0">
+        <LocalizedDialog open={isOpen} onOpenChange={onClose}>
+            <LocalizedDialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto p-0">
                 {/* Header with Machine Profile */}
-                <DialogHeader className="border-b px-6 py-4 bg-muted/20 text-left">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div className="flex items-center gap-2.5">
-                            <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                <LocalizedDialogHeader className="border-b px-6 py-4 pr-14 bg-muted/20 text-left">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0">
                                 <Cpu className="h-5 w-5" />
                             </div>
-                            <div>
-                                <DialogTitle className="text-base font-bold text-foreground leading-tight">
+                            <div className="min-w-0">
+                                <LocalizedDialogTitle className="text-base font-bold text-foreground leading-tight truncate">
                                     {asset.assetName}
-                                </DialogTitle>
-                                <DialogDescription className="flex flex-wrap items-center gap-2 mt-1 text-xs text-muted-foreground">
+                                </LocalizedDialogTitle>
+                                <LocalizedDialogDescription className="flex flex-wrap items-center gap-2 mt-1 text-xs text-muted-foreground">
                                     <span>Station: <strong className="text-foreground">{asset.workCenterName}</strong></span>
                                     {asset.serial && <span>• SN: <code className="font-mono">{asset.serial}</code></span>}
                                     <span>• Condition:</span>
@@ -80,15 +80,17 @@ export function EvidenceDrilldownModal({
                                     >
                                         {asset.condition}
                                     </Badge>
-                                </DialogDescription>
+                                </LocalizedDialogDescription>
                             </div>
                         </div>
 
-                        <Badge className={`${getRiskBadgeColor(asset.riskLevel)} text-xs px-2.5 py-1 font-bold shrink-0 self-start sm:self-auto`}>
-                            {asset.predictedBreakdownRiskPct}% — {asset.riskLevel} Risk
-                        </Badge>
+                        <div className="flex items-center shrink-0 mr-2">
+                            <Badge className={`${getRiskBadgeColor(asset.riskLevel)} text-xs px-2.5 py-1 font-bold shadow-xs`}>
+                                {asset.predictedBreakdownRiskPct}% — {asset.riskLevel} Risk
+                            </Badge>
+                        </div>
                     </div>
-                </DialogHeader>
+                </LocalizedDialogHeader>
 
                 <div className="p-6 space-y-6">
                     {/* 4-Stat Metric Chips */}
@@ -268,7 +270,7 @@ export function EvidenceDrilldownModal({
                         )}
                     </div>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </LocalizedDialogContent>
+        </LocalizedDialog>
     );
 }
