@@ -10,7 +10,7 @@
 
 import { DIRECTUS_URL, headers } from "@/app/api/manufacturing/directus-api";
 import { calculateAssetRisk, getHorizonDays } from "./_prediction-engine";
-import type { RawAssetData, RawBreakdownEpisode } from "./_prediction-engine";
+import type { RawBreakdownEpisode } from "./_prediction-engine";
 import type {
     AiTierInfo,
     AssetRiskRow,
@@ -46,7 +46,7 @@ export async function resolveServerAiTier(signal?: AbortSignal): Promise<AiTierI
             assigned: false,
             tierLevel: 0,
             tierName: "Unassigned",
-            tierSlug: "unassigned" as unknown as any,
+            tierSlug: "unassigned",
             description: "Directus API URL not configured."
         };
     }
@@ -80,7 +80,7 @@ export async function resolveServerAiTier(signal?: AbortSignal): Promise<AiTierI
         assigned: false,
         tierLevel: 0,
         tierName: "Unassigned",
-        tierSlug: "unassigned" as unknown as any,
+        tierSlug: "unassigned",
         description: "No AI Tier assigned to this module. Standard reporting mode only."
     };
 }

@@ -6,15 +6,11 @@ import {
     AlertCircle,
     AlertTriangle,
     Calculator,
-    CheckCircle2,
     Clock,
     Cpu,
-    ShieldAlert,
     UserCheck,
-    Wrench,
-    X
+    Wrench
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {

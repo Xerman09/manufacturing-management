@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Activity, AlertTriangle, Layers, RefreshCw } from "lucide-react";
+import { Activity, AlertTriangle, Layers } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReportFilterBar } from "./components/ReportFilterBar";
@@ -24,8 +24,7 @@ import type {
     PredictiveAiCommentaryPayload,
     PredictiveMaintenanceFilters,
     PredictiveMaintenanceReportPayload,
-    PredictiveReportTabKey,
-    ReportStatus
+    PredictiveReportTabKey
 } from "./types";
 
 function initialFilters(): PredictiveMaintenanceFilters {

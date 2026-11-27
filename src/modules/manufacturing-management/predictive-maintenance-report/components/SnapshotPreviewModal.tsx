@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { CheckCircle2, Clock, FileCheck, Layers, X, Eye } from "lucide-react";
+import { Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -14,6 +14,13 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SnapshotMetaItem } from "./SnapshotSelectorCombobox";
+import type { AssetRiskRow, PredictiveMaintenanceReportPayload } from "../types";
+
+interface SnapshotDetailResponse {
+    id: number;
+    title: string;
+    report_payload: PredictiveMaintenanceReportPayload;
+}
 
 interface SnapshotPreviewModalProps {
     snapshot: SnapshotMetaItem | null;
@@ -28,34 +35,52 @@ export function SnapshotPreviewModal({
     onClose,
     onLoadSnapshot
 }: SnapshotPreviewModalProps) {
-    const [detail, setDetail] = useState<any>(null);
-    const [isLoading, setIsLoading] = useState(false);
+    const [detail, setDetail] = useState<SnapshotDetailResponse | null>(null);
+    const [loadingId, setLoadingId] = useState<number | null>(null);
+
+    const snapshotId = (isOpen && snapshot) ? snapshot.id : null;
+    const isLoading = snapshotId !== null && loadingId === snapshotId && detail?.id !== snapshotId;
 
     useEffect(() => {
-        if (!snapshot || !isOpen) {
-            setDetail(null);
+        if (!snapshotId) {
             return;
         }
 
-        setIsLoading(true);
-        fetch(`/api/manufacturing/reports/predictive-maintenance-report/snapshots/${snapshot.id}`)
+        let isCancelled = false;
+        fetch(`/api/manufacturing/reports/predictive-maintenance-report/snapshots/${snapshotId}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((res) => {
-                if (res?.data) {
+                if (!isCancelled && res?.data) {
                     setDetail(res.data);
                 }
             })
             .catch(() => {})
-            .finally(() => setIsLoading(false));
-    }, [snapshot, isOpen]);
+            .finally(() => {
+                if (!isCancelled) {
+                    setLoadingId(null);
+                }
+            });
+
+        return () => {
+            isCancelled = true;
+        };
+    }, [snapshotId]);
+
+    const handleOpenModal = (open: boolean) => {
+        if (!open) {
+            onClose();
+        } else if (snapshot) {
+            setLoadingId(snapshot.id);
+        }
+    };
 
     if (!snapshot) return null;
 
-    const payload = detail?.report_payload;
+    const payload = (isOpen && detail?.id === snapshot.id) ? detail.report_payload : null;
     const kpis = payload?.kpis;
 
     return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
+        <Dialog open={isOpen} onOpenChange={handleOpenModal}>
             <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle className="flex items-center justify-between text-base">
@@ -136,7 +161,7 @@ export function SnapshotPreviewModal({
                                     Evaluated Assets ({payload.assetRiskRows.length} total)
                                 </span>
                                 <div className="max-h-36 overflow-y-auto space-y-1 border rounded-md p-2 bg-card">
-                                    {payload.assetRiskRows.slice(0, 5).map((row: any) => (
+                                    {payload.assetRiskRows.slice(0, 5).map((row: AssetRiskRow) => (
                                         <div key={row.assetId} className="flex items-center justify-between py-1 border-b last:border-b-0 text-[11px]">
                                             <span className="truncate max-w-[240px] font-medium">{row.assetName}</span>
                                             <Badge variant="outline" className="text-[10px]">{row.predictedBreakdownRiskPct}% - {row.riskLevel}</Badge>
