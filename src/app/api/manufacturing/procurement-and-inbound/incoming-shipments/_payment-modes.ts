@@ -15,13 +15,14 @@ export class PurchaseOrderPaymentModeError extends Error {
 }
 
 function isActive(value: PurchaseOrderPaymentMode["is_active"]): boolean {
+    if (value === undefined || value === null) return true;
     return value === true || Number(value) === 1;
 }
 
 export async function fetchPurchaseOrderPaymentModes(): Promise<PurchaseOrderPaymentMode[]> {
     const params = new URLSearchParams({
         "filter[is_active][_eq]": "1",
-        fields: "id,mode_name,code,is_active,sort_order",
+        fields: "id,code,is_active,mode_name,sort_order",
         sort: "sort_order,mode_name",
         limit: "-1"
     });
@@ -34,7 +35,7 @@ export async function fetchPurchaseOrderPaymentModes(): Promise<PurchaseOrderPay
 
 export async function validatePurchaseOrderPaymentMode(id: number): Promise<PurchaseOrderPaymentMode> {
     const response = await procurementDirectusFetch(
-        `/items/purchase_order_payment_modes/${id}?fields=id,mode_name,code,is_active,sort_order`
+        `/items/purchase_order_payment_modes/${id}?fields=id,code,is_active,mode_name,sort_order`
     );
     if (!response.ok) {
         throw new PurchaseOrderPaymentModeError("The selected Payment Type was not found.", response.status >= 500 ? 503 : 400);

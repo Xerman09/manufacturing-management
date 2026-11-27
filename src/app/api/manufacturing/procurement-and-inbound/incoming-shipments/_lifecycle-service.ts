@@ -91,7 +91,19 @@ interface PurchaseOrderLineRecord {
 }
 
 function asBoolean(value: unknown): boolean {
-    return value === true || Number(value) === 1;
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (typeof value === "string") {
+        const lower = value.trim().toLowerCase();
+        return lower === "1" || lower === "true";
+    }
+    if (value && typeof value === "object") {
+        const bufferValue = value as { data?: unknown };
+        if (Array.isArray(bufferValue.data) && bufferValue.data.length > 0) {
+            return Number(bufferValue.data[0]) !== 0;
+        }
+    }
+    return false;
 }
 
 function relationId(value: unknown, key: string): number | null {
@@ -220,7 +232,7 @@ async function validateRevisionReferences(command: RevisionCommand) {
 
     const branch = branchRows && branchRows.length > 0 ? branchRows[0] : null;
 
-    if (!asBoolean(supplier.isActive) || asBoolean(supplier.nonBuy)) {
+    if (!asBoolean(supplier.isActive)) {
         throw new PurchaseOrderLifecycleError("The revised supplier is not purchasing eligible.", 400);
     }
 

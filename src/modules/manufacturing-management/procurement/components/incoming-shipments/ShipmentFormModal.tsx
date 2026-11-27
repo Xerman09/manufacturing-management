@@ -66,6 +66,7 @@ export interface ShipmentFormModalProps {
     discountTypes?: Array<{ id: number; discount_type: string; total_percent: number | string }>;
     productPerSupplierMap?: Record<number, { discount_type_id?: number; total_percent?: number }>;
     jobOrders: Array<{ job_order_id: number; job_order_no?: string }>;
+    paymentTypes?: Array<{ id: number; payment_type_name?: string; payment_name?: string; name?: string }>;
     paymentTerms?: Array<{
         id: number;
         payment_name: string;
@@ -149,6 +150,7 @@ export function ShipmentFormModal({
     supplierRawMaterials,
     discountTypes,
     productPerSupplierMap,
+    paymentTypes = [],
     paymentTerms = [],
     paymentModes = [],
     priceControlStatus = "idle",
@@ -478,22 +480,17 @@ export function ShipmentFormModal({
                                     <select
                                         value={shipmentForm.branch_id ? String(shipmentForm.branch_id) : ""}
                                         onChange={e => setShipmentForm({ ...shipmentForm, branch_id: e.target.value ? parseInt(e.target.value) : null })}
-                                        className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs font-semibold h-8"
+                                        disabled={dynamicBranches.length === 0}
+                                        className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs font-semibold h-8 disabled:bg-muted"
                                     >
-                                        <option value="" disabled hidden>Select Branch...</option>
-                                        {dynamicBranches.length > 0 ? (
-                                            dynamicBranches.map(b => (
-                                                <option key={b.id} value={b.id}>{b.branchName}</option>
-                                            ))
-                                        ) : (
-                                            <>
-                                                <option value={183}>Main Branch</option>
-                                                <option value={163}>Urdaneta Branch</option>
-                                                <option value={181}>Bihon Branch</option>
-                                                <option value={182}>Bihon Bad Branch</option>
-                                            </>
-                                        )}
+                                        <option value="">Select Branch...</option>
+                                        {dynamicBranches.map(b => (
+                                            <option key={b.id} value={b.id}>{b.branchName}</option>
+                                        ))}
                                     </select>
+                                    {dynamicBranches.length === 0 && (
+                                        <p className="text-[10px] font-medium text-destructive" role="alert">Branches are unavailable.</p>
+                                    )}
                                 </div>
 
                                 <div className="space-y-1">
@@ -501,15 +498,17 @@ export function ShipmentFormModal({
                                     <select
                                         value={shipmentForm.payment_type !== null ? String(shipmentForm.payment_type) : ""}
                                         onChange={e => setShipmentForm({ ...shipmentForm, payment_type: e.target.value ? parseInt(e.target.value) : null })}
-                                        className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs font-semibold h-8"
+                                        disabled={paymentTypes.length === 0}
+                                        className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs font-semibold h-8 disabled:bg-muted"
                                     >
-                                        <option value="" disabled hidden>Select Arrangement...</option>
-                                        <option value={3}>Full Payment</option>
-                                        <option value={1}>Advance Payment</option>
-                                        <option value={2}>Partial Payment</option>
-                                        <option value={4}>Refund</option>
-                                        <option value={5}>Installment</option>
+                                        <option value="">Select Arrangement...</option>
+                                        {paymentTypes.map(pt => (
+                                            <option key={pt.id} value={pt.id}>{pt.payment_type_name || pt.payment_name || pt.name}</option>
+                                        ))}
                                     </select>
+                                    {paymentTypes.length === 0 && (
+                                        <p className="text-[10px] font-medium text-destructive" role="alert">Payment arrangements are unavailable.</p>
+                                    )}
                                 </div>
 
                                 {canonicalDrafting && (
@@ -544,7 +543,7 @@ export function ShipmentFormModal({
                                             disabled={paymentTerms.length === 0}
                                             className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs font-semibold h-8 disabled:bg-muted"
                                         >
-                                            <option value="" disabled hidden>Select Payment Terms...</option>
+                                            <option value="">Select Payment Terms...</option>
                                             {paymentTerms.map(term => (
                                                 <option key={term.id} value={term.id}>{term.payment_name}</option>
                                             ))}

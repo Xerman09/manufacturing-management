@@ -206,7 +206,7 @@ export function useQuotation() {
                 return {
                     ...snap,
                     product_type_name: typeName || "Finished Goods",
-                    version_name: snap.version_name || (snap.version_id ? `v${snap.version_id}.0` : "v1.0")
+                    version_name: snap.version_name || (snap.version_id ? `v${snap.version_id}.0` : "Standard / Non-BOM")
                 };
             });
             setSnapshots(enrichedSnapshots);
@@ -496,11 +496,13 @@ export function useQuotation() {
     const handleRowProductSelect = (lineId: number, prod: CatalogProduct | null) => {
         setSelectedProductsList(prev => prev.map(item => {
             if (item.line_id === lineId) {
-                if (!prod) return { ...item, product: null };
+                if (!prod) return { ...item, product: null, versionId: null, versionName: null };
                 const preloadedPrice = priceTypeRatesMap[prod.product_id] || prod.price_per_unit || 0;
                 return {
                     ...item,
                     product: prod,
+                    versionId: null,
+                    versionName: null,
                     priceTypePrice: preloadedPrice,
                     agreedPrice: preloadedPrice
                 };
@@ -689,9 +691,10 @@ export function useQuotation() {
             const productsWithLatestCost = await Promise.all(selectedProductsList.map(async (item) => {
                 if (!item.product) return null;
                 let latestCost = Number(item.product.cost_per_unit || 0);
+                const isNonBom = item.product.has_bom === false;
                 try {
                     const parentId = item.parent_product_id || item.product.parent_product_id || item.product.product_id;
-                    if (item.versionId) {
+                    if (!isNonBom && item.versionId) {
                         let versionData: Record<string, unknown> | null = null;
                         const candidateIds = Array.from(new Set([parentId, item.product.product_id])).filter((id): id is number => typeof id === "number" && id > 0);
                         for (const qId of candidateIds) {
@@ -712,7 +715,7 @@ export function useQuotation() {
                                 latestCost = calculatedCOGS;
                             }
                         }
-                    } else {
+                    } else if (!isNonBom) {
                         const url = `/api/manufacturing/finished-goods/bom-cost?productId=${item.product.product_id}`;
                         const resBOM = await fetch(url);
                         if (resBOM.ok) {
@@ -778,7 +781,7 @@ export function useQuotation() {
                     if (tMatch) pType = String(tMatch.name);
                 }
 
-                const isNonBomProduct = item.product?.has_bom === false;
+                const isNonBomProduct = item.product?.has_bom === false || !item.versionId;
                 const defaultVersionName = isNonBomProduct ? "Standard / Non-BOM" : "v1.0";
 
                 return {
@@ -787,8 +790,8 @@ export function useQuotation() {
                     parent_product_name: pName || null,
                     product_type_id: item.product_type_id || null,
                     product_type_name: pType || "Finished Goods",
-                    version_id: item.versionId || null, // Store selected version ID or null if none/non-BOM
-                    version_name: item.versionName || defaultVersionName,
+                    version_id: item.product?.has_bom === false ? null : (item.versionId || null), // Store selected version ID or null if none/non-BOM
+                    version_name: item.product?.has_bom === false ? "Standard / Non-BOM" : (item.versionName || defaultVersionName),
                     node_name: item.product.product_name,
                     node_type: "product_quota",
                     quantity: 1,

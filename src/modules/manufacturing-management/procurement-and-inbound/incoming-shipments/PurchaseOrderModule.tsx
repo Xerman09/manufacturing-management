@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import IncomingShipments from "@/modules/manufacturing-management/procurement/components/IncomingShipments";
 import { usePurchaseOrder, type PurchaseOrderViewMode } from "./hooks/usePurchaseOrder";
 import type { PurchaseOrderDraftResponse } from "./types";
@@ -16,14 +16,16 @@ export default function PurchaseOrderModule({
     backHref?: string;
 }) {
     const router = useRouter();
+    const pathname = usePathname();
+    const baseRoute = backHref || pathname;
     const handleCreated = useCallback((result: PurchaseOrderDraftResponse) => {
         if (mode === "create") {
-            router.replace(`/mm/procurement-and-inbound/incoming-purchase-shipments?shipmentId=${encodeURIComponent(String(result.purchaseOrderId))}`);
+            router.replace(`${baseRoute}?shipmentId=${encodeURIComponent(String(result.purchaseOrderId))}`);
         }
-    }, [mode, router]);
+    }, [baseRoute, mode, router]);
     const handleExitCreate = useCallback(() => {
-        router.push("/mm/procurement-and-inbound/incoming-purchase-shipments");
-    }, [router]);
+        router.push(baseRoute);
+    }, [baseRoute, router]);
     const purchaseOrder = usePurchaseOrder({
         mode,
         shipmentId,
@@ -63,6 +65,8 @@ export default function PurchaseOrderModule({
                     onQueryChange: purchaseOrder.loadShipments
                 }}
                 canonicalDrafting
+                branches={purchaseOrder.branches}
+                paymentTypes={purchaseOrder.paymentTypes}
                 paymentModes={purchaseOrder.paymentModes}
                 priceTypeRules={purchaseOrder.priceTypeRules}
                 paymentTerms={purchaseOrder.paymentTerms}

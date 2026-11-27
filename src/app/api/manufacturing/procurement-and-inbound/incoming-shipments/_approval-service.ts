@@ -121,13 +121,10 @@ interface ApprovalPaymentTermRow {
     payment_description?: string | null;
 }
 
-const PAYMENT_ARRANGEMENT_LABELS: ApprovalReferenceLabel[] = [
-    { id: 1, label: "Advance Payment" },
-    { id: 2, label: "Partial Payment" },
-    { id: 3, label: "Full Payment" },
-    { id: 4, label: "Refund" },
-    { id: 5, label: "Installment" }
-];
+interface ApprovalPaymentTypeRow {
+    id: number;
+    payment_type_name?: string | null;
+}
 
 const ORDER_FIELDS = [
     "purchase_order_id", "purchase_order_no", "date_encoded", "reference", "supplier_name", "branch_id", "payment_type", "payment_mode", "payment_terms", "delivery_terms", "price_type", "remark", "encoder_id", "approver_id", "finance_id",
@@ -327,20 +324,24 @@ async function loadReferenceLabels(order: ApprovalOrder, history: ApprovalHistor
     const supplierIds = new Set<number>();
     const branchIds = new Set<number>();
     const paymentTermIds = new Set<number>();
+    const paymentTypeIds = new Set<number>();
 
     referenceHeaders(order, history).forEach(header => {
         const supplierId = positiveReferenceId(header.supplier_name);
         const branchId = positiveReferenceId(header.branch_id);
         const paymentTermsId = positiveReferenceId(header.payment_terms);
+        const paymentTypeId = positiveReferenceId(header.payment_type);
         if (supplierId) supplierIds.add(supplierId);
         if (branchId) branchIds.add(branchId);
         if (paymentTermsId) paymentTermIds.add(paymentTermsId);
+        if (paymentTypeId) paymentTypeIds.add(paymentTypeId);
     });
 
-    const [suppliers, branches, paymentTerms] = await Promise.all([
+    const [suppliers, branches, paymentTerms, paymentTypes] = await Promise.all([
         loadReferenceRows<ApprovalSupplierRow>("suppliers", supplierIds, "id,supplier_name"),
         loadReferenceRows<ApprovalBranchRow>("branches", branchIds, "id,branch_name,branch_code"),
-        loadReferenceRows<ApprovalPaymentTermRow>("payment_terms", paymentTermIds, "id,payment_name,payment_description")
+        loadReferenceRows<ApprovalPaymentTermRow>("payment_terms", paymentTermIds, "id,payment_name,payment_description"),
+        loadReferenceRows<ApprovalPaymentTypeRow>("payment_type", paymentTypeIds, "id,payment_type_name")
     ]);
 
     return {
@@ -354,7 +355,12 @@ async function loadReferenceLabels(order: ApprovalOrder, history: ApprovalHistor
                 return { id: Number(row.id), label: code ? `${name} (${code})` : name };
             })
             .filter(row => Number.isSafeInteger(row.id) && row.id > 0),
-        paymentArrangements: PAYMENT_ARRANGEMENT_LABELS,
+        paymentArrangements: paymentTypes
+            .map(row => ({
+                id: Number(row.id),
+                label: row.payment_type_name?.trim() || "Unknown payment arrangement"
+            }))
+            .filter(row => Number.isSafeInteger(row.id) && row.id > 0),
         paymentTerms: paymentTerms
             .map(row => ({
                 id: Number(row.id),

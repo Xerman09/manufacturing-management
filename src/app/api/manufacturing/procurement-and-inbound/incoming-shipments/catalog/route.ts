@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
     try {
-        await requirePurchaseOrderModuleAccess({ modulePath: PURCHASE_ORDER_MODULE_PATHS.procurement });
+        await requirePurchaseOrderModuleAccess({ modulePaths: Object.values(PURCHASE_ORDER_MODULE_PATHS) });
         return NextResponse.json(await fetchPurchaseOrderCatalog());
     } catch (error) {
         return NextResponse.json({ error: (error as Error).message || "Failed to load purchase-order catalog." }, {

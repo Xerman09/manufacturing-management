@@ -305,7 +305,7 @@ export function QuotationDetailModal({
                                                 const unitCost = Number(item.frozen_unit_cost_php || 0);
                                                 const totalCost = Number(item.frozen_total_cost_php || 0);
                                                 const typeLabel = item.product_type_name || "Finished Goods";
-                                                const versionLabel = item.version_name || (item.version_id ? `v${item.version_id}.0` : "v1.0");
+                                                const versionLabel = item.version_name || (item.version_id ? `v${item.version_id}.0` : "Standard / Non-BOM");
                                                 return (
                                                     <tr key={item.id} className="hover:bg-muted/10">
                                                         <td className="p-2.5 font-medium text-foreground">{item.node_name}</td>

@@ -1,5 +1,6 @@
 import React from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Loader2, Globe, Building2, Calendar, Layers, Info, Anchor, Edit, Trash2, Printer, ArrowLeft, RotateCcw, Check, X } from "lucide-react";
 import { IncomingShipment, ShipmentLineItem, Supplier, PurchaseOrderPaymentMode } from "../../types";
 import { formatMoney, getStatusBadge, displayShipmentStatus } from "./ShipmentBadges";
@@ -13,6 +14,7 @@ export interface ShipmentDetailViewProps {
     loading: boolean;
     activeShipment: IncomingShipment | null;
     canonicalDrafting: boolean;
+    paymentTypes?: Array<{ id: number; payment_type_name?: string; payment_name?: string; name?: string }>;
     paymentTerms?: Array<{
         id: number;
         payment_name: string;
@@ -40,6 +42,7 @@ export function ShipmentDetailView({
     loading,
     activeShipment,
     canonicalDrafting,
+    paymentTypes = [],
     paymentTerms = [],
     paymentModes = [],
     suppliers,
@@ -57,6 +60,8 @@ export function ShipmentDetailView({
     backHref,
     onBack
 }: ShipmentDetailViewProps) {
+    const pathname = usePathname();
+    const resolvedBackHref = backHref || pathname;
     const [isCancelDialogOpen, setIsCancelDialogOpen] = React.useState(false);
     const effectiveStatus = activeShipment ? displayShipmentStatus(activeShipment, canonicalDrafting) : "Ordered";
     const initialWorkflowStatus = canonicalDrafting ? "For Approval" : "Requested";
@@ -129,7 +134,7 @@ export function ShipmentDetailView({
                             </button>
                         ) : backHref !== undefined ? (
                             <Link
-                                href={backHref || "/mm/procurement-and-inbound/incoming-purchase-shipments"}
+                                href={resolvedBackHref}
                                 className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted"
                             >
                                 <ArrowLeft className="h-3.5 w-3.5" /> Back to Incoming Shipments
@@ -149,7 +154,7 @@ export function ShipmentDetailView({
                         </button>
                     ) : backHref !== undefined ? (
                         <Link
-                            href={backHref || "/mm/procurement-and-inbound/incoming-purchase-shipments"}
+                            href={resolvedBackHref}
                             className="inline-flex min-h-9 w-fit items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-bold text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                         >
                             <ArrowLeft className="h-3.5 w-3.5" /> Back to Incoming Shipments
@@ -295,14 +300,8 @@ export function ShipmentDetailView({
                                     <strong className="text-foreground font-bold">
                                         {(() => {
                                             const payType = (activeShipment as IncomingShipment & { payment_type?: number | null }).payment_type;
-                                            switch (Number(payType)) {
-                                                case 1: return "Advance Payment";
-                                                case 2: return "Partial Payment";
-                                                case 3: return "Full Payment";
-                                                case 4: return "Refund";
-                                                case 5: return "Installment";
-                                                default: return payType ? `Payment Type #${payType}` : "N/A";
-                                            }
+                                            const matched = paymentTypes.find(pt => Number(pt.id) === Number(payType));
+                                            return matched?.payment_type_name || matched?.payment_name || matched?.name || (payType ? `Payment Type #${payType}` : "N/A");
                                         })()}
                                     </strong>
                                 </span>

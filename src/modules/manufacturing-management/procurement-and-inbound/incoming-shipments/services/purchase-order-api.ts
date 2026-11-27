@@ -32,34 +32,36 @@ async function responseJson<T>(response: Response, fallback: string): Promise<T>
     return response.json();
 }
 
+const INCOMING_SHIPMENTS_API_BASE = "/api/manufacturing/procurement-and-inbound/incoming-shipments";
+
 export async function fetchPurchaseOrders(query: PurchaseOrderListQuery = {}, signal?: AbortSignal) {
     const params = new URLSearchParams();
     Object.entries(query).forEach(([key, value]) => {
         if (value !== undefined && value !== "") params.set(key, String(value));
     });
-    const response = await fetch(`/api/manufacturing/purchase-orders?${params.toString()}`, { signal });
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}?${params.toString()}`, { signal });
     return responseJson<PurchaseOrderListResponse<IncomingShipment>>(response, "Failed to load purchase orders.");
 }
 
 export async function fetchPurchaseOrderLines(id: number, signal?: AbortSignal) {
-    const response = await fetch(`/api/manufacturing/purchase-orders/${id}`, { signal });
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/${id}`, { signal });
     const body = await responseJson<{ data: ShipmentLineItem[] }>(response, "Failed to load purchase-order lines.");
     return body.data;
 }
 
 export async function fetchPurchaseOrderDetail(id: number, signal?: AbortSignal) {
-    const response = await fetch(`/api/manufacturing/purchase-orders/${id}/detail`, { signal });
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/${id}/detail`, { signal });
     return responseJson<PurchaseOrderDetailResponse>(response, "Failed to load purchase-order details.");
 }
 
 export async function fetchPurchaseOrderCatalog(signal?: AbortSignal) {
-    const response = await fetch("/api/manufacturing/purchase-orders/catalog", { signal });
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/catalog`, { signal });
     return responseJson<PurchaseOrderCatalog>(response, "Failed to load purchase-order catalog.");
 }
 
 export async function fetchPurchaseOrderFxRate(currencyCode: "PHP" | "USD", signal?: AbortSignal) {
     const params = new URLSearchParams({ currency: currencyCode });
-    const response = await fetch(`/api/manufacturing/purchase-orders/fx-rate?${params.toString()}`, { signal });
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/fx-rate?${params.toString()}`, { signal });
     return responseJson<PurchaseOrderFxRateResponse>(response, "Failed to load the current exchange rate.");
 }
 
@@ -68,7 +70,7 @@ export async function resolvePurchaseOrderCommercialTerms(
     productIds: number[],
     signal?: AbortSignal
 ) {
-    const response = await fetch("/api/manufacturing/purchase-orders/commercial-resolution", {
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/commercial-resolution`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ supplierId, productIds }),
@@ -78,7 +80,7 @@ export async function resolvePurchaseOrderCommercialTerms(
 }
 
 export async function createPurchaseOrder(payload: PurchaseOrderDraftPayload) {
-    const response = await fetch("/api/manufacturing/purchase-orders", {
+    const response = await fetch(INCOMING_SHIPMENTS_API_BASE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -87,7 +89,7 @@ export async function createPurchaseOrder(payload: PurchaseOrderDraftPayload) {
 }
 
 export async function editPurchaseOrder(id: number, shipmentData: unknown, lineItems: unknown[]) {
-    const response = await fetch(`/api/manufacturing/purchase-orders/${id}`, {
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shipmentData, lineItems })
@@ -109,7 +111,7 @@ export function buildPurchaseOrderRevisionShipmentData(shipmentData: unknown): R
 }
 
 export async function reviseRejectedPurchaseOrder(id: number, shipmentData: unknown, lineItems: unknown[], workflowRevision: number) {
-    const response = await fetch(`/api/manufacturing/purchase-orders/${id}/revision`, {
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/${id}/revision`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shipmentData: buildPurchaseOrderRevisionShipmentData(shipmentData), lineItems, workflowRevision })
@@ -118,7 +120,7 @@ export async function reviseRejectedPurchaseOrder(id: number, shipmentData: unkn
 }
 
 export async function cancelRejectedPurchaseOrder(id: number, workflowRevision: number, remarks?: string) {
-    const response = await fetch(`/api/manufacturing/purchase-orders/${id}/cancel`, {
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/${id}/cancel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workflowRevision, remarks })
@@ -127,7 +129,7 @@ export async function cancelRejectedPurchaseOrder(id: number, workflowRevision: 
 }
 
 export async function updatePurchaseOrderStatus(id: number, status: string) {
-    const response = await fetch(`/api/manufacturing/purchase-orders/${id}/status`, {
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/${id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status })
@@ -137,7 +139,7 @@ export async function updatePurchaseOrderStatus(id: number, status: string) {
 
 export async function fetchPurchaseOrderApproval(id: number, approvalStage: PurchaseOrderDecisionStage, signal?: AbortSignal) {
     const params = new URLSearchParams({ approvalStage });
-    const response = await fetch(`/api/manufacturing/purchase-orders/${id}/approvals?${params.toString()}`, { signal });
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/${id}/approvals?${params.toString()}`, { signal });
     const body = await responseJson<{ data: PurchaseOrderApprovalDetail }>(response, "Failed to load purchase-order approval details.");
     return body.data;
 }
@@ -149,7 +151,7 @@ export async function fetchFinanceApprovalDetail(id: number, signal?: AbortSigna
 
 export async function submitPurchaseOrderWorkflowAction(id: number, payload: PurchaseOrderApprovalCommand, approvalStage: PurchaseOrderDecisionStage) {
     const params = new URLSearchParams({ approvalStage });
-    const response = await fetch(`/api/manufacturing/purchase-orders/${id}/approvals?${params.toString()}`, {
+    const response = await fetch(`${INCOMING_SHIPMENTS_API_BASE}/${id}/approvals?${params.toString()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
